@@ -23,7 +23,7 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
   throw new Error(`Unknown command: ${command}. Run juiced --help.`);
 }
 
-export const HELP = `Run Claude Code on Cantelop, attached to your terminal.
+export const HELP = `Run Claude Code on Cantelop with Juiced's local terminal interface.
 
 Usage:
   juiced [--workspace SLUG] claude [Claude arguments...]
@@ -40,7 +40,10 @@ Options before the command:
   -h, --help        Show this help
   -v, --version     Show version
 
-Arguments after claude are passed through unchanged, including --help.
+Interactive sessions use local prompt editing and streamed remote responses.
+Enter sends, Alt+Enter adds a line, Esc interrupts, and /exit quits.
+Claude flags configure the remote process. -p, --help, --version, and pipes
+use native CLI passthrough.
 Each invocation starts a new session. Files and Claude login persist in the
 remote workspace. Local files are not uploaded.
 

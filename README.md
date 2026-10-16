@@ -6,7 +6,9 @@ Run the real Claude Code CLI in a Cantelop session, attached to your local termi
 juiced claude
 ```
 
-Each invocation starts a fresh session in a persistent remote workspace. Claude's interface, colors, keyboard input, permission prompts, terminal resizing, and exit status pass through. Files and Claude authentication stay in the remote workspace between sessions. Your local project is not uploaded.
+Interactive invocations open the **Juiced TUI on your machine**, connected to a headless Claude Code process on Cantelop. Typing, cursor movement, multiline editing, and pasting happen locally. Only submitted prompts, permission answers, and interrupts cross the network. Claude's agent loop, tools, files, and authentication stay in the persistent remote workspace. Your local project is not uploaded.
+
+The local interface streams Claude's responses, shows tool activity, and asks before actions that Claude requires permission to run. Each invocation starts a fresh remote process and conversation; turns within that invocation share the same Claude process and context. Piped commands and explicit `-p`, `--help`, and `--version` invocations retain the native CLI passthrough.
 
 ## Set up
 
@@ -35,11 +37,11 @@ juiced claude
 
 `juiced claude --version` and `juiced claude --help` work before Claude sign-in and can verify connectivity to the deployed runtime.
 
-The first interactive launch also runs Claude's native onboarding. Complete its theme, subscription login, and safety screens once; that setup persists in the workspace. Claude retains its own folder trust and permission prompts.
+The local UI uses Claude's programmatic mode in the remote workspace you have chosen. It does not run native terminal onboarding or show a remote folder-trust dialog. Claude's own tool permission checks remain active; permission requests appear in Juiced with **Deny** selected by default. Permission grants apply once, without changing stored permission rules. `AskUserQuestion` prompts accept a typed answer or an option number.
 
 ## Use
 
-Arguments after `claude` are forwarded unchanged:
+Arguments after `claude` configure the remote Claude process. Interactive launches add the JSON transport flags needed by the local UI. Explicit print/introspection/output-format invocations use native passthrough:
 
 ```sh
 juiced claude --model sonnet
@@ -60,9 +62,18 @@ export JUICED_WORKSPACE=my-project
 
 The default workspace slug is `default`. Workspaces share neither files nor Claude login. Sessions within the same workspace share its files, so concurrent sessions can edit the same files.
 
-Typing uses a fixed 8 ms batching window. Keys continue accumulating while a request is in flight and travel together in the next request, reducing the backlog from waiting for each keystroke separately. Enter, Escape, backspace, and control keys flush pending text and keep their own input boundaries. Pasted bytes and EOF retain their order, with bounded buffering for large inputs. Batching reduces accumulated delay; the underlying HTTP request latency still affects the first key.
+In the local UI:
 
-Ctrl-C reaches Claude as it would locally. Closing the session restores your terminal and releases the sandbox. If the client disappears or loses connectivity, the remote process is cancelled when its renewable 90-second terminal lease expires; Cantelop can then reclaim the idle sandbox. The CLI retries interrupted output streams up to three times using their last cursor. It never replays keyboard input or silently starts another Claude process.
+- **Enter** submits the complete prompt when Claude is ready.
+- **Alt+Enter**, **Shift+Enter** in terminals that support it, or **`\` then Enter** inserts a newline. Multiline paste stays in the editor until you submit.
+- Arrow keys, Home/End, backspace/delete, Ctrl+A/E, Ctrl+U/K/W edit the local draft, including Unicode characters.
+- **Esc** or **Ctrl+C** during a turn interrupts Claude. You can draft your next prompt while it works; Enter keeps that draft until the current turn finishes.
+- **Ctrl+C** while idle clears the draft, then exits if it is empty. **Ctrl+D** with an empty draft, **`/exit`**, and **`/quit`** disconnect and stop the remote process.
+- **`/help`** shows the local shortcuts. Claude's native terminal menus are not part of this interface.
+
+Submitted prompts and controls use ordered `session.dispatch()` calls. The stream carries responses and permission requests independently; the client does not wait for a runtime reply before submitting the next JSON fragment. Network latency still affects submission and response arrival, but cannot delay local typing. Prompts are limited to 512 KiB, pending input to 1 MiB, and transport fragments to 16 KiB.
+
+Closing the session restores your terminal and releases the sandbox. If the client disappears or loses connectivity, the remote process is cancelled when its renewable 90-second terminal lease expires; Cantelop can then reclaim the idle sandbox. The CLI retries interrupted output streams up to three times using their last cursor. It retains partial JSON frames across reconnects and never automatically replays a prompt or starts a replacement Claude process. Native passthrough keeps its existing terminal input batching and raw Ctrl+C behavior.
 
 For another machine, configure Cantelop's app integration profile or supply `CANTELOP_APP_SLUG` and `CANTELOP_INTEGRATION_TOKEN`, with `CANTELOP_EDGE_URL` for a local endpoint. The compiled CLI already carries its runtime identity. Keep app tokens private; they grant access to the app's workspaces. `CANTELOP_PROFILE` selects a configured profile.
 
@@ -77,6 +88,8 @@ node bin/juiced.mjs --help
 ```
 
 After deployment, `npm link`, and `juiced login`, run `npm run test:live` to verify the installed command against Cantelop. It checks the remote Claude version and sends a small real prompt through stdin, asserting the exact streamed response and a successful exit. This uses your Claude subscription.
+
+`npm run test:agent:live` separately verifies the headless handshake, two turns sharing conversation context, explicit denial followed by approval of a remote Write, and interruption followed by another successful turn. It uses the configured workspace and Claude subscription, then verifies and removes its uniquely named smoke-test file with an explicitly approved Bash command.
 
 Set `JUICED_DEBUG=1` to log session IDs, command types, request timing, and transport errors to stderr. Terminal input contents are excluded from these diagnostics.
 
@@ -105,10 +118,12 @@ These probes assert the observed behavior for the investigated platform revision
 
 The tests exercise real subprocesses and PTYs plus the real SDK's request/SSE protocol against a local test transport. They cover input, resizing, cancellation, output replay, separate pipe stdout/stderr, exit codes, and terminal cleanup without a Cantelop deployment or model calls. PTY tests require Python 3 and macOS or Linux.
 
-The transport uses Cantelop commands for input and SSE for output. Interactive sessions use a Python PTY; piped sessions use separate stdin/stdout/stderr pipes. A supervised runtime activity keeps command intake responsive and renews its deadline while the client is connected.
+The local UI uses React and Ink. It communicates with stock Claude Code over its bidirectional JSONL control protocol: initialization, user messages, `can_use_tool` responses, and interruption. Cantelop carries JSON bytes over commands and SSE. Interactive Juiced sessions use pipes on the server; native passthrough retains the Python PTY when needed. A supervised runtime activity keeps command intake responsive and renews its deadline while the client is connected. Dispatch delivery errors are reported on SSE.
 
 Live execution requires deploying the runtime and completing Claude sign-in. Local tests do not verify the hosted platform or your Claude subscription.
 
 ## Hosted verification
+
+The local Juiced TUI was verified against active release v2 (`rel_3af3dee9134a99e9635b0d103c89d67c`) on October 16, 2026. The installed `juiced claude` rendered a streamed answer, answered an `AskUserQuestion` dialog, interrupted generation, accepted another turn, and exited with code 0. The headless live test verified persistent conversation context, denial and approval of a Write, remote file verification and cleanup, interruption without duplicate output, and another successful turn. Native piped execution also passed. Offline renderer tests verify that keystrokes and multiline paste remain local even while the connection is stalled, and that pasted text cannot approve an action.
 
 Verified against Cantelop on October 16, 2026, using app `juiced` and active release v1 (`rel_ac265686e609d480b2dca6d1cd8cd04b`). The installed `juiced` command returned Claude Code `2.1.259` in both pipe and PTY modes, passed the real prompt smoke test, and displayed the native interactive UI. Typing a prompt through the PTY returned `JUICED_INTERACTIVE_OK`; `/exit` returned exit code 0 and restored the local terminal. A fresh session retained Claude sign-in and completed onboarding, with native folder trust prompts preserved.

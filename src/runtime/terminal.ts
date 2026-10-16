@@ -185,8 +185,15 @@ export async function receiveTerminal(context: SessionContext<TerminalCommand, T
       await terminal.run(command, activity);
     }, { timeoutMs: 90_000, onCancel: () => { terminal.cancel(); } });
   } else {
-    await terminal.input(command);
-    context.activity.extend(90_000);
+    try {
+      await terminal.input(command);
+      context.activity.extend(90_000);
+    } catch (error) {
+      // Dispatch confirms queue acceptance. Report later delivery failures on
+      // the output stream so a local UI never mistakes acceptance for success.
+      await context.output.send({ type: 'error', message: 'The remote terminal rejected a command.' });
+      throw error;
+    }
   }
   context.reply({ ok: true });
 }

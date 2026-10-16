@@ -2,6 +2,9 @@ import { app } from './cantelop.js';
 import { HELP, parseArguments } from './args.js';
 import { ensureLogin } from './login.js';
 import { runRemoteTerminal } from './remote-terminal.js';
+import { useLocalTui } from './agent-protocol.js';
+import { RemoteAgent } from './remote-agent.js';
+import { runLocalTui } from './tui/app.js';
 
 const controller = new AbortController();
 let interrupted = 0;
@@ -27,7 +30,9 @@ try {
     if (args.command === 'login') process.stderr.write(`Ready. Run juiced${args.workspace === 'default' ? '' : ` --workspace ${args.workspace}`} claude.\n`);
     else {
       const session = workspace.session({ keepAliveSeconds: 120 });
-      process.exitCode = await runRemoteTerminal(session, args.argv, process, { signal: controller.signal, term: process.env.TERM ?? 'xterm-256color' });
+      process.exitCode = useLocalTui(args.argv, Boolean(process.stdin.isTTY && process.stdout.isTTY))
+        ? await runLocalTui(new RemoteAgent(session), args.argv, args.workspace, process, controller.signal)
+        : await runRemoteTerminal(session, args.argv, process, { signal: controller.signal, term: process.env.TERM ?? 'xterm-256color' });
     }
   }
 } catch (error) {
