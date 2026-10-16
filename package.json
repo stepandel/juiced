@@ -26,7 +26,7 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@cantelop/sdk": "1.1.0",
+    "@cantelop/sdk": "github:stepandel/cantelop-sdk#b7f547a13286065ecdd2409e9a99cfb3f9d4e68f",
     "ink": "^8.0.0",
     "react": "^19.3.1"
   },
