@@ -62,6 +62,10 @@ export JUICED_WORKSPACE=my-project
 
 The default workspace slug is `default`. Workspaces share neither files nor Claude login. Sessions within the same workspace share its files, so concurrent sessions can edit the same files.
 
+Automatic project sync is planned but is not connected to the CLI yet. It will use the current directory as the local root and keep its directory name remotely: a local `work/juiced` directory will sync into `/workspace/juiced`, where Claude will start after initial reconciliation succeeds. The workspace slug will use the directory name plus a stable hash of the resolved absolute local path, so projects with identical directory names remain separate.
+
+The platform must bind the validated directory name to the workspace and confine every sync operation to that directory. Individual transfers must not select arbitrary workspace folders. Claude's remote account configuration remains outside the sync root at `/workspace/.claude`. The current platform still uses the fixed `project/` root; the named root must be implemented before automatic project sync is enabled.
+
 In the local UI:
 
 - **Enter** submits the complete prompt when Claude is ready.
