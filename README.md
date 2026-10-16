@@ -33,6 +33,10 @@ juiced claude
 
 `juiced login` prints Claude's sign-in URL and asks for the returned authorization code. The native Claude login runs inside Cantelop; credentials persist in the workspace. Interactive `juiced claude` also starts this login flow when needed. Piped commands require an existing login.
 
+`juiced claude --version` and `juiced claude --help` work before Claude sign-in and can verify connectivity to the deployed runtime.
+
+The first interactive launch also runs Claude's native onboarding. Complete its theme, subscription login, and safety screens once; that setup persists in the workspace. Claude retains its own folder trust and permission prompts.
+
 ## Use
 
 Arguments after `claude` are forwarded unchanged:
@@ -70,6 +74,10 @@ npm run build:runtime
 node bin/juiced.mjs --help
 ```
 
+After deployment, `npm link`, and `juiced login`, run `npm run test:live` to verify the installed command against Cantelop. It checks the remote Claude version and sends a small real prompt through stdin, asserting the exact streamed response and a successful exit. This uses your Claude subscription.
+
+Set `JUICED_DEBUG=1` to log session IDs, command types, request timing, and transport errors to stderr. Terminal input contents are excluded from these diagnostics.
+
 `build` produces the CLI with Cantelop's backend compiler transform; the sandbox implementation stays out of the local bundle. `build:runtime` produces the generated Edge API, sandbox runtime, and backend artifacts under `dist/cantelop`. `cantelop deploy` builds the deployable image using the SDK's Claude Dockerfile, including stock Claude Code, Python, Git, and ripgrep.
 
 The tests exercise real subprocesses and PTYs plus the real SDK's request/SSE protocol against a local test transport. They cover input, resizing, cancellation, output replay, separate pipe stdout/stderr, exit codes, and terminal cleanup without a Cantelop deployment or model calls. PTY tests require Python 3 and macOS or Linux.
@@ -77,3 +85,7 @@ The tests exercise real subprocesses and PTYs plus the real SDK's request/SSE pr
 The transport uses Cantelop commands for input and SSE for output. Interactive sessions use a Python PTY; piped sessions use separate stdin/stdout/stderr pipes. A supervised runtime activity keeps command intake responsive and renews its deadline while the client is connected.
 
 Live execution requires deploying the runtime and completing Claude sign-in. Local tests do not verify the hosted platform or your Claude subscription.
+
+## Hosted verification
+
+Verified against Cantelop on October 16, 2026, using app `juiced` and active release v1 (`rel_ac265686e609d480b2dca6d1cd8cd04b`). The installed `juiced` command returned Claude Code `2.1.259` in both pipe and PTY modes, passed the real prompt smoke test, and displayed the native interactive UI. Typing a prompt through the PTY returned `JUICED_INTERACTIVE_OK`; `/exit` returned exit code 0 and restored the local terminal. A fresh session retained Claude sign-in and completed onboarding, with native folder trust prompts preserved.

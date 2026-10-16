@@ -12,6 +12,7 @@
     "build:runtime": "node scripts/build-runtime.mjs",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
+    "test:live": "node scripts/test-live.mjs",
     "prepack": "npm run build"
   },
   "dependencies": { "@cantelop/sdk": "1.0.1" },

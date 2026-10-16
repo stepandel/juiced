@@ -161,6 +161,28 @@ test('cleans up an ambiguously failed start and times out a terminal that never 
   assert.equal(stops, 2);
 });
 
+test('reconnects when the network aborts the stream while the local session is still active', { timeout: 5000 }, async () => {
+  const { stdin } = input();
+  let streams = 0;
+  let starts = 0;
+  const session: TerminalSession = {
+    id: 'test',
+    async request() { starts++; return { ok: true }; },
+    async *stream(options) {
+      if (++streams === 1) {
+        yield event({ type: 'ready' }, 1);
+        throw new DOMException('The operation was aborted', 'AbortError');
+      }
+      assert.deepEqual(options?.after, { streamId: 'a'.repeat(32), sequence: 1 });
+      yield event({ type: 'exit', code: 0 }, 2);
+    },
+    async stop() {},
+  };
+  assert.equal(await runRemoteTerminal(session, [], { stdin, stdout: capture().stream, stderr: capture().stream }), 0);
+  assert.equal(streams, 2);
+  assert.equal(starts, 1);
+});
+
 test('forwards Ctrl-C as terminal input and stops and restores on external cancellation', { timeout: 5000 }, async () => {
   const { stdin, raw } = input(true);
   const stdout = capture(true);

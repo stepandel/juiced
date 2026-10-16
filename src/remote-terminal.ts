@@ -20,6 +20,7 @@ function retryable(error: unknown): boolean {
   if (error instanceof TerminalError) return false;
   const remote = error as { status?: number; code?: string };
   if (remote.status !== undefined) return remote.status === 0 || remote.status >= 500;
+  if (error instanceof Error && error.name === 'AbortError') return true;
   return error instanceof Error && /stream|fetch|network|socket|terminated|connection/i.test(error.message);
 }
 
@@ -44,10 +45,19 @@ export async function runRemoteTerminal(
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   let cursor: SessionEventCursor | undefined;
   let pending = Promise.resolve();
-  const fail = (error: unknown) => { if (!signal.aborted && !exited) controller.abort(error); };
+  const debug = (event: string, detail: object = {}) => {
+    if (process.env.JUICED_DEBUG && !io.stderr.destroyed) io.stderr.write(JSON.stringify({ session: session.id, event, ...detail }) + '\n');
+  };
+  const fail = (error: unknown) => {
+    debug('local.failure', { name: (error as Error)?.name, message: (error as Error)?.message });
+    if (!signal.aborted && !exited) controller.abort(error);
+  };
   const send = async (command: TerminalCommand) => {
     signal.throwIfAborted();
+    const startedAt = Date.now();
+    debug('control.send', { type: command.type });
     const reply = await session.request(command, { timeoutMs: 30_000, signal: AbortSignal.any([signal, AbortSignal.timeout(35_000)]) });
+    debug('control.accepted', { type: command.type, elapsedMs: Date.now() - startedAt });
     if (reply?.ok !== true) throw new Error('The remote terminal rejected input');
   };
   const enqueue = (task: () => Promise<void>) => {
@@ -109,6 +119,7 @@ export async function runRemoteTerminal(
             case 'exit':
               if (!Number.isInteger(data.code) || data.code < 0 || data.code > 255) throw new TerminalError('Invalid remote exit code');
               exited = true;
+              debug('remote.exit', { code: data.code });
               return data.code;
             default: throw new TerminalError('Unknown remote terminal event');
           }
@@ -117,6 +128,7 @@ export async function runRemoteTerminal(
         }
         throw new Error('The output stream ended before Claude exited');
       } catch (error) {
+        debug('stream.error', { aborted: signal.aborted, name: (error as Error)?.name, message: (error as Error)?.message });
         if (signal.aborted) throw signal.reason;
         if (!retryable(error) || ++failures > 3) throw error;
         await delay(250 * 2 ** (failures - 1), undefined, { signal });

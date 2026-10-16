@@ -21,7 +21,9 @@ try {
   else {
     const workspace = app.workspace({ slug: args.workspace });
     if (process.stderr.isTTY) process.stderr.write(`Connecting to Cantelop workspace ${args.workspace}…\n`);
-    await ensureLogin(workspace.auth(), controller.signal);
+    const introspection = args.command === 'claude' && args.argv.length === 1 &&
+      ['--help', '-h', '--version', '-v'].includes(args.argv[0]!);
+    if (!introspection) await ensureLogin(workspace.auth(), controller.signal);
     if (args.command === 'login') process.stderr.write(`Ready. Run juiced${args.workspace === 'default' ? '' : ` --workspace ${args.workspace}`} claude.\n`);
     else {
       const session = workspace.session({ keepAliveSeconds: 120 });
@@ -30,6 +32,11 @@ try {
   }
 } catch (error) {
   const code = (error as { code?: string }).code;
+  if (process.env.JUICED_DEBUG) {
+    const detail = error as Error & { code?: string; status?: number; cause?: Error & { code?: string } };
+    process.stderr.write(JSON.stringify({ name: detail.name, message: detail.message, code: detail.code, status: detail.status,
+      stack: detail.stack, cause: detail.cause ? { name: detail.cause.name, message: detail.cause.message, code: detail.cause.code } : undefined }) + '\n');
+  }
   if (!interrupted) {
     if (code === 'app_configuration_missing' || code === 'app_configuration_invalid' || code === 'app_not_configured') {
       process.stderr.write('juiced: Cantelop credentials are missing or invalid. Run cantelop login and cantelop deploy in the Juiced project, then rebuild with npm run build.\n');
