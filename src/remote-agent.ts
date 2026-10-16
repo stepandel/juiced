@@ -19,6 +19,7 @@ export class RemoteAgent extends EventEmitter {
   private controls = new Map<string, Control>();
   private pending = Promise.resolve();
   private pendingBytes = 0;
+  private submission = 0;
   private reader: Promise<void> | undefined;
   private heartbeat: ReturnType<typeof setInterval> | undefined;
   private closing: Promise<void> | undefined;
@@ -26,7 +27,7 @@ export class RemoteAgent extends EventEmitter {
   private cursor: SessionEventCursor | undefined;
   private diagnostic = '';
 
-  constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number } = {}) { super(); }
+  constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; directoryName?: string; beforeSubmit?: () => Promise<void> } = {}) { super(); }
 
   private debug(event: string, detail: object = {}) {
     if (process.env.JUICED_DEBUG) console.error(JSON.stringify({ session: this.session.id, event, ...detail }));
@@ -49,7 +50,7 @@ export class RemoteAgent extends EventEmitter {
     if (this.started) throw new Error('The agent has already started');
     this.started = true;
     try {
-      const reply = await this.session.request({ type: 'start', argv: headlessArguments(argv), tty: false, columns: 120, rows: 36, term: 'dumb' }, { timeoutMs: 120_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(125_000)]) });
+      const reply = await this.session.request({ type: 'start', argv: headlessArguments(argv), tty: false, columns: 120, rows: 36, term: 'dumb', ...(this.options.directoryName ? { directoryName: this.options.directoryName } : {}) }, { timeoutMs: 120_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(125_000)]) });
       if (reply?.ok !== true) throw new Error('Cantelop could not start Claude');
       this.reader = this.read();
       void this.reader.catch(error => this.fail(error));
@@ -114,13 +115,24 @@ export class RemoteAgent extends EventEmitter {
     if (!text.trim()) return;
     if (Buffer.byteLength(text) > 512 * 1024) throw new Error('The prompt is too large (maximum 512 KiB)');
     const bytes = this.encode({ type: 'user', uuid: randomUUID(), session_id: '', parent_tool_use_id: null, message: { role: 'user', content: text } });
+    const submission = ++this.submission;
     this.setStatus('working');
-    await this.sendBytes(bytes);
+    try {
+      await this.options.beforeSubmit?.();
+      this.controller.signal.throwIfAborted();
+      if (submission !== this.submission) throw new Error('Prompt submission was interrupted before sending');
+      await this.sendBytes(bytes);
+    } catch (error) {
+      if (!this.controller.signal.aborted && submission === this.submission) this.setStatus('ready');
+      throw error;
+    }
   }
 
   async answer(id: string, allow: boolean, answers?: Record<string, string>): Promise<void> {
     const approval = this.approvals.get(id);
     if (!approval) throw new Error('This permission request is no longer active');
+    if (allow) await this.options.beforeSubmit?.();
+    if (this.approvals.get(id) !== approval) throw new Error('This permission request is no longer active');
     const bytes = this.encode({ type: 'control_response', response: { subtype: 'success', request_id: id, response: allow
       ? { behavior: 'allow', updatedInput: answers ? { ...approval.input, answers } : approval.input }
       : { behavior: 'deny', message: 'The user declined this request.' } } });
@@ -131,6 +143,7 @@ export class RemoteAgent extends EventEmitter {
 
   async interrupt(): Promise<void> {
     if (!['working', 'interrupting'].includes(this.status)) return;
+    ++this.submission;
     this.setStatus('interrupting');
     await this.control({ subtype: 'interrupt' });
   }

@@ -12,7 +12,7 @@ export async function until(check: () => boolean, ms = 2000) {
   while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
 }
 
-function fixture() {
+function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}) {
   const emitted = new EventEmitter();
   const events: SessionEvent<TerminalEvent>[] = [];
   const frames: ClaudeFrame[] = [];
@@ -50,7 +50,7 @@ function fixture() {
     },
     async stop() { stops++; },
   };
-  const agent = new RemoteAgent(session, { controlTimeoutMs: 2000, stopTimeoutMs: 100 });
+  const agent = new RemoteAgent(session, { controlTimeoutMs: 2000, stopTimeoutMs: 100, ...options });
   return { agent, frames, commands, output, bytes, events, after, session, get stops() { return stops; }, breakNextStream() { breakStream = true; } };
 }
 
@@ -131,4 +131,49 @@ test('unknown control requests fail closed; cancellation removes stale approvals
   await until(() => f.agent.approvals.size === 1);
   f.output({ type: 'control_cancel_request', request_id: 'stale' });
   await until(() => f.agent.approvals.size === 0);
+});
+
+
+test('a prompt waits for sync and a sync failure never dispatches its contents', async () => {
+  let release!: () => void;
+  const f=fixture({beforeSubmit:()=>new Promise<void>(resolve=>release=resolve)});
+  try {
+    await f.agent.start();const submitted=f.agent.submit('read the synced README');
+    assert.equal(f.agent.status,'working');assert.equal(f.frames.some(frame=>frame.type==='user'),false);
+    await assert.rejects(f.agent.submit('second'),/still working/);release();await submitted;
+    assert.equal(f.frames.filter(frame=>frame.type==='user').length,1);
+  } finally { await f.agent.close(); }
+  const gated=fixture({beforeSubmit:async()=>{throw new Error('sync unavailable');}});
+  try { await gated.agent.start();await assert.rejects(gated.agent.submit('never send'),/sync unavailable/);
+    assert.equal(gated.agent.status,'ready');assert.equal(gated.frames.some(frame=>frame.type==='user'),false);
+  } finally { await gated.agent.close(); }
+});
+
+
+test('interrupting during reconciliation never submits the waiting prompt', async () => {
+  let release!: () => void;
+  const f = fixture({ beforeSubmit: () => new Promise<void>(resolve => release = resolve) });
+  try {
+    await f.agent.start();
+    const submitted = f.agent.submit('interrupted before upload');
+    const rejection = assert.rejects(submitted, /interrupted before sending/);
+    await f.agent.interrupt(); release(); await rejection;
+    assert.equal(f.frames.some(frame => frame.type === 'user'), false);
+  } finally { await f.agent.close(); }
+});
+
+test('a permission cancelled during reconciliation cannot be granted afterward', async () => {
+  let release!: () => void;
+  const f = fixture({ beforeSubmit: () => new Promise<void>(resolve => release = resolve) });
+  try {
+    await f.agent.start();
+    f.output({ type: 'control_request', request_id: 'pending', request: { subtype: 'can_use_tool', tool_name: 'Write', input: {} } });
+    await until(() => f.agent.approvals.has('pending'));
+    const answer = f.agent.answer('pending', true);
+    const rejection = assert.rejects(answer, /no longer active/);
+    f.output({ type: 'control_cancel_request', request_id: 'pending' });
+    await until(() => !f.agent.approvals.has('pending'));
+    release(); await rejection;
+    assert.equal(f.frames.some(frame => frame.type === 'control_response' && object(frame.response).request_id === 'pending'), false);
+  } finally { await f.agent.close(); }
 });

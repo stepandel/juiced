@@ -1,10 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, realpath, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import type { SessionActivationContext, SessionContext, SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
 import { decodeInput, dimensions, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
 import { PTY_HELPER } from './pty.js';
+import { validProjectName } from '../project-name.js';
 
 type Work = { signal: AbortSignal; output: SessionOutput<TerminalEvent> };
 type Start = Extract<TerminalCommand, { type: 'start' }>;
@@ -18,6 +19,7 @@ function write(stream: Writable, data: string | Buffer): Promise<void> {
 function validateStart(command: Start): void {
   dimensions(command.columns, command.rows);
   if (typeof command.tty !== 'boolean' || !Array.isArray(command.argv) ||
+      (command.directoryName !== undefined && !validProjectName(command.directoryName)) ||
       command.argv.some(arg => typeof arg !== 'string' || arg.includes('\0')) ||
       Buffer.byteLength(JSON.stringify(command.argv)) > 64 * 1024 ||
       typeof command.term !== 'string' || !/^[A-Za-z0-9._+-]{1,64}$/.test(command.term)) {
@@ -70,6 +72,19 @@ export function createTerminal(
     const signal = AbortSignal.any([context.signal, work.signal]);
     signal.throwIfAborted();
     const workspace = options.workspace ?? process.cwd();
+    let workingDirectory = workspace;
+    if (command.directoryName !== undefined) {
+      try {
+        const candidate = join(workspace, command.directoryName);
+        const info = await lstat(candidate);
+        if (!info.isDirectory() || info.isSymbolicLink() || await realpath(candidate) !== join(await realpath(workspace), command.directoryName)) throw new Error('Unsafe project directory');
+        workingDirectory = candidate;
+      } catch (cause) {
+        const message = 'The synced project directory is unavailable. Restart Juiced to reconcile the project before starting Claude.';
+        await work.output.send({ type: 'error', message }).catch(() => {});
+        throw new Error(message, { cause });
+      }
+    }
     await mkdir(join(workspace, '.claude'), { recursive: true, mode: 0o700 });
     const env: NodeJS.ProcessEnv = {
       HOME: workspace,
@@ -92,8 +107,8 @@ export function createTerminal(
     tty = command.tty;
     const running = tty
       ? spawn(options.python ?? 'python3', ['-u', '-c', PTY_HELPER, String(command.columns), String(command.rows), binary, ...command.argv],
-          { cwd: workspace, env, detached: true, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
-      : spawn(binary, command.argv, { cwd: workspace, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+          { cwd: workingDirectory, env, detached: true, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
+      : spawn(binary, command.argv, { cwd: workingDirectory, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child = running;
     control = running.stdio[3] as Writable | undefined;
     running.stdin?.on('error', () => {});

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, mkdir, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -8,6 +8,20 @@ import { createTerminal } from '../src/runtime/terminal.js';
 import { decodeInput, type TerminalCommand, type TerminalEvent } from '../src/protocol.js';
 
 const start = (argv: string[], tty = false): Extract<TerminalCommand, { type: 'start' }> => ({ type: 'start', argv, tty, columns: 91, rows: 32, term: 'xterm-256color' });
+
+test('named project cwd keeps Claude account state at the workspace root', async t => {
+  const f = await fixture(t); await mkdir(join(f.workspace, 'My Project')); await writeFile(join(f.workspace, 'My Project', 'README.md'), 'synced');
+  await f.terminal.run({ ...start(['-e', 'console.log(JSON.stringify({cwd:process.cwd(),home:process.env.HOME,config:process.env.CLAUDE_CONFIG_DIR,readme:require("fs").readFileSync("README.md","utf8")}))']), directoryName: 'My Project' }, { signal: f.signal, output: f.output });
+  const value = JSON.parse(f.text().split('\n')[0]!);
+  assert.equal(value.cwd, join(f.workspace, 'My Project')); assert.equal(value.home, f.workspace); assert.equal(value.config, join(f.workspace, '.claude')); assert.equal(value.readme, 'synced');
+});
+
+test('project cwd rejects account directories and symlinks before spawning', async t => {
+  const f = await fixture(t); await symlink(f.workspace, join(f.workspace, 'escape'));
+  await assert.rejects(f.terminal.run({ ...start(['-e', 'process.exit(0)']), directoryName: '.claude' }, { signal: f.signal, output: f.output }), /Invalid terminal/);
+  await assert.rejects(f.terminal.run({ ...start(['-e', 'process.exit(0)']), directoryName: 'escape' }, { signal: f.signal, output: f.output }), /project directory/);
+  assert.equal(f.events.length, 1); assert.equal(f.events[0]?.type, 'error');
+});
 
 async function fixture(t: test.TestContext) {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), 'juiced-test-')));

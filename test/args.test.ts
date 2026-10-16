@@ -4,7 +4,7 @@ import { parseArguments } from '../src/args.js';
 
 test('passes every argument after claude unchanged', () => {
   const argv = ['--help', '--model', 'sonnet', '--workspace', 'native-value', 'a prompt; $(literal)'];
-  assert.deepEqual(parseArguments(['claude', ...argv], {}), { command: 'claude', workspace: 'default', argv });
+  assert.deepEqual(parseArguments(['claude', ...argv], {}), { command: 'claude', workspace: undefined, argv });
 });
 
 test('selects a persistent workspace before the command or from the environment', () => {

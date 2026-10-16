@@ -1,5 +1,5 @@
 export type TerminalCommand =
-  | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string }
+  | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string; directoryName?: string }
   | { type: 'input'; data: string }
   | { type: 'resize'; columns: number; rows: number }
   | { type: 'signal'; signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP' }

@@ -1,7 +1,7 @@
-export type Arguments = { command: 'claude' | 'login' | 'help' | 'version'; workspace: string; argv: string[] };
+export type Arguments = { command: 'claude' | 'login' | 'help' | 'version'; workspace: string | undefined; argv: string[] };
 
 export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.env): Arguments {
-  let workspace = env.JUICED_WORKSPACE ?? 'default';
+  let workspace = env.JUICED_WORKSPACE;
   let index = 0;
   while (index < args.length) {
     const arg = args[index]!;
@@ -13,7 +13,7 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
       index++;
     } else break;
   }
-  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(workspace)) throw new Error('Workspace must be 1–63 lowercase letters, numbers, or hyphens');
+  if (workspace !== undefined && !/^[a-z0-9][a-z0-9-]{0,62}$/.test(workspace)) throw new Error('Workspace must be 1–63 lowercase letters, numbers, or hyphens');
   const command = args[index];
   const argv = args.slice(index + 1);
   if (command === 'claude') return { command, workspace, argv };
@@ -36,7 +36,8 @@ Examples:
   echo "Explain this project" | juiced claude -p
 
 Options before the command:
-  --workspace SLUG  Persistent remote workspace (default: JUICED_WORKSPACE or default)
+  --workspace SLUG  Override the workspace derived from the current directory
+                   (JUICED_WORKSPACE also overrides automatic selection)
   -h, --help        Show this help
   -v, --version     Show version
 
@@ -45,7 +46,9 @@ Enter sends, Alt+Enter adds a line, Esc interrupts, and /exit quits.
 Claude flags configure the remote process. -p, --help, --version, and pipes
 use native CLI passthrough.
 Each invocation starts a new session. Files and Claude login persist in the
-remote workspace. Local files are not uploaded.
+remote workspace. Project files sync continuously into /workspace/<directory-name>;
+initial sync must finish before Claude starts. .git, .env*, node_modules, dist,
+and coverage are excluded. Claude login is separate for each project workspace.
 
 First run: deploy this project's runtime with cantelop deploy, then run juiced
 login to sign in to Claude inside the remote workspace. See README.md.

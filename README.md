@@ -60,11 +60,32 @@ juiced --workspace my-project claude
 export JUICED_WORKSPACE=my-project
 ```
 
-The default workspace slug is `default`. Workspaces share neither files nor Claude login. Sessions within the same workspace share its files, so concurrent sessions can edit the same files.
+The current directory selects a persistent workspace automatically. The slug is
+its folder name plus a stable hash of its resolved absolute path, so two projects
+with the same folder name remain separate. `--workspace` or `JUICED_WORKSPACE`
+overrides that selection. Workspaces share neither files nor Claude login.
 
-Automatic project sync is planned but is not connected to the CLI yet. It will use the current directory as the local root and keep its directory name remotely: a local `work/juiced` directory will sync into `/workspace/juiced`, where Claude will start after initial reconciliation succeeds. The workspace slug will use the directory name plus a stable hash of the resolved absolute local path, so projects with identical directory names remain separate.
+Juiced synchronizes the current directory into `/workspace/<folder-name>` and
+starts Claude there after initial two-way reconciliation succeeds. It keeps
+syncing while the command runs, flushes before each interactive prompt or tool
+approval, and flushes once more on normal exit. Claude's HOME and account state
+remain at `/workspace`, including `.claude` and `.local`; sibling folders never
+enter the project's sync tree. Each project workspace needs its own Claude login.
 
-The platform must bind the validated directory name to the workspace and confine every sync operation to that directory. Individual transfers must not select arbitrary workspace folders. Claude's remote account configuration remains outside the sync root at `/workspace/.claude`. The current platform still uses the fixed `project/` root; the named root must be implemented before automatic project sync is enabled.
+`.git`, `.cantelop`, `node_modules`, `.env*`, temporary sync files, `dist`, and
+`coverage` are excluded. Divergent edits preserve both copies and stop the agent
+with a conflict error. Resolve both copies before restarting. One local directory
+can have one active sync handle. Sync runs only while Juiced is running.
+
+During review, `package.json` pins the SDK to immutable commit
+`b7f547a13286065ecdd2409e9a99cfb3f9d4e68f`; Git installation builds its artifacts.
+Replace that pin with the corresponding registry version after the SDK release.
+
+Automatic sync needs the matching platform, generated App Edge, SDK, and native
+Cantelop helper. Hosted writes remain gated pending JuiceFS/NFS concurrency
+qualification: Juiced refuses to start an agent when uploads are disabled,
+including for empty directories. An existing login is retained in its original
+workspace; pass `--workspace default` to reuse the previous default workspace.
 
 In the local UI:
 
@@ -128,7 +149,7 @@ Live execution requires deploying the runtime and completing Claude sign-in. Loc
 
 ## Hosted verification
 
-Release v3 (`rel_4f206ba65af1e78dac06408895053726`) was deployed on October 16, 2026 with SDK 1.1.0. Cantelop CLI 0.16.0 was published, installed through Homebrew, and its macOS signature verified. The rebuilt installed `juiced claude` passed the real prompt smoke test. An SDK-level sync probe downloaded a binary file through the public App Edge, gateway, hosted storage, and native CLI helper, then confirmed that an attempted upload returned `sync_writes_not_enabled` without reaching storage. The temporary fixture was removed. Hosted uploads and deletions remain disabled pending live JuiceFS/NFS concurrency qualification; automatic project sync in the Juiced CLI is still a separate integration step.
+Release v3 (`rel_4f206ba65af1e78dac06408895053726`) was deployed on October 16, 2026 with SDK 1.1.0. Cantelop CLI 0.16.0 was published, installed through Homebrew, and its macOS signature verified. The rebuilt installed `juiced claude` passed the real prompt smoke test. An SDK-level sync probe downloaded a binary file through the public App Edge, gateway, hosted storage, and native CLI helper, then confirmed that an attempted upload returned `sync_writes_not_enabled` without reaching storage. The temporary fixture was removed. Hosted uploads and deletions remain disabled pending live JuiceFS/NFS concurrency qualification; this is evidence for the previous release, before automatic CLI project sync. The implementation below has not yet been deployed and does not enable the hosted write gate.
 
 The local Juiced TUI was verified against active release v2 (`rel_3af3dee9134a99e9635b0d103c89d67c`) on October 16, 2026. The installed `juiced claude` rendered a streamed answer, answered an `AskUserQuestion` dialog, interrupted generation, accepted another turn, and exited with code 0. The headless live test verified persistent conversation context, denial and approval of a Write, remote file verification and cleanup, interruption without duplicate output, and another successful turn. Native piped execution also passed. Offline renderer tests verify that keystrokes and multiline paste remain local even while the connection is stalled, and that pasted text cannot approve an action.
 
