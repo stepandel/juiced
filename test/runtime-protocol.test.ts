@@ -1,0 +1,78 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+import test from 'node:test';
+import { createSessionRuntimeHandler } from '@cantelop/sdk/runtime';
+import { activateTerminal, receiveTerminal } from '../src/runtime/terminal.js';
+import type { TerminalCommand, TerminalEvent } from '../src/protocol.js';
+
+test('native runtime keeps terminal work alive after start intake and handles input, heartbeat, output acknowledgments and exit', { timeout: 10_000 }, async t => {
+  const previousDirectory = process.cwd();
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), 'juiced-native-test-')));
+  process.chdir(workspace);
+  const sandboxId = `sbx-${'1'.repeat(32)}`;
+  const server = createServer(createSessionRuntimeHandler({ onActivate: activateTerminal, receive: receiveTerminal }, { sandboxId, env: { CLAUDE_PATH: process.execPath } }));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const origin = `http://127.0.0.1:${address.port}`;
+  const request = async (path: string, body?: unknown) => {
+    const response = await fetch(origin + path, { headers: { 'X-Cantelop-Sandbox-ID': sandboxId, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }), signal: AbortSignal.timeout(3000) });
+    assert.ok(response.ok, `${path} returned ${response.status}: ${response.ok ? '' : await response.text()}`);
+    return response.json();
+  };
+  t.after(async () => {
+    const snapshot = await request('/__cantelop/v2/runtime').catch(() => ({}));
+    if (snapshot.activity) await request('/__cantelop/v2/runtime/activity/cancel', { activity_id: snapshot.activity.id }).catch(() => {});
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    process.chdir(previousDirectory);
+    await rm(workspace, { recursive: true, force: true });
+  });
+  const submit = async (payload: TerminalCommand) => {
+    const id = `msg_${randomUUID().replaceAll('-', '')}`;
+    await request('/__cantelop/v2/messages', { session: { id: 'test', workspace_id: `wsp_${'2'.repeat(32)}`, keep_alive_seconds: 120 }, message: { id, payload }, reply: true });
+    for (let i = 0; i < 100; i++) {
+      const status = await request(`/__cantelop/v2/messages/${id}`);
+      if (status.state === 'succeeded') {
+        assert.deepEqual(await request(`/__cantelop/v2/messages/${id}/reply`), { reply: { ok: true } });
+        return;
+      }
+      assert.notEqual(status.state, 'failed', JSON.stringify(status));
+      await delay(5);
+    }
+    throw new Error('Message did not finish');
+  };
+  const events: TerminalEvent[] = [];
+  let cursor = 0;
+  const drainUntil = async (predicate: () => boolean) => {
+    for (let i = 0; i < 200; i++) {
+      const batch = await request(`/__cantelop/v2/runtime/events?after=${cursor}&wait=0`);
+      for (const item of batch.events) { events.push(item.event); cursor = item.cursor; }
+      if (batch.events.length) await request('/__cantelop/v2/runtime/events/ack', { through: cursor });
+      if (predicate()) return;
+      await delay(5);
+    }
+    throw new Error('Expected terminal output did not arrive');
+  };
+  await submit({ type: 'start', tty: false, columns: 80, rows: 24, term: 'xterm-256color', argv: ['-e', `console.log('READY'); process.stdin.pipe(process.stdout); process.stdin.on('end',()=>process.exitCode=4);`] });
+  await drainUntil(() => events.some(event => event.type === 'output'));
+  const first = await request('/__cantelop/v2/runtime');
+  assert.ok(first.activity);
+  await delay(10);
+  await submit({ type: 'heartbeat' });
+  const renewed = await request('/__cantelop/v2/runtime');
+  assert.ok(Date.parse(renewed.activity.deadline) > Date.parse(first.activity.deadline));
+  await submit({ type: 'input', data: Buffer.from('native intake 🍈\n').toString('base64') });
+  await submit({ type: 'eof' });
+  await drainUntil(() => events.some(event => event.type === 'exit'));
+  const text = events.filter(event => event.type === 'output').map(event => Buffer.from(event.data, 'base64').toString()).join('');
+  assert.match(text, /native intake 🍈/);
+  assert.deepEqual(events.at(-1), { type: 'exit', code: 4 });
+});
