@@ -4,11 +4,12 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
+import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { CantelopClient, type AppCommandEnvelope, type SessionEvent, type SessionEventCursor } from '@cantelop/sdk';
 import { createTerminal } from '../src/runtime/terminal.js';
 import { runRemoteTerminal, type TerminalInput, type TerminalOutput, type TerminalSession } from '../src/remote-terminal.js';
-import type { TerminalCommand, TerminalEvent } from '../src/protocol.js';
+import { MAX_INPUT_BYTES, type TerminalCommand, type TerminalEvent } from '../src/protocol.js';
 
 function capture(tty = false) {
   const bytes: Buffer[] = [];
@@ -213,4 +214,118 @@ test('forwards Ctrl-C as terminal input and stops and restores on external cance
   assert.equal(received, true);
   assert.deepEqual(raw, [true, false]);
   assert.equal(stops, 1);
+});
+
+test('coalesces keys typed during a request and preserves their bytes before EOF', { timeout: 5000 }, async () => {
+  const { stdin } = input();
+  const inputs: Buffer[] = [];
+  let releaseFirst!: () => void;
+  let startedFirst!: () => void;
+  let receivedEOF!: () => void;
+  const firstStarted = new Promise<void>(resolve => { startedFirst = resolve; });
+  const firstReleased = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const eof = new Promise<void>(resolve => { receivedEOF = resolve; });
+  const session: TerminalSession = {
+    id: 'test',
+    async request(command) {
+      if (command.type === 'input') {
+        inputs.push(Buffer.from(command.data, 'base64'));
+        if (inputs.length === 1) { startedFirst(); await firstReleased; }
+      }
+      if (command.type === 'eof') receivedEOF();
+      return { ok: true };
+    },
+    async *stream() {
+      yield event({ type: 'ready' }, 1);
+      stdin.write('a');
+      await firstStarted;
+      assert.equal(stdin.isPaused(), false, 'normal typing should continue while a request is outstanding');
+      stdin.write('bc');
+      stdin.write(Buffer.from([0xf0, 0x9f]));
+      stdin.write(Buffer.from([0x8d, 0x88]));
+      stdin.end('de');
+      releaseFirst();
+      await eof;
+      yield event({ type: 'exit', code: 0 }, 2);
+    },
+    async stop() {},
+  };
+  assert.equal(await runRemoteTerminal(session, [], { stdin, stdout: capture().stream, stderr: capture().stream }), 0);
+  assert.equal(inputs.length, 2);
+  assert.equal(Buffer.concat(inputs).toString(), 'abc🍈de');
+});
+
+test('control keys flush pending text without waiting for the batching window', { timeout: 5000 }, async () => {
+  const { stdin } = input();
+  const inputs: Buffer[] = [];
+  let receivedInput!: () => void;
+  let receivedEOF!: () => void;
+  const inputReceived = new Promise<void>(resolve => { receivedInput = resolve; });
+  const eof = new Promise<void>(resolve => { receivedEOF = resolve; });
+  const session: TerminalSession = {
+    id: 'test',
+    async request(command) {
+      if (command.type === 'input') { inputs.push(Buffer.from(command.data, 'base64')); receivedInput(); }
+      if (command.type === 'eof') receivedEOF();
+      return { ok: true };
+    },
+    async *stream() {
+      yield event({ type: 'ready' }, 1);
+      stdin.write('pending');
+      stdin.write(Buffer.from([3]));
+      stdin.write('after');
+      stdin.write('\r');
+      await Promise.race([inputReceived, delay(100).then(() => { throw new Error('Ctrl-C waited for the batch timer'); })]);
+      stdin.end();
+      await eof;
+      yield event({ type: 'exit', code: 0 }, 2);
+    },
+    async stop() {},
+  };
+  assert.equal(await runRemoteTerminal(session, [], { stdin, stdout: capture().stream, stderr: capture().stream }, { inputBatchMs: 1000 }), 0);
+  assert.deepEqual(inputs, [Buffer.from('pending'), Buffer.from([3]), Buffer.from('after'), Buffer.from('\r')]);
+});
+
+test('a large paste respects remote frame limits and drains before EOF', { timeout: 5000 }, async () => {
+  const { stdin } = input();
+  const payload = Buffer.alloc(MAX_INPUT_BYTES * 40 + 3, 0x61);
+  const inputs: Buffer[] = [];
+  let receivedEOF!: () => void;
+  const eof = new Promise<void>(resolve => { receivedEOF = resolve; });
+  const session: TerminalSession = {
+    id: 'test',
+    async request(command) {
+      if (command.type === 'input') inputs.push(Buffer.from(command.data, 'base64'));
+      if (command.type === 'eof') receivedEOF();
+      return { ok: true };
+    },
+    async *stream() {
+      yield event({ type: 'ready' }, 1);
+      stdin.end(payload);
+      await eof;
+      yield event({ type: 'exit', code: 0 }, 2);
+    },
+    async stop() {},
+  };
+  assert.equal(await runRemoteTerminal(session, [], { stdin, stdout: capture().stream, stderr: capture().stream }), 0);
+  assert.ok(inputs.every(bytes => bytes.length <= MAX_INPUT_BYTES));
+  assert.deepEqual(Buffer.concat(inputs), payload);
+});
+
+test('discards an unsent batch when the remote process exits', { timeout: 5000 }, async () => {
+  const { stdin } = input();
+  let inputs = 0;
+  const session: TerminalSession = {
+    id: 'test',
+    async request(command) { if (command.type === 'input') inputs++; return { ok: true }; },
+    async *stream() {
+      yield event({ type: 'ready' }, 1);
+      stdin.write('pending');
+      yield event({ type: 'exit', code: 0 }, 2);
+    },
+    async stop() {},
+  };
+  await runRemoteTerminal(session, [], { stdin, stdout: capture().stream, stderr: capture().stream }, { inputBatchMs: 20 });
+  await delay(30);
+  assert.equal(inputs, 0);
 });

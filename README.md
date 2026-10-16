@@ -60,6 +60,8 @@ export JUICED_WORKSPACE=my-project
 
 The default workspace slug is `default`. Workspaces share neither files nor Claude login. Sessions within the same workspace share its files, so concurrent sessions can edit the same files.
 
+Typing uses a fixed 8 ms batching window. Keys continue accumulating while a request is in flight and travel together in the next request, reducing the backlog from waiting for each keystroke separately. Enter, Escape, backspace, and control keys flush pending text and keep their own input boundaries. Pasted bytes and EOF retain their order, with bounded buffering for large inputs. Batching reduces accumulated delay; the underlying HTTP request latency still affects the first key.
+
 Ctrl-C reaches Claude as it would locally. Closing the session restores your terminal and releases the sandbox. If the client disappears or loses connectivity, the remote process is cancelled when its renewable 90-second terminal lease expires; Cantelop can then reclaim the idle sandbox. The CLI retries interrupted output streams up to three times using their last cursor. It never replays keyboard input or silently starts another Claude process.
 
 For another machine, configure Cantelop's app integration profile or supply `CANTELOP_APP_SLUG` and `CANTELOP_INTEGRATION_TOKEN`, with `CANTELOP_EDGE_URL` for a local endpoint. The compiled CLI already carries its runtime identity. Keep app tokens private; they grant access to the app's workspaces. `CANTELOP_PROFILE` selects a configured profile.
