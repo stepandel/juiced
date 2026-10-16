@@ -80,6 +80,27 @@ After deployment, `npm link`, and `juiced login`, run `npm run test:live` to ver
 
 Set `JUICED_DEBUG=1` to log session IDs, command types, request timing, and transport errors to stderr. Terminal input contents are excluded from these diagnostics.
 
+To measure typing latency against the deployed app without submitting a model prompt:
+
+```sh
+npm run measure:latency -- --samples 10 --output /tmp/juiced-latency.json
+```
+
+This starts a fresh Claude terminal in the selected existing workspace, accepts its folder trust prompt, types synthetic text without pressing Enter, and stops the session. It records input acknowledgement and matching output timings with command IDs for server correlation; it excludes local batching and waiting behind earlier input. `--workspace` selects another workspace. The workspace must already have Claude sign-in and onboarding completed. No credentials or terminal output contents are written to the report.
+
+The October 16 investigation correlated ten input samples with the compute host's durable receipt timestamps. Input visibility ranged from 430–1,639 ms and acknowledgement from 702–2,224 ms. Five slow samples spent 1,165–1,229 ms between sandbox binding and runtime admission, while the input handler itself took 0–1 ms at its millisecond clock resolution. A further 297–585 ms elapsed between handler settlement and the durable handled projection. Matching terminal output reached the event store in 16–26 ms. Cross-machine timestamp splits are approximate; client elapsed durations and the local reproductions do not depend on clock synchronization. See [the recorded measurements](diagnostics/terminal-latency-2026-10-16.json).
+
+Two issues reproduce in the sibling Cantelop source: an admission wake consumed while the same sandbox's worker is busy does not survive worker release, leaving the next periodic sweep to pick it up; and reconciliation repeatedly revisits every settled command until the whole session becomes quiescent. With 100 settled commands, one pass makes 100 message reads, 300 execution-save calls, and 100 runtime status calls, plus fixed supervision calls. The fresh-delivery optimization also requires a group of exactly one execution, so it does not help an ongoing interactive session.
+
+Run the source diagnostics with Go installed and the Cantelop checkout available:
+
+```sh
+npm run probe:reconciliation
+# Or: node scripts/probe-cantelop-reconciliation.mjs /path/to/cantelop
+```
+
+These probes assert the observed behavior for the investigated platform revision. They use a temporary Go overlay and do not edit or deploy Cantelop. After platform fixes, their expectations should be updated. The recommended platform changes are to retain admission reruns per sandbox, prioritize new input and reply completion over old settled work, and supervise activity/output ownership per sandbox without repeatedly rewriting every finished command. A direct terminal WebSocket could then carry ordered bytes outside the durable command path. Switching the existing output stream to WebSocket alone would preserve the dispatch delay. Measured TCP connection time to the current compute host was 164–184 ms, so deployment locality remains relevant after the platform stalls are removed.
+
 `build` produces the CLI with Cantelop's backend compiler transform; the sandbox implementation stays out of the local bundle. `build:runtime` produces the generated Edge API, sandbox runtime, and backend artifacts under `dist/cantelop`. `cantelop deploy` builds the deployable image using the SDK's Claude Dockerfile, including stock Claude Code, Python, Git, and ripgrep.
 
 The tests exercise real subprocesses and PTYs plus the real SDK's request/SSE protocol against a local test transport. They cover input, resizing, cancellation, output replay, separate pipe stdout/stderr, exit codes, and terminal cleanup without a Cantelop deployment or model calls. PTY tests require Python 3 and macOS or Linux.

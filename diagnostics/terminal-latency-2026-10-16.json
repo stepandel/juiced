@@ -1,0 +1,423 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-16T19:34:04Z",
+  "sdkVersion": "1.0.1",
+  "platformSourceCheckout": "be9fb0c7",
+  "deployedDispatcherSha256": "72dafbf7989b5487f05aeeeed45b426345c8fe8ae52d754c8fde806a895f5c43",
+  "method": "Ten sequential synthetic text batches in a real Claude PTY over the SDK request/SSE path. Text was never submitted as a model prompt. ID and slug workspace selectors alternated. Command IDs were joined to read-only host database receipt records. Sessions were stopped after measurement. Output-stage timing uses the event containing the matching text; the first sample also emitted a preceding cursor-only chunk.",
+  "limitations": [
+    "This is a small diagnostic sample, not a percentile SLO benchmark.",
+    "Client elapsed times use one monotonic clock. Subdivisions spanning client, host and guest timestamps are approximate and require clock synchronization.",
+    "Probe requests exclude the local 8 ms batching window and any delay behind earlier input requests.",
+    "Host API reads were measured in a separate active test session; TCP connect times are a network reference, not a measured WebSocket echo result.",
+    "No platform fix or WebSocket implementation was deployed. Improvement estimates remain unverified.",
+    "The stripped deployed binary was fingerprinted; its exact source revision was not established. Source reproductions ran on the recorded local checkout."
+  ],
+  "inputSummaryMs": {
+    "echo": {
+      "samples": 10,
+      "min": 430,
+      "median": 1062.5,
+      "max": 1639
+    },
+    "ack": {
+      "samples": 10,
+      "min": 702,
+      "median": 1635.5,
+      "max": 2224
+    },
+    "queue": {
+      "samples": 10,
+      "min": 3.7,
+      "median": 18.45,
+      "max": 21.8
+    },
+    "claim_to_binding": {
+      "samples": 10,
+      "min": 19.1,
+      "median": 42.7,
+      "max": 97.6
+    },
+    "binding_to_runtime": {
+      "samples": 10,
+      "min": 134.0,
+      "median": 717.0,
+      "max": 1229.0
+    },
+    "handler": {
+      "samples": 10,
+      "min": 0.0,
+      "median": 0.0,
+      "max": 1.0
+    },
+    "settled_to_handled": {
+      "samples": 10,
+      "min": 296.5,
+      "median": 426.8,
+      "max": 584.7
+    },
+    "runtime_to_event_store": {
+      "samples": 10,
+      "min": 16.0,
+      "median": 18.0,
+      "max": 26.0
+    },
+    "event_store_to_client": {
+      "samples": 10,
+      "min": 94.0,
+      "median": 95.5,
+      "max": 102.0
+    }
+  },
+  "samplesMs": [
+    {
+      "type": "start",
+      "id": "msg_4ce46749b12c44cb94e6169ecc92744e",
+      "selector": "id",
+      "ack": 715,
+      "client_to_enqueue": 161.2,
+      "queue": 18.1,
+      "claim_to_binding": 322.7,
+      "binding_to_runtime": 45.0,
+      "runtime_queue": 2.0,
+      "handler": 2.0,
+      "settled_to_handled": 58.9,
+      "handled_to_client_ack": 105.1,
+      "revision": 115
+    },
+    {
+      "type": "input",
+      "id": "msg_37f3efd8a50549ffbba7bc49e59c6f46",
+      "selector": "id",
+      "ack": 633,
+      "client_to_enqueue": 168.6,
+      "queue": 21.8,
+      "claim_to_binding": 19.5,
+      "binding_to_runtime": 82.0,
+      "runtime_queue": 1.0,
+      "handler": 0.0,
+      "settled_to_handled": 168.5,
+      "handled_to_client_ack": 171.5,
+      "revision": 104
+    },
+    {
+      "type": "input",
+      "id": "msg_6a6057529e114480b039a9a0a691613f",
+      "selector": "id",
+      "ack": 625,
+      "client_to_enqueue": 185.4,
+      "queue": 21.1,
+      "claim_to_binding": 19.5,
+      "binding_to_runtime": 88.0,
+      "runtime_queue": 0.0,
+      "handler": 0.0,
+      "settled_to_handled": 206.1,
+      "handled_to_client_ack": 104.9,
+      "revision": 99
+    },
+    {
+      "type": "heartbeat",
+      "id": "msg_0b937ed4c8a549459f8dd32987d9733c",
+      "selector": "id",
+      "ack": 616,
+      "client_to_enqueue": 171.8,
+      "queue": 10.4,
+      "claim_to_binding": 18.8,
+      "binding_to_runtime": 116.0,
+      "runtime_queue": 0.0,
+      "handler": 0.0,
+      "settled_to_handled": 193.3,
+      "handled_to_client_ack": 105.7,
+      "revision": 88
+    },
+    {
+      "type": "heartbeat",
+      "id": "msg_919d69c2c89949f09a4cea67bdd8e251",
+      "selector": "slug",
+      "ack": 655,
+      "client_to_enqueue": 160.6,
+      "queue": 18.3,
+      "claim_to_binding": 19.1,
+      "binding_to_runtime": 100.0,
+      "runtime_queue": 0.0,
+      "handler": 1.0,
+      "settled_to_handled": 246.6,
+      "handled_to_client_ack": 109.4,
+      "revision": 83
+    },
+    {
+      "type": "heartbeat",
+      "id": "msg_4e4f514483764a40af06aa4e67f8b3b9",
+      "selector": "id",
+      "ack": 680,
+      "client_to_enqueue": 170.1,
+      "queue": 10.5,
+      "claim_to_binding": 19.5,
+      "binding_to_runtime": 118.0,
+      "runtime_queue": 0.0,
+      "handler": 0.0,
+      "settled_to_handled": 256.5,
+      "handled_to_client_ack": 105.5,
+      "revision": 78
+    },
+    {
+      "type": "heartbeat",
+      "id": "msg_f0deb53279534c89bfcbf175d9931d5c",
+      "selector": "slug",
+      "ack": 808,
+      "client_to_enqueue": 187.9,
+      "queue": 26.5,
+      "claim_to_binding": 46.7,
+      "binding_to_runtime": 130.0,
+      "runtime_queue": 0.0,
+      "handler": 1.0,
+      "settled_to_handled": 312.9,
+      "handled_to_client_ack": 103.1,
+      "revision": 73
+    },
+    {
+      "type": "input",
+      "id": "msg_112f416bda6948d28db64f255c79ddc3",
+      "selector": "id",
+      "ack": 702,
+      "client_to_enqueue": 136.9,
+      "queue": 10.9,
+      "claim_to_binding": 21.2,
+      "binding_to_runtime": 134.0,
+      "runtime_queue": 0.0,
+      "handler": 0.0,
+      "settled_to_handled": 296.5,
+      "handled_to_client_ack": 102.5,
+      "revision": 68,
+      "echo": 430,
+      "runtime_to_event_store": 26.0,
+      "event_store_to_client": 101.0
+    },
+    {
+      "type": "input",
+      "id": "msg_29fa5458f5be4f07980ce0d5d93d22e5",
+      "selector": "slug",
+      "ack": 827,
+      "client_to_enqueue": 171.5,
+      "queue": 10.1,
+      "claim_to_binding": 19.4,
+      "binding_to_runtime": 142.0,
+      "runtime_queue": 0.0,
+      "handler": 0.0,
+      "settled_to_handled": 321.5,
+      "handled_to_client_ack": 162.5,
+      "revision": 63,
+      "echo": 456,
+      "runtime_to_event_store": 17.0,
+      "event_store_to_client": 94.0
+    },
+    {
+      "type": "input",
+      "id": "msg_34b282f96c3f4cf48951ab5597814a9c",
+      "selector": "id",
+      "ack": 794,
+      "client_to_enqueue": 138.1,
+      "queue": 9.8,
+      "claim_to_binding": 19.1,
+      "binding_to_runtime": 165.0,
+      "runtime_queue": 0.0,
+      "handler": 1.0,
+      "settled_to_handled": 353.0,
+      "handled_to_client_ack": 108.0,
+      "revision": 58,
+      "echo": 450,
+      "runtime_to_event_store": 19.0,
+      "event_store_to_client": 94.0
+    },
+    {
+      "type": "input",
+      "id": "msg_8d2dd4f176834084992a846b5ba94483",
+      "selector": "slug",
+      "ack": 1893,
+      "client_to_enqueue": 178.8,
+      "queue": 3.7,
+      "claim_to_binding": 25.5,
+      "binding_to_runtime": 1165.0,
+      "runtime_queue": 1.0,
+      "handler": 0.0,
+      "settled_to_handled": 408.7,
+      "handled_to_client_ack": 110.3,
+      "revision": 51,
+      "echo": 1488,
+      "runtime_to_event_store": 16.0,
+      "event_store_to_client": 96.0
+    },
+    {
+      "type": "input",
+      "id": "msg_d830cb3b8b3d4043b7e8230d6946358e",
+      "selector": "id",
+      "ack": 2047,
+      "client_to_enqueue": 175.7,
+      "queue": 18.7,
+      "claim_to_binding": 69.6,
+      "binding_to_runtime": 1229.0,
+      "runtime_queue": 0.0,
+      "handler": 1.0,
+      "settled_to_handled": 444.9,
+      "handled_to_client_ack": 108.1,
+      "revision": 44,
+      "echo": 1607,
+      "runtime_to_event_store": 18.0,
+      "event_store_to_client": 96.0
+    },
+    {
+      "type": "input",
+      "id": "msg_9dace4b3eaf14d5ea3004b54c873cdf3",
+      "selector": "slug",
+      "ack": 2013,
+      "client_to_enqueue": 193.3,
+      "queue": 18.6,
+      "claim_to_binding": 35.1,
+      "binding_to_runtime": 1202.0,
+      "runtime_queue": 0.0,
+      "handler": 1.0,
+      "settled_to_handled": 458.1,
+      "handled_to_client_ack": 104.9,
+      "revision": 37,
+      "echo": 1561,
+      "runtime_to_event_store": 18.0,
+      "event_store_to_client": 94.0
+    },
+    {
+      "type": "input",
+      "id": "msg_02d047a0fea746fe8007aec3a8f60758",
+      "selector": "id",
+      "ack": 1952,
+      "client_to_enqueue": 149.6,
+      "queue": 18.4,
+      "claim_to_binding": 68.0,
+      "binding_to_runtime": 1215.0,
+      "runtime_queue": 1.0,
+      "handler": 0.0,
+      "settled_to_handled": 397.5,
+      "handled_to_client_ack": 102.5,
+      "revision": 30,
+      "echo": 1567,
+      "runtime_to_event_store": 17.0,
+      "event_store_to_client": 96.0
+    },
+    {
+      "type": "input",
+      "id": "msg_d6711f065d7646199f7a61450fa54e63",
+      "selector": "slug",
+      "ack": 2224,
+      "client_to_enqueue": 186.8,
+      "queue": 18.5,
+      "claim_to_binding": 97.6,
+      "binding_to_runtime": 1220.0,
+      "runtime_queue": 0.0,
+      "handler": 0.0,
+      "settled_to_handled": 584.7,
+      "handled_to_client_ack": 116.3,
+      "revision": 23,
+      "echo": 1639,
+      "runtime_to_event_store": 17.0,
+      "event_store_to_client": 94.0
+    },
+    {
+      "type": "input",
+      "id": "msg_70c817f219ad4da18ebeca9823b630ab",
+      "selector": "id",
+      "ack": 1378,
+      "client_to_enqueue": 160.7,
+      "queue": 19.0,
+      "claim_to_binding": 81.3,
+      "binding_to_runtime": 229.0,
+      "runtime_queue": 1.0,
+      "handler": 0.0,
+      "settled_to_handled": 527.8,
+      "handled_to_client_ack": 359.2,
+      "revision": 16,
+      "echo": 606,
+      "runtime_to_event_store": 18.0,
+      "event_store_to_client": 95.0
+    },
+    {
+      "type": "input",
+      "id": "msg_71256b30c984430689be374957a3aedf",
+      "selector": "slug",
+      "ack": 1150,
+      "client_to_enqueue": 173.0,
+      "queue": 21.8,
+      "claim_to_binding": 50.3,
+      "binding_to_runtime": 269.0,
+      "runtime_queue": 1.0,
+      "handler": 0.0,
+      "settled_to_handled": 508.6,
+      "handled_to_client_ack": 126.4,
+      "revision": 9,
+      "echo": 637,
+      "runtime_to_event_store": 20.0,
+      "event_store_to_client": 102.0
+    }
+  ],
+  "hostApiReadsMs": {
+    "direct-runtime-inspect": [
+      0.86,
+      0.19,
+      0.17,
+      0.16,
+      0.16,
+      0.15
+    ],
+    "host-control-read": [
+      6.58,
+      0.28,
+      0.26,
+      0.25,
+      0.24
+    ]
+  },
+  "clientToComputeTcpConnectMs": [
+    184,
+    174,
+    169,
+    166,
+    164
+  ],
+  "sourceReproductions": {
+    "admissionHintConsumedWhileWorkerBusy": "No rerun wake is retained after the same-Sandbox worker releases. Completion notifications have retention; admission hints lack equivalent retention.",
+    "settledGroupPasses": [
+      {
+        "settledCommands": 1,
+        "messageReads": 1,
+        "executionSaveCalls": 3,
+        "runtimeStatusCalls": 1,
+        "runtimeInspections": 2
+      },
+      {
+        "settledCommands": 10,
+        "messageReads": 10,
+        "executionSaveCalls": 30,
+        "runtimeStatusCalls": 10,
+        "runtimeInspections": 2
+      },
+      {
+        "settledCommands": 50,
+        "messageReads": 50,
+        "executionSaveCalls": 150,
+        "runtimeStatusCalls": 50,
+        "runtimeInspections": 2
+      },
+      {
+        "settledCommands": 100,
+        "messageReads": 100,
+        "executionSaveCalls": 300,
+        "runtimeStatusCalls": 100,
+        "runtimeInspections": 2
+      }
+    ],
+    "freshDeliveryRestriction": "takeFreshDelivery requires len(group) == 1; it falls back to full reconciliation during an active interactive session."
+  },
+  "recommendedOrder": [
+    "Retain pending admission work per Sandbox and immediately rerun after its serialized worker releases, using a fresh snapshot.",
+    "Prioritize first delivery and reply completion; stop re-reading immutable settled receipts and rewriting inspection success per historical command. Preserve durable fencing, ordered intake, activity supervision and output ownership.",
+    "Add a scoped persistent terminal byte channel that bypasses durable per-key command admission; retain ordinary Session lifecycle control and bounded backpressure.",
+    "Choose compute close enough to the user for the desired echo budget. The measured current network round trip already exceeds a sub-100 ms target."
+  ]
+}
