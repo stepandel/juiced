@@ -1,0 +1,51 @@
+{
+  "date_local": "2026-10-16",
+  "platform_commit": "edb6351c0eebc4350b1214000b376ddf6ea125a8",
+  "sdk_commit": "e00afac7bb38b1ae65b9f5a450652120ca87d564",
+  "sdk_version": "1.2.0",
+  "sdk_integrity": "sha512-rl9bYvQnJjA5vChZYSPro9VfZn7ly+bfDU+ZrguHP7/1Vkzqf1Zf6iXBw6J464uaTQ46Bje56lEtHU5WiaPf7g==",
+  "cli_version": "0.16.1",
+  "cli_signature_verified": true,
+  "cloudflare_commit": "05d01a27b8dc77496f0dc90904491d285b93f4f6",
+  "app_release": {
+    "version": 4,
+    "id": "rel_0760c39bd457205a9bdbf5a8f1a9d56c",
+    "sdk_version": "1.2.0",
+    "status": "active"
+  },
+  "merged_prs": [
+    "https://github.com/stepandel/cantelop/pull/353",
+    "https://github.com/stepandel/cantelop-sdk/pull/56",
+    "https://github.com/stepandel/cantelop/pull/354"
+  ],
+  "workflows": {
+    "sdk": "https://github.com/stepandel/cantelop-sdk/actions/runs/38984105962",
+    "cli": "https://github.com/stepandel/cantelop/actions/runs/38984833659",
+    "cloudflare": "https://github.com/stepandel/cantelop/actions/runs/38984086967"
+  },
+  "workspace_sync_writes": true,
+  "concurrency_contract": "Optimistic version preconditions against ordinary POSIX/NFS writers; not filesystem CAS.",
+  "storage_qualification": [
+    "bidirectional JuiceFS/NFS transfer",
+    "stale version rejection",
+    "competing clients",
+    "NFS write/rename/delete/type changes during upload",
+    "interrupted upload cleanup",
+    "selected-root and sibling confinement"
+  ],
+  "live_checks": {
+    "installed_cli_read_uploaded_readme": true,
+    "claude_write_approved_once": true,
+    "agent_edit_synced_locally": true,
+    "remote_fixture_files_deleted": true,
+    "existing_claude_login_retained": true,
+    "workspace": "default"
+  },
+  "offline_checks": {
+    "sdk_pass": 264,
+    "sdk_environment_skips": 7,
+    "juiced_pass": 38,
+    "platform": "Go/CLI, Linux and macOS filesystem publication, SDK contract and cross-repository SDK/Juiced roundtrip"
+  },
+  "automatic_workspace_selection": "Verified locally; live tests used the explicitly selected signed-in default workspace."
+}

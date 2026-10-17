@@ -80,9 +80,9 @@ can have one active sync handle. Sync runs only while Juiced is running.
 Juiced uses the published `@cantelop/sdk` 1.2.0 release.
 
 Automatic sync needs the matching platform, generated App Edge, SDK, and native
-Cantelop helper. Hosted writes remain gated pending JuiceFS/NFS concurrency
-qualification: Juiced refuses to start an agent when uploads are disabled,
-including for empty directories. An existing login is retained in its original
+Cantelop helper. Hosted writes are operator-gated: Juiced refuses to start an
+agent when uploads are disabled, including for empty directories. The current
+deployment enables writes after live JuiceFS/NFS qualification. An existing login is retained in its original
 workspace; pass `--workspace default` to reuse the previous default workspace.
 
 In the local UI:
@@ -152,7 +152,32 @@ Live execution requires deploying the runtime and completing Claude sign-in. Loc
 
 ## Hosted verification
 
-Release v3 (`rel_4f206ba65af1e78dac06408895053726`) was deployed on October 16, 2026 with SDK 1.1.0. Cantelop CLI 0.16.0 was published, installed through Homebrew, and its macOS signature verified. The rebuilt installed `juiced claude` passed the real prompt smoke test. An SDK-level sync probe downloaded a binary file through the public App Edge, gateway, hosted storage, and native CLI helper, then confirmed that an attempted upload returned `sync_writes_not_enabled` without reaching storage. The temporary fixture was removed. Hosted uploads and deletions remain disabled pending live JuiceFS/NFS concurrency qualification; this is evidence for the previous release, before automatic CLI project sync. The implementation below has not yet been deployed and does not enable the hosted write gate.
+Release v4 (`rel_0760c39bd457205a9bdbf5a8f1a9d56c`) was activated on October 16,
+2026 with published SDK 1.2.0. Signed and notarized Cantelop CLI 0.16.1
+(`edb6351c0eeb`) was published, installed through Homebrew, and its macOS signature
+verified. The runtime runs platform commit `edb6351c0eebc4350b1214000b376ddf6ea125a8`;
+Cloudflare was deployed from `05d01a27b8dc77496f0dc90904491d285b93f4f6`.
+
+Hosted writes are enabled after qualification against the real JuiceFS data mount
+and a disposable loopback NFS export. That check covered both transfer directions,
+stale versions, competing clients, NFS write/rename/delete/type changes during
+upload, interruption cleanup, and sibling confinement. Qualification exposed a
+trash-retained hard link from file publication; new files now use atomic
+no-overwrite rename through pinned directory descriptors. Genuine hard links
+remain rejected. Concurrency with arbitrary filesystem writers remains optimistic.
+
+The installed `juiced claude` uploaded a disposable local README, had real Claude
+read its unique token from the remote project directory, streamed the exact reply,
+and exited with code 0. The live local-TUI test separately approved one remote
+Write and verified the resulting file locally through sync. Both tests removed
+their remote fixture files through synchronized deletion and reused the existing
+`default` workspace login without relocating credentials. Automatic workspace
+selection is covered by local tests; each newly selected workspace needs its own
+Claude login. [Release evidence](diagnostics/sync-release-2026-10-16.json).
+
+Release v3 (`rel_4f206ba65af1e78dac06408895053726`) earlier verified SDK 1.1.0 and
+CLI 0.16.0 against the public sync download route, with uploads deliberately
+disabled before storage qualification.
 
 The local Juiced TUI was verified against active release v2 (`rel_3af3dee9134a99e9635b0d103c89d67c`) on October 16, 2026. The installed `juiced claude` rendered a streamed answer, answered an `AskUserQuestion` dialog, interrupted generation, accepted another turn, and exited with code 0. The headless live test verified persistent conversation context, denial and approval of a Write, remote file verification and cleanup, interruption without duplicate output, and another successful turn. Native piped execution also passed. Offline renderer tests verify that keystrokes and multiline paste remain local even while the connection is stalled, and that pasted text cannot approve an action.
 
