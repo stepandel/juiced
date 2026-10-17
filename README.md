@@ -77,9 +77,7 @@ enter the project's sync tree. Each project workspace needs its own Claude login
 with a conflict error. Resolve both copies before restarting. One local directory
 can have one active sync handle. Sync runs only while Juiced is running.
 
-During review, `package.json` pins the SDK to immutable commit
-`b7f547a13286065ecdd2409e9a99cfb3f9d4e68f`; Git installation builds its artifacts.
-Replace that pin with the corresponding registry version after the SDK release.
+Juiced uses the published `@cantelop/sdk` 1.2.0 release.
 
 Automatic sync needs the matching platform, generated App Edge, SDK, and native
 Cantelop helper. Hosted writes remain gated pending JuiceFS/NFS concurrency
