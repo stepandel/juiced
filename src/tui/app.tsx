@@ -1,5 +1,5 @@
 import React, { useEffect, useReducer, useRef, useState } from 'react';
-import { Box, Text, Static, render, useInput, usePaste, useStdout } from 'ink';
+import { Box, Text, Static, render, useInput, usePaste } from 'ink';
 import { object, type Approval, type ClaudeFrame } from '../agent-protocol.js';
 import { RemoteAgent, type AgentStatus } from '../remote-agent.js';
 import type { TerminalIO } from '../remote-terminal.js';
@@ -22,6 +22,12 @@ function Entries({ entries }: { entries: Entry[] }) {
   </Box>)}</Box>;
 }
 
+function Clipped({ children, tail = false }: { children: React.ReactNode; tail?: boolean }) {
+  return <Box flexDirection="column" overflow="hidden" justifyContent={tail ? 'flex-end' : 'flex-start'}>
+    <Box flexDirection="column" flexShrink={0}>{children}</Box>
+  </Box>;
+}
+
 function Prompt({ editor, onEdit, onSubmit, disabled = false, placeholder = 'Ask Claude to work in your remote workspace…' }: { editor: Draft; onEdit(value: Editor): void; onSubmit(value: string): void; disabled?: boolean; placeholder?: string }) {
   usePaste(text => onEdit(edit(editor.current, text, {})), { isActive: !disabled });
   useInput((input, key) => {
@@ -35,7 +41,7 @@ function Prompt({ editor, onEdit, onSubmit, disabled = false, placeholder = 'Ask
   const [before, cursor, after] = cursorParts(editor.current);
   return <Box borderStyle="round" borderColor={disabled ? 'gray' : 'green'} paddingX={1}>
     <Text color="green">› </Text>
-    <Box flexGrow={1}><Text>{editor.current.text ? <>{before}<Text inverse={!disabled}>{cursor}</Text>{after}</> : <><Text inverse={!disabled}> </Text><Text dimColor>{placeholder}</Text></>}</Text></Box>
+    <Box flexGrow={1}><Clipped tail><Text>{editor.current.text ? <>{before}<Text inverse={!disabled}>{cursor}</Text>{after}</> : <><Text inverse={!disabled}> </Text><Text dimColor>{placeholder}</Text></>}</Text></Clipped></Box>
   </Box>;
 }
 
@@ -60,11 +66,13 @@ function Permission({ approval, answer, cancel }: { approval: Approval; answer(a
     else if (key.return) answer(selected.current);
   });
   const preview = plain(JSON.stringify(approval.input, null, 2));
-  return <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
-    <Text bold color="yellow">{asking ? 'Claude has a question' : `Allow ${plain(approval.tool)} on Cantelop?`}</Text>
+  return <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} overflow="hidden">
+    <Box flexShrink={0}><Text bold color="yellow">{asking ? 'Claude has a question' : `Allow ${plain(approval.tool)} on Cantelop?`}</Text></Box>
     {asking ? <>
-      <Text>{plain(question.question)}</Text>
-      {Array.isArray(question.options) && question.options.map((raw, i) => { const option = object(raw); return <Text key={i} dimColor>{i + 1}. {plain(option.label)}{option.description ? ` — ${plain(option.description)}` : ''}</Text>; })}
+      <Clipped>
+        <Text>{plain(question.question)}</Text>
+        {Array.isArray(question.options) && question.options.map((raw, i) => { const option = object(raw); return <Text key={i} dimColor>{i + 1}. {plain(option.label)}{option.description ? ` — ${plain(option.description)}` : ''}</Text>; })}
+      </Clipped>
       <Prompt editor={editor} onEdit={setEditor} placeholder="Type an answer or option number" onSubmit={value => {
         if (!value.trim()) return;
         const options = Array.isArray(question.options) ? question.options.map(object) : [];
@@ -74,21 +82,22 @@ function Permission({ approval, answer, cancel }: { approval: Approval; answer(a
         else { setAnswers(next); setIndex(index + 1); setEditor({ text: '', cursor: 0 }); }
       }} />
     </> : <>
-      <Text>{preview.length > 12_000 ? preview.slice(0, 12_000) + '\n[preview truncated]' : preview}</Text>
-      {approval.description && <Text dimColor>{plain(approval.description)}</Text>}
-      <Text><Text inverse={!selected.current}> Deny </Text>{'  '}<Text inverse={selected.current}> Allow once </Text>{'  '}<Text dimColor>←/→ select · Enter confirm · y/n</Text></Text>
+      <Clipped>
+        <Text>{preview.length > 12_000 ? preview.slice(0, 12_000) + '\n[preview truncated]' : preview}</Text>
+        {approval.description && <Text dimColor>{plain(approval.description)}</Text>}
+      </Clipped>
+      <Box flexShrink={0}><Text><Text inverse={!selected.current}> Deny </Text>{'  '}<Text inverse={selected.current}> Allow once </Text>{'  '}<Text dimColor>←/→ select · Enter confirm · y/n</Text></Text></Box>
     </>}
   </Box>;
 }
 
-function Juiced({ agent, argv, workspace, quit }: { agent: RemoteAgent; argv: string[]; workspace: string; quit(code: number): void }) {
+function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; argv: string[]; workspace: string; rows: number; quit(code: number): void }) {
   const [conversation, setConversation] = useState(emptyConversation);
   const [editor, setEditor] = useDraft();
   const [status, setStatus] = useState<AgentStatus>(agent.status);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [notice, setNotice] = useState('');
   const [closing, setClosing] = useState(false);
-  const { stdout } = useStdout();
   const action = (work: Promise<unknown>) => { void work.catch(error => setNotice(plain((error as Error).message))); };
   const exit = () => { if (!closing) { setClosing(true); quit(0); } };
   useEffect(() => {
@@ -129,17 +138,25 @@ function Juiced({ agent, argv, workspace, quit }: { agent: RemoteAgent; argv: st
     }));
   };
   const active = approvals[0];
-  const live = conversation.live.slice(-12).map(entry => ({ ...entry, text: entry.text.split('\n').slice(-Math.max(4, ((stdout as NodeJS.WriteStream).rows ?? 24) - 12)).join('\n') }));
+  // Ink can only erase rows still in the viewport. An overflowing live frame
+  // pushes its first lines into scrollback again on every option change.
+  // Reserve the trailing newline and let layout account for wrapping, borders
+  // and the actual height of the controls before clipping conversation rows.
+  const height = Math.max(1, rows - 1);
   return <Box flexDirection="column">
     <Static items={[{ id: 'header', entries: [] }, ...conversation.history.map(turn => ({ id: String(turn.id), entries: turn.entries }))]}>{item => item.id === 'header'
       ? <Box key="header" flexDirection="column" marginBottom={1}><Text bold color="green">JUICED</Text><Text dimColor>Claude on Cantelop · workspace {workspace} · local keyboard and interface</Text></Box>
       : <Entries key={item.id} entries={item.entries} />}</Static>
-    <Entries entries={live} />
-    <Box marginBottom={1}><Text color={status === 'ready' ? 'green' : status === 'failed' ? 'red' : 'cyan'}>{closing ? 'Disconnecting…' : status === 'connecting' ? 'Connecting to Claude…' : status === 'working' ? 'Claude is working…' : status === 'interrupting' ? 'Interrupting…' : status === 'ready' ? 'Ready' : status}</Text><Text dimColor>{conversation.model ? ` · ${conversation.model}` : ''}{conversation.tokens ? ` · ${conversation.tokens.toLocaleString()} tokens last turn` : ''}</Text></Box>
-    {notice && <Box marginBottom={1}><Text color="yellow">{notice}</Text></Box>}
-    {active ? <Permission key={active.id} approval={active} cancel={cancel} answer={(allow, answers) => action(agent.answer(active.id, allow, answers))} />
-      : <Prompt editor={editor} onEdit={setEditor} onSubmit={submit} disabled={closing} />}
-    <Text dimColor>{active ? 'Esc decline · Ctrl+C interrupt' : 'Enter send · Alt+Enter newline · Esc interrupt · Ctrl+C clear / exit · /help'}</Text>
+    <Box flexDirection="column" maxHeight={height} overflow="hidden">
+      <Clipped tail><Entries entries={conversation.live.slice(-12)} /></Clipped>
+      <Box flexDirection="column" flexShrink={0} maxHeight={height} overflow="hidden">
+        <Box marginBottom={1} flexShrink={0} maxHeight={2} overflow="hidden"><Text color={status === 'ready' ? 'green' : status === 'failed' ? 'red' : 'cyan'}>{closing ? 'Disconnecting…' : status === 'connecting' ? 'Connecting to Claude…' : status === 'working' ? 'Claude is working…' : status === 'interrupting' ? 'Interrupting…' : status === 'ready' ? 'Ready' : status}</Text><Text dimColor>{conversation.model ? ` · ${conversation.model}` : ''}{conversation.tokens ? ` · ${conversation.tokens.toLocaleString()} tokens last turn` : ''}</Text></Box>
+        {notice && <Box marginBottom={1} flexShrink={0} maxHeight={2} overflow="hidden"><Text color="yellow">{notice}</Text></Box>}
+        {active ? <Permission key={active.id} approval={active} cancel={cancel} answer={(allow, answers) => action(agent.answer(active.id, allow, answers))} />
+          : <Prompt editor={editor} onEdit={setEditor} onSubmit={submit} disabled={closing} />}
+        <Box flexShrink={0}><Text dimColor wrap="truncate-end">{active ? 'Esc decline · Ctrl+C interrupt' : 'Enter send · Alt+Enter newline · Esc interrupt · Ctrl+C clear / exit · /help'}</Text></Box>
+      </Box>
+    </Box>
   </Box>;
 }
 
@@ -150,7 +167,12 @@ export async function runLocalTui(agent: RemoteAgent, argv: string[], workspace:
     code = Math.max(code, nextCode);
     quitting ??= agent.close().catch(error => { code = 1; io.stderr.write(`juiced: ${plain((error as Error).message)}\n`); }).finally(() => instance.unmount());
   };
-  const instance = render(<Juiced agent={agent} argv={argv} workspace={workspace} quit={quit} />, { stdin: io.stdin as NodeJS.ReadStream, stdout: io.stdout as NodeJS.WriteStream, stderr: io.stderr as NodeJS.WriteStream, exitOnCtrlC: false, interactive: true });
+  const ui = () => <Juiced agent={agent} argv={argv} workspace={workspace} rows={io.stdout.rows || 24} quit={quit} />;
+  const instance = render(ui(), { stdin: io.stdin as NodeJS.ReadStream, stdout: io.stdout as NodeJS.WriteStream, stderr: io.stderr as NodeJS.WriteStream, exitOnCtrlC: false, interactive: true });
+  // Update the row budget before Ink's synchronous resize repaint, which would
+  // otherwise paint one frame using the old height in the smaller terminal.
+  const resize = () => instance.rerender(ui());
+  io.stdout.prependListener('resize', resize);
   const abort = () => quit(0);
   const ioError = (error: Error) => { io.stderr.write(`juiced: ${plain(error.message)}\n`); quit(1); };
   signal.addEventListener('abort', abort, { once: true });
@@ -159,5 +181,5 @@ export async function runLocalTui(agent: RemoteAgent, argv: string[], workspace:
   io.stdout.once('error', ioError);
   if (signal.aborted) abort();
   try { await instance.waitUntilExit(); await quitting; return code; }
-  finally { signal.removeEventListener('abort', abort); io.stdin.off('end', abort); io.stdin.off('error', ioError); io.stdout.off('error', ioError); await agent.close().catch(() => {}); }
+  finally { signal.removeEventListener('abort', abort); io.stdin.off('end', abort); io.stdin.off('error', ioError); io.stdout.off('error', ioError); io.stdout.off('resize', resize); await agent.close().catch(() => {}); }
 }
