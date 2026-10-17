@@ -23,7 +23,8 @@
     "test:agent:live": "node scripts/test-agent-live.mjs",
     "measure:latency": "node scripts/measure-terminal-latency.mjs",
     "probe:reconciliation": "node scripts/probe-cantelop-reconciliation.mjs",
-    "prepack": "npm run build"
+    "prepack": "npm run build",
+    "test:sync:live": "node scripts/test-sync-live.mjs"
   },
   "dependencies": {
     "@cantelop/sdk": "1.2.0",

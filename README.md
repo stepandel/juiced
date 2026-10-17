@@ -114,6 +114,11 @@ After deployment, `npm link`, and `juiced login`, run `npm run test:live` to ver
 
 `npm run test:agent:live` separately verifies the headless handshake, two turns sharing conversation context, explicit denial followed by approval of a remote Write, and interruption followed by another successful turn. It uses the configured workspace and Claude subscription, then verifies and removes its uniquely named smoke-test file with an explicitly approved Bash command.
 
+`npm run test:sync:live` uses a disposable project folder in a signed-in workspace
+(`JUICED_WORKSPACE`, default `default`). It uploads a README, asks real Claude to
+read it and write one explicitly approved fixture, verifies the edit locally,
+and removes both remote fixture files through sync.
+
 Set `JUICED_DEBUG=1` to log session IDs, command types, request timing, and transport errors to stderr. Terminal input contents are excluded from these diagnostics.
 
 To measure typing latency against the deployed app without submitting a model prompt:
