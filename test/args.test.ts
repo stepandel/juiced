@@ -62,7 +62,7 @@ test('Git maintenance is scoped under claude and directions are explicit', () =>
 });
 
 test('reserved subcommand names can still be sent as literal Claude prompts', () => {
-  for (const prompt of ['login', 'sync', 'fast-forward']) {
+  for (const prompt of ['login', 'sync', 'fast-forward', 'delete']) {
     assert.deepEqual(parseArguments(['claude', '--', prompt], {}), {
       command: 'claude', action: 'run', workspace: undefined, argv: [prompt],
     });
@@ -70,4 +70,17 @@ test('reserved subcommand names can still be sent as literal Claude prompts', ()
       command: 'claude', action: 'run', workspace: undefined, argv: ['--model', 'sonnet', prompt],
     });
   }
+});
+
+test('deletion is a Claude action and requires an explicit flag to bypass confirmation', () => {
+  assert.deepEqual(parseArguments(['--workspace', 'chosen', 'claude', 'delete', '--yes'], {}), {
+    command: 'claude', action: 'delete', workspace: 'chosen', yes: true, argv: [],
+  });
+  assert.deepEqual(parseArguments(['claude', 'delete'], {}), {
+    command: 'claude', action: 'delete', workspace: undefined, yes: false, argv: [],
+  });
+  for (const extra of [['--force'], ['--yes', '--yes'], ['other']]) {
+    assert.throws(() => parseArguments(['claude', 'delete', ...extra], {}), /Usage: juiced claude delete/);
+  }
+  assert.throws(() => parseArguments(['delete'], {}), /Run juiced claude delete/);
 });

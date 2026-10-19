@@ -86,13 +86,46 @@ Maintenance commands use Cantelop authentication and do not require Claude
 sign-in. Launching Claude still requires sign-in for the selected workspace.
 All Git commands are nested under `claude`. Reserved subcommand names can be
 sent as literal prompts with `juiced claude -- login`, `juiced claude -- sync`,
-or `juiced claude -- fast-forward`.
+`juiced claude -- fast-forward`, or `juiced claude -- delete`.
 
 The first version requires a repository with an initial commit and complete
 history. Submodule transfer is not supported; Git LFS object transfer is not
 provided. A transfer is limited to 512 MiB, and each snapshot diff to 64 MiB.
 Failed transfers preserve their remote temporary data for diagnosis; there is
 no automatic garbage collection of abandoned transfers or retained import refs.
+
+## Delete a workspace
+
+```sh
+juiced claude delete
+juiced --workspace my-project-git claude delete
+# Explicit confirmation for scripts:
+juiced claude delete --yes
+```
+
+Deletion uses the same canonical local path and workspace override as launching
+Claude. It shows the slug and canonical workspace ID, then asks you to type the
+slug. Scripts must pass `--yes`. An absent workspace is a no-op; the command
+never creates a workspace just to delete it.
+
+This deletes the entire remote workspace, stopping its sessions and removing
+all project folders, remote Git history, uncommitted edits, Claude login, and
+database data. This includes other project folders sharing an overridden
+workspace. Import remote commits you want to keep before deleting. Local files,
+branches, and previously imported Git refs are retained.
+
+Deletion requires Cantelop account authentication (`cantelop login`), a Cantelop
+CLI with `workspace list/delete` support, and a console with
+`DELETE /v1/workspaces/{id}`. Claude sign-in and a runtime deployment are not
+required. The SDK remains at 1.2.0. Older Cantelop CLIs report an upgrade error.
+The required Cantelop changes are tracked in
+[Cantelop PR #355](https://github.com/stepandel/cantelop/pull/355) and are
+separate from the Git transfer feature. Deploy that console change and release
+its CLI before using deletion against production.
+
+Remote purge is asynchronous. Wait for deletion to finish before launching
+again; a later launch creates a fresh workspace from the current local HEAD
+(or local file sync for non-Git directories), and requires Claude sign-in again.
 
 ## Build and verify
 
@@ -105,8 +138,9 @@ cantelop deploy
 npm run test:git:live
 ```
 
-Build the CLI and deploy the Juiced app runtime from matching sources. No
-Cantelop platform change or SDK upgrade is needed. The live test uses a uniquely
+Build the CLI and deploy the Juiced app runtime from matching sources. Git
+transfers require no Cantelop platform change or SDK upgrade. Workspace deletion
+requires the Cantelop support described above. The live test uses a uniquely
 named disposable Git project in `JUICED_WORKSPACE` (default `default`), which
 must already be signed in to Claude. It approves only exact fixture Bash
 commands, checks two concurrent sessions, imports and fast-forwards an agent

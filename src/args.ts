@@ -2,6 +2,7 @@ export type Arguments =
   | { command: 'help' | 'version'; workspace: string | undefined; argv: string[] }
   | ({ command: 'claude'; workspace: string | undefined; argv: string[] } & (
     | { action: 'run' | 'login' | 'fast-forward' }
+    | { action: 'delete'; yes: boolean }
     | { action: 'sync'; direction: 'to-workspace' | 'from-workspace'; includeUncommitted: boolean }
   ));
 
@@ -23,6 +24,10 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
   const argv = args.slice(index + 1);
   if (command === 'claude') {
     if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1) };
+    if (argv[0] === 'delete') {
+      if (argv.length !== 1 && !(argv.length === 2 && argv[1] === '--yes')) throw new Error('Usage: juiced claude delete [--yes]');
+      return { command, action: 'delete', workspace, yes: argv[1] === '--yes', argv: [] };
+    }
     if (argv[0] === 'login') {
       if (argv.length !== 1) throw new Error('Usage: juiced claude login');
       return { command, action: 'login', workspace, argv: [] };
@@ -42,6 +47,7 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
     return { command, action: 'run', workspace, argv };
   }
   if (command === 'login') throw new Error('juiced login has moved. Run juiced claude login.');
+  if (command === 'delete') throw new Error('Run juiced claude delete [--yes] to delete the workspace for this directory.');
   if (command === '--version' || command === '-v') return { command: 'version', workspace, argv: [] };
   if (command === undefined || command === '--help' || command === '-h' || command === 'help') return { command: 'help', workspace, argv: [] };
   throw new Error(`Unknown command: ${command}. Run juiced --help.`);
@@ -55,6 +61,7 @@ Usage:
   juiced [--workspace SLUG] claude sync --to-workspace [--include-uncommitted]
   juiced [--workspace SLUG] claude sync --from-workspace
   juiced [--workspace SLUG] claude fast-forward
+  juiced [--workspace SLUG] claude delete [--yes]
 
 Examples:
   juiced claude login
@@ -78,7 +85,10 @@ remote workspace. Git repositories initialize from local HEAD once, then retain
 remote commits and edits. Use sync to explicitly transfer commits; fast-forward
 optionally applies imported commits to a clean local source branch. To include
 uncommitted work, run sync --to-workspace --include-uncommitted before launching.
-Use juiced claude -- <prompt> for literal prompts named login, sync, or fast-forward.
+Delete removes the entire remote workspace, including its files and Claude login.
+It asks for confirmation; --yes confirms deletion in scripts. Local files are kept.
+Use juiced claude -- <prompt> for literal prompts named login, sync, fast-forward,
+or delete. Deletion requires cantelop login and a CLI with workspace delete support.
 Non-Git directories keep continuous file sync, excluding .git, .env*,
 node_modules, dist, and coverage.
 Claude login is separate for each project workspace.

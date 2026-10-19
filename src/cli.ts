@@ -8,6 +8,7 @@ import { runLocalTui } from './tui/app.js';
 import { selectProject, synchronizeProject, syncError } from './project.js';
 import { discoverRepository } from './git.js';
 import { createGitSession, GitWorkspaceClient } from './git-workspace.js';
+import { deleteWorkspace } from './delete-workspace.js';
 
 const controller = new AbortController();
 let interrupted = 0;
@@ -24,7 +25,10 @@ try {
   const args = parseArguments(process.argv.slice(2));
   if (args.command === 'help') process.stdout.write(HELP);
   else if (args.command === 'version') process.stdout.write('juiced 0.1.0\n');
-  else if (args.command === 'claude') {
+  else if (args.command === 'claude' && args.action === 'delete') {
+    const project = await selectProject(process.cwd(), args.workspace);
+    await deleteWorkspace(claudeApp.name, project.workspace, args.yes, controller.signal);
+  } else if (args.command === 'claude') {
     const project = await selectProject(process.cwd(), args.workspace);
     const workspace = claudeApp.workspace({ slug: project.workspace });
     if (process.stderr.isTTY) process.stderr.write(`Connecting to Cantelop workspace ${project.workspace}…\n`);
