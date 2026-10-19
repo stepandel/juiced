@@ -1,8 +1,11 @@
+import { inspectionScope } from './inspection-protocol.js';
+
 export type Arguments =
   | { command: 'help' | 'version'; workspace: string | undefined; argv: string[] }
   | ({ command: 'claude'; workspace: string | undefined; argv: string[] } & (
     | { action: 'run' | 'login' | 'fast-forward' }
     | { action: 'delete'; yes: boolean }
+    | { action: 'ls' | 'peek'; path: string; includeIgnored: boolean }
     | { action: 'sync'; direction: 'to-workspace' | 'from-workspace'; includeUncommitted: boolean }
   ));
 
@@ -24,6 +27,20 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
   const argv = args.slice(index + 1);
   if (command === 'claude') {
     if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1) };
+    if (argv[0] === 'ls' || argv[0] === 'peek') {
+      const action = argv[0];
+      if (argv.length === 2 && ['--help', '-h'].includes(argv[1]!)) return { command: 'help', workspace, argv: [] };
+      let path: string | undefined, includeIgnored = false, literal = false;
+      for (const arg of argv.slice(1)) {
+        if (!literal && arg === '--') { literal = true; continue; }
+        if (!literal && arg === '--include-ignored' && !includeIgnored) { includeIgnored = true; continue; }
+        if ((!literal && arg.startsWith('-')) || path !== undefined) throw new Error(`Usage: juiced claude ${action} [--include-ignored] [PATH]`);
+        path = arg;
+      }
+      if (includeIgnored && path === undefined) throw new Error('--include-ignored requires an explicit PATH.');
+      inspectionScope(path);
+      return { command, action, workspace, path: path ?? '.', includeIgnored, argv: [] };
+    }
     if (argv[0] === 'delete') {
       if (argv.length !== 1 && !(argv.length === 2 && argv[1] === '--yes')) throw new Error('Usage: juiced claude delete [--yes]');
       return { command, action: 'delete', workspace, yes: argv[1] === '--yes', argv: [] };
@@ -62,6 +79,8 @@ Usage:
   juiced [--workspace SLUG] claude sync --from-workspace
   juiced [--workspace SLUG] claude fast-forward
   juiced [--workspace SLUG] claude delete [--yes]
+  juiced [--workspace SLUG] claude ls [--include-ignored] [PATH]
+  juiced [--workspace SLUG] claude peek [--include-ignored] [PATH]
 
 Examples:
   juiced claude login
@@ -87,8 +106,12 @@ optionally applies imported commits to a clean local source branch. To include
 uncommitted work, run sync --to-workspace --include-uncommitted before launching.
 Delete removes the entire remote workspace, including its files and Claude login.
 It asks for confirmation; --yes confirms deletion in scripts. Local files are kept.
+ls compares immediate local/remote entries; peek hides matching entries. Directory
+status includes descendants. Pass a path to drill down one level. Both inspect
+current Git-visible contents without syncing, changing the real index, or starting
+Claude. Ignored files are excluded; --include-ignored requires an explicit PATH.
 Use juiced claude -- <prompt> for literal prompts named login, sync, fast-forward,
-or delete. Deletion uses the configured Cantelop app credentials through the SDK.
+delete, ls, or peek. Workspace operations use app credentials through the SDK.
 Non-Git directories keep continuous file sync, excluding .git, .env*,
 node_modules, dist, and coverage.
 Claude login is separate for each project workspace.

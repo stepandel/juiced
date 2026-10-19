@@ -12,6 +12,33 @@ Git repositories use explicit transfers. Local edits and remote edits do not
 automatically appear on the other side. Non-Git directories retain the existing
 continuous file-sync behavior.
 
+## Inspect local and remote work
+
+```sh
+juiced claude ls
+juiced claude peek
+juiced claude peek src/
+juiced claude peek --include-ignored .env
+```
+
+`ls` shows immediate local and remote entries side by side; `peek` hides matching
+entries. Each directory represents its descendants, so a repository with many
+files stays compact. Pass a directory to inspect its immediate children, or a
+file to compare that entry. Both commands include uncommitted changes using
+temporary Git trees without modifying the real index, objects, refs, or files.
+
+Ignored untracked files are excluded by default. Tracked files remain included.
+An included path whose counterpart is ignored shows `[ignored]`, rather than
+claiming the counterpart is absent. `--include-ignored` requires an explicit
+path and includes ignored contents only within that scope. Normal Git filters
+and line-ending rules apply. No file contents cross the network for this view.
+
+Inspection uses SDK session requests and Git, with no Claude sign-in, model
+turn, or Cantelop CLI dependency. A missing workspace is reported without being
+created. Incomplete or excluded comparisons exit with status 2; complete views
+exit 0 even when differences exist. Read failures never appear as empty folders.
+See [workspace inspection](workspace-inspection.md) for symbols and limitations.
+
 ## Send local work
 
 ```sh

@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-19",
+  "scope": "Local implementation verification; no hosted deployment",
+  "sourceBaseCommit": "31e713a611678ff18ebfffc0abffce002bb7beae",
+  "sdk": "1.3.0",
+  "runtimeId": "rt_9951131a3965e1ed2f076def465a6b729ac95b5c9505a5e2fd298784171a0526",
+  "outcome": "passed",
+  "tests": {
+    "total": 99,
+    "passed": 99,
+    "failed": 0
+  },
+  "checks": [
+    "TypeScript check and complete existing test suite",
+    "CLI and app runtime builds from matching sources",
+    "Built CLI through the real SDK Edge adapter into a disposable loopback platform fixture",
+    "PATH contains Git only; no Cantelop CLI or account credentials",
+    "Native runtime activity and output acknowledgments without database access or a Claude binary",
+    "One-level directory summaries include uncommitted descendant changes",
+    "Scoped drill-down and explicit ignored-file inclusion",
+    "Ignored counterparts are labelled excluded rather than missing",
+    "Fixture working trees and full Git directories preserve original bytes and metadata",
+    "Missing workspace lookup creates no workspace or session",
+    "Submodule and embedded-repository scopes report unsupported contents",
+    "Pending publication journals are preserved without recovery",
+    "Canonical workspace IDs, own-session shutdown, corrupted and incomplete stream rejection",
+    "Linked worktrees, symlinks, binary files, executable modes, Unicode and narrow terminals"
+  ],
+  "sdkOrPlatformChanges": false,
+  "cantelopCliDependencyAdded": false,
+  "hostedRuntimeDeployed": false
+}

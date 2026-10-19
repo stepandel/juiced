@@ -1,4 +1,5 @@
 import type { GitCommand, GitEvent, GitResult, StaleLease } from './git-protocol.js';
+import type { InspectionCommand, InspectionEvent } from './inspection-protocol.js';
 
 export type TerminalCommand =
   | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string; directoryName?: string; git?: { binding: string; relativeDirectory: string } }
@@ -7,14 +8,16 @@ export type TerminalCommand =
   | { type: 'signal'; signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP' }
   | { type: 'eof' }
   | { type: 'heartbeat' }
-  | GitCommand;
+  | GitCommand
+  | InspectionCommand;
 
 export type TerminalEvent =
   | { type: 'ready' }
   | { type: 'output'; channel: 'stdout' | 'stderr'; data: string }
   | { type: 'exit'; code: number }
   | { type: 'error'; message: string }
-  | GitEvent;
+  | GitEvent
+  | InspectionEvent;
 
 export type TerminalReply = { ok: true; git?: GitResult } | { ok: false; error: string; stale?: StaleLease[]; busy?: 'sessions' | 'maintenance' };
 

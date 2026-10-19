@@ -1,0 +1,58 @@
+import { posix } from 'node:path';
+import { validOid, validTransferId } from './git-protocol.js';
+import { relativeProjectPath } from './git.js';
+import { validProjectName } from './project-name.js';
+
+export const MAX_INSPECTION_BYTES = 64 * 1024 * 1024;
+export const INSPECTION_CHUNK_BYTES = 32 * 1024;
+export const INSPECTION_TIMEOUT_MS = 240_000;
+export type TreeEntry = { name: string; mode: '040000' | '100644' | '100755' | '120000'; oid: string };
+export type InspectionSnapshot = {
+  version: 1; scope: string; kind: 'directory' | 'file' | 'missing' | 'ignored';
+  entry?: TreeEntry; entries: TreeEntry[]; ignored: string[];
+  head: string; branch: string | null; objectFormat: 'sha1' | 'sha256';
+  startedAt: string; finishedAt: string;
+};
+export type InspectionCommand = {
+  type: 'inspect'; id: string; directoryName: string; binding: string; scope: string; includeIgnored: boolean;
+};
+export type InspectionEvent =
+  | { type: 'inspection-chunk'; id: string; offset: number; data: string }
+  | { type: 'inspection-end'; id: string; size: number; sha256: string }
+  | { type: 'inspection-error'; id: string; message: string };
+
+export class InspectionIncomplete extends Error { readonly code = 'inspection_incomplete'; }
+
+export function inspectionScope(path = '.') {
+  if (!path || path.startsWith('/') || path.includes('\\') || path.includes('\0') || path.split('/').includes('..')) throw new Error('Inspection path must stay within the current directory.');
+  const normalized = posix.normalize(path).replace(/\/$/, '');
+  const scope = normalized === '.' ? '' : normalized;
+  if (!relativeProjectPath(scope)) throw new Error('Invalid inspection path; Git metadata cannot be inspected.');
+  return scope;
+}
+
+export function validateInspectionCommand(command: InspectionCommand) {
+  if (!command || command.type !== 'inspect' || !validTransferId(command.id) || !validProjectName(command.directoryName) ||
+      !/^[a-f0-9]{64}$/.test(command.binding) || !relativeProjectPath(command.scope) || typeof command.includeIgnored !== 'boolean') throw new Error('Invalid workspace inspection command');
+}
+
+const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+const name = (value: unknown): value is string => typeof value === 'string' && !!value && !['.', '..', '.git'].includes(value) && !value.includes('/') && !value.includes('\0');
+function entry(value: unknown): value is TreeEntry {
+  return record(value) && name(value.name) && ['040000', '100644', '100755', '120000'].includes(String(value.mode)) && validOid(value.oid);
+}
+export function validateInspectionSnapshot(value: unknown, scope: string): InspectionSnapshot {
+  if (!record(value) || value.version !== 1 || value.scope !== scope || !['directory', 'file', 'missing', 'ignored'].includes(String(value.kind)) ||
+      !Array.isArray(value.entries) || !value.entries.every(entry) || new Set(value.entries.map(item => item.name)).size !== value.entries.length ||
+      !Array.isArray(value.ignored) || !value.ignored.every(name) || !validOid(value.head) ||
+      !(value.branch === null || typeof value.branch === 'string') || !['sha1', 'sha256'].includes(String(value.objectFormat)) ||
+      typeof value.startedAt !== 'string' || !Number.isFinite(Date.parse(value.startedAt)) || typeof value.finishedAt !== 'string' || !Number.isFinite(Date.parse(value.finishedAt)) ||
+      (value.entry !== undefined && !entry(value.entry)) || (['file', 'directory'].includes(String(value.kind)) && !entry(value.entry)) ||
+      (value.kind !== 'directory' && value.entries.length !== 0)) throw new InspectionIncomplete('The runtime returned an invalid workspace inspection.');
+  if ((value.kind === 'directory' && (value.entry as TreeEntry).mode !== '040000') ||
+      (value.kind === 'file' && (value.entry as TreeEntry).mode === '040000') ||
+      (['missing', 'ignored'].includes(String(value.kind)) && value.entry !== undefined)) throw new InspectionIncomplete('The runtime returned an inconsistent entry type.');
+  const length = value.objectFormat === 'sha1' ? 40 : 64;
+  if (value.head.length !== length || value.entries.some(item => item.oid.length !== length) || value.entry && (value.entry as TreeEntry).oid.length !== length) throw new InspectionIncomplete('The runtime returned inconsistent Git object formats.');
+  return value as InspectionSnapshot;
+}

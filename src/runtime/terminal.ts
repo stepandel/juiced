@@ -9,6 +9,8 @@ import { validProjectName } from '../project-name.js';
 import { relativeProjectPath } from '../git.js';
 import { createGitRuntime, projectPaths, readBinding } from './git.js';
 import { acquireCheckout, acquireSessionCheckout, CheckoutBusy } from './project-state.js';
+import { inspectRemote } from './inspection.js';
+import { INSPECTION_TIMEOUT_MS, validateInspectionCommand } from '../inspection-protocol.js';
 
 type Work = { signal: AbortSignal; output: SessionOutput<TerminalEvent> };
 type Start = Extract<TerminalCommand, { type: 'start' }>;
@@ -236,6 +238,14 @@ export function activateTerminal(context: SessionActivationContext<TerminalComma
 
 export async function receiveTerminal(context: SessionContext<TerminalCommand, TerminalEvent, TerminalReply>): Promise<void> {
   const command = context.message.payload;
+  if (command.type === 'inspect') {
+    validateInspectionCommand(command);
+    context.activity.start(async activity => {
+      await inspectRemote(command, activity.output, activity.signal);
+    }, { timeoutMs: INSPECTION_TIMEOUT_MS });
+    context.reply({ ok: true });
+    return;
+  }
   if (command.type === 'git') {
     try {
       if (command.action === 'download') {

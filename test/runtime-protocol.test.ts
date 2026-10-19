@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +12,7 @@ import { createClient } from '@libsql/client';
 import type { WorkspaceDatabase } from '@cantelop/sdk/session';
 import { activateTerminal, receiveTerminal } from '../src/runtime/terminal.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
+import { discoverRepository, git, sha256 } from '../src/git.js';
 
 test('native runtime keeps terminal work alive after start intake and handles input, heartbeat, output acknowledgments and exit', { timeout: 10_000 }, async t => {
   const previousDirectory = process.cwd();
@@ -111,4 +112,45 @@ test('native runtime routes Git maintenance without starting Claude and returns 
   assert.deepEqual(await call({ ...base, action: 'status' }), { ok: true, git: { status: { initialized: false } } });
   assert.deepEqual(await call({ ...base, action: 'export', id: randomUUID(), known: 'b'.repeat(40) }), { ok: false, error: 'Initialize or recover this Git workspace before importing commits.' });
   assert.equal((await request('/__cantelop/v2/runtime')).activity, null);
+});
+
+test('native runtime streams a Git inspection without database access or starting Claude', { timeout: 15_000 }, async t => {
+  const previous = process.cwd();
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'juiced-inspect-native-'))), target = join(root, 'project');
+  await mkdir(target); await git(target, ['init', '-b', 'main']);
+  await git(target, ['config', 'user.name', 'Native Test']); await git(target, ['config', 'user.email', 'test@example.test']);
+  await writeFile(join(target, 'file.txt'), 'base\n'); await git(target, ['add', '.']); await git(target, ['commit', '-m', 'base']);
+  const repository = (await discoverRepository(target))!;
+  await mkdir(join(root, '.juiced', 'project'), { recursive: true });
+  await writeFile(join(root, '.juiced', 'project', 'binding.json'), JSON.stringify({ version: 1, binding: repository.binding, sourceBranch: 'main' }));
+  const index = await readFile(join(target, '.git', 'index'));
+  process.chdir(root);
+  const sandboxId = `sbx-${'5'.repeat(32)}`;
+  const noDatabase = async (): Promise<WorkspaceDatabase> => { throw new Error('Inspection must not access the database'); };
+  const server = createServer(createSessionRuntimeHandler<TerminalCommand, TerminalEvent, TerminalReply>({
+    onActivate(context) { activateTerminal({ ...context, database: noDatabase }); },
+    receive(context) { return receiveTerminal({ ...context, database: noDatabase }); },
+  }, { sandboxId, env: { CLAUDE_PATH: '/missing-provider-binary' } }));
+  t.after(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); process.chdir(previous); await rm(root, { recursive: true, force: true }); });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const request = async (path: string, body?: unknown) => {
+    const response = await fetch(`http://127.0.0.1:${address.port}${path}`, { headers: { 'X-Cantelop-Sandbox-ID': sandboxId, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }), signal: AbortSignal.timeout(3000) });
+    assert.ok(response.ok); return response.json();
+  };
+  const message = `msg_${randomUUID().replaceAll('-', '')}`, inspection = randomUUID();
+  await request('/__cantelop/v2/messages', { session: { id: 'inspection-test', workspace_id: `wsp_${'6'.repeat(32)}`, keep_alive_seconds: 120 }, message: { id: message, payload: { type: 'inspect', id: inspection, directoryName: 'project', binding: repository.binding, scope: '', includeIgnored: false } }, reply: true });
+  const events: TerminalEvent[] = []; let cursor = 0;
+  for (let i = 0; i < 200 && !events.some(event => event.type === 'inspection-end'); i++) {
+    const batch = await request(`/__cantelop/v2/runtime/events?after=${cursor}&wait=0`);
+    for (const item of batch.events) { events.push(item.event); cursor = item.cursor; }
+    if (batch.events.length) await request('/__cantelop/v2/runtime/events/ack', { through: cursor });
+    await delay(5);
+  }
+  assert.deepEqual(await request(`/__cantelop/v2/messages/${message}/reply`), { reply: { ok: true } });
+  assert.ok(events.every(event => event.type === 'inspection-chunk' || event.type === 'inspection-end'));
+  const bytes = Buffer.concat(events.filter(event => event.type === 'inspection-chunk').map(event => Buffer.from(event.data, 'base64')));
+  assert.deepEqual(events.at(-1), { type: 'inspection-end', id: inspection, size: bytes.length, sha256: sha256(bytes) });
+  assert.equal(JSON.parse(bytes.toString()).entries[0].name, 'file.txt');
+  assert.deepEqual(await readFile(join(target, '.git', 'index')), index);
 });
