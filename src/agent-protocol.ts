@@ -30,6 +30,18 @@ export class ClaudeDecoder {
 
 export type Approval = { id: string; tool: string; input: ClaudeFrame; description: string };
 export type SlashCommand = { name: string; description: string; argumentHint: string };
+export type ModelOption = { value: string; displayName: string; description: string };
+
+export function modelOptions(value: unknown): ModelOption[] {
+  if (!Array.isArray(value)) return [];
+  const models = new Map<string, ModelOption>();
+  for (const raw of value) {
+    const model = object(raw);
+    if (typeof model.value !== 'string' || !model.value || /\s|[\x00-\x1f\x7f-\x9f]/u.test(model.value)) continue;
+    models.set(model.value, { value: model.value, displayName: typeof model.displayName === 'string' ? model.displayName : model.value, description: typeof model.description === 'string' ? model.description : '' });
+  }
+  return [...models.values()];
+}
 
 export function slashCommands(value: unknown): SlashCommand[] {
   if (!Array.isArray(value)) return [];

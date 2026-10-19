@@ -3,6 +3,7 @@ import type { Editor } from './editor.js';
 
 const local: SlashCommand[] = [
   { name: 'help', description: 'Show Juiced keyboard shortcuts', argumentHint: '' },
+  { name: 'model', description: 'Choose the model for this session', argumentHint: '[name]' },
   { name: 'exit', description: 'Disconnect and stop Claude', argumentHint: '' },
   { name: 'quit', description: 'Disconnect and stop Claude', argumentHint: '' },
 ];

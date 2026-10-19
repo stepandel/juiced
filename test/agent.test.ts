@@ -3,7 +3,7 @@ import { EventEmitter, once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import type { SessionEvent } from '@cantelop/sdk';
-import { ClaudeDecoder, headlessArguments, object, slashCommands, useLocalTui, type ClaudeFrame } from '../src/agent-protocol.js';
+import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, useLocalTui, type ClaudeFrame } from '../src/agent-protocol.js';
 import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
 import type { TerminalCommand, TerminalEvent } from '../src/protocol.js';
 
@@ -12,7 +12,7 @@ export async function until(check: () => boolean, ms = 2000) {
   while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
 }
 
-function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}, initialization: ClaudeFrame = {}) {
+function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}, initialization: ClaudeFrame = {}, modelResponse: 'success' | 'error' | 'pending' = 'success') {
   const emitted = new EventEmitter();
   const events: SessionEvent<TerminalEvent>[] = [];
   const frames: ClaudeFrame[] = [];
@@ -34,6 +34,10 @@ function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}, ini
       if (command.type === 'input') for (const frame of decoder.push(Buffer.from(command.data, 'base64'))) {
         frames.push(frame);
         if (frame.type === 'control_request') {
+          if (object(frame.request).subtype === 'set_model' && modelResponse === 'pending') continue;
+          if (object(frame.request).subtype === 'set_model' && modelResponse === 'error') {
+            output({ type: 'control_response', response: { subtype: 'error', request_id: frame.request_id, error: 'Model unavailable' } }); continue;
+          }
           output({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response: object(frame.request).subtype === 'initialize' ? initialization : {} } });
         }
       }
@@ -95,6 +99,65 @@ test('command metadata tolerates missing fields and rejects invalid names', () =
   assert.deepEqual(slashCommands([null, {}, { name: 4 }, { name: '/help' }, { name: 'bad\nname' }, { name: '\x1b[31mevil' }, 'compact', 'compact', { name: 'plugin:review', description: false, argumentHint: 3 }]), [
     { name: 'compact', description: '', argumentHint: '' },
     { name: 'plugin:review', description: '', argumentHint: '' },
+  ]);
+});
+
+test('models come from Claude and switching uses a control request in the same conversation', async t => {
+  const models = [
+    { value: 'default', displayName: 'Default', description: 'Use the default model' },
+    { value: 'sonnet', displayName: 'Sonnet', description: 'Efficient for routine tasks' },
+  ];
+  let syncs = 0;
+  const f = fixture({ beforeSubmit: async () => { syncs++; } }, { models });
+  t.after(() => f.agent.close());
+  await f.agent.start(['--model', 'opus']);
+  assert.deepEqual(f.agent.models, models);
+  assert.equal(f.agent.model, 'opus');
+  await f.agent.setModel('sonnet');
+  assert.equal(f.agent.model, 'sonnet');
+  assert.equal(f.agent.status, 'ready');
+  assert.deepEqual(object(f.frames.at(-1)?.request), { subtype: 'set_model', model: 'sonnet' });
+  assert.equal(f.frames.some(frame => frame.type === 'user'), false, 'A model change must not submit a model prompt');
+  assert.equal(syncs, 0, 'Changing a model does not require a project transfer');
+  await f.agent.submit('Continue the conversation');
+  assert.equal(object(f.frames.at(-1)?.message).content, 'Continue the conversation');
+  assert.equal(f.commands.filter(command => command.type === 'start').length, 1, 'Switching must retain the remote process');
+});
+
+test('model changes wait for confirmation and block concurrent submissions', async t => {
+  const f = fixture({}, {}, 'pending');
+  t.after(() => f.agent.close());
+  await f.agent.start(['--model=opus']);
+  const changing = f.agent.setModel('sonnet');
+  await until(() => object(f.frames.at(-1)?.request).subtype === 'set_model');
+  assert.equal(f.agent.status, 'configuring');
+  assert.equal(f.agent.model, 'opus', 'The current model changes only after acknowledgment');
+  await assert.rejects(f.agent.submit('too early'), /still working/);
+  await assert.rejects(f.agent.setModel('haiku'), /Wait for Claude/);
+  const request = f.frames.at(-1)!;
+  f.output({ type: 'control_response', response: { subtype: 'success', request_id: request.request_id, response: {} } });
+  await changing;
+  assert.equal(f.agent.model, 'sonnet');
+  assert.equal(f.agent.status, 'ready');
+});
+
+test('rejected model changes preserve the current model and leave the session usable', async t => {
+  const f = fixture({}, {}, 'error');
+  t.after(() => f.agent.close());
+  await f.agent.start();
+  for (const value of ['', 'sonnet extra', 'sonnet\n', '\x1b[31msonnet']) await assert.rejects(f.agent.setModel(value), /one model/);
+  await assert.rejects(f.agent.setModel('provider.custom-model'), /Model unavailable/);
+  assert.equal(f.agent.model, 'default');
+  assert.equal(f.agent.status, 'ready');
+  await f.agent.submit('Still usable');
+  assert.equal(object(f.frames.at(-1)?.message).content, 'Still usable');
+});
+
+test('model metadata uses provider names without inventing a fallback catalog', () => {
+  assert.deepEqual(modelOptions(undefined), []);
+  assert.deepEqual(modelOptions([null, {}, { value: '' }, { value: 'bad\nmodel' }, { value: 'custom', description: 7 }, { value: 'sonnet', displayName: 'Sonnet', description: 'A model' }]), [
+    { value: 'custom', displayName: 'custom', description: '' },
+    { value: 'sonnet', displayName: 'Sonnet', description: 'A model' },
   ]);
 });
 

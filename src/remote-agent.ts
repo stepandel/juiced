@@ -3,10 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionEventCursor, SessionRef } from '@cantelop/sdk';
 import { MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
-import { ClaudeDecoder, headlessArguments, object, slashCommands, type Approval, type ClaudeFrame, type SlashCommand } from './agent-protocol.js';
+import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, type Approval, type ClaudeFrame, type ModelOption, type SlashCommand } from './agent-protocol.js';
 
 export type AgentSession = Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'>;
-export type AgentStatus = 'connecting' | 'ready' | 'working' | 'interrupting' | 'closed' | 'failed';
+export type AgentStatus = 'connecting' | 'ready' | 'working' | 'configuring' | 'interrupting' | 'closed' | 'failed';
 type Control = { resolve(value: ClaudeFrame): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> };
 class RemoteProcessError extends Error {}
 
@@ -15,6 +15,8 @@ export class RemoteAgent extends EventEmitter {
   status: AgentStatus = 'connecting';
   readonly approvals = new Map<string, Approval>();
   commands: SlashCommand[] = [];
+  models: ModelOption[] = [];
+  model = 'default';
   private controller = new AbortController();
   private decoder = new ClaudeDecoder();
   private controls = new Map<string, Control>();
@@ -50,6 +52,10 @@ export class RemoteAgent extends EventEmitter {
   async start(argv: string[] = []): Promise<void> {
     if (this.started) throw new Error('The agent has already started');
     this.started = true;
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === '--model' && argv[i + 1]) this.model = argv[++i]!;
+      else if (argv[i]!.startsWith('--model=')) this.model = argv[i]!.slice('--model='.length);
+    }
     try {
       const reply = await this.session.request({ type: 'start', argv: headlessArguments(argv), tty: false, columns: 120, rows: 36, term: 'dumb', ...(this.options.directoryName ? { directoryName: this.options.directoryName } : {}), ...(this.options.git ? { git: this.options.git } : {}) }, { timeoutMs: 120_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(125_000)]) });
       if (reply?.ok !== true) throw new Error('Cantelop could not start Claude');
@@ -61,6 +67,9 @@ export class RemoteAgent extends EventEmitter {
       this.heartbeat.unref();
       const initialized = await this.control({ subtype: 'initialize', hooks: null });
       this.updateCommands(initialized.commands);
+      this.models = modelOptions(initialized.models);
+      this.emit('models', this.models);
+      this.emit('model', this.model);
       this.setStatus('ready');
     } catch (error) { this.fail(error); throw error; }
   }
@@ -110,6 +119,19 @@ export class RemoteAgent extends EventEmitter {
         clearTimeout(timer); this.controls.delete(id); reject(error);
       });
     });
+  }
+
+  async setModel(model: string): Promise<void> {
+    if (this.status !== 'ready') throw new Error('Wait for Claude to finish before switching models');
+    if (!model || /\s|[\x00-\x1f\x7f-\x9f]/u.test(model)) throw new Error('Specify one model alias or full model ID');
+    this.setStatus('configuring');
+    try {
+      await this.control({ subtype: 'set_model', model });
+      this.model = model;
+      this.emit('model', model);
+    } finally {
+      if (!this.controller.signal.aborted) this.setStatus('ready');
+    }
   }
 
   async submit(text: string): Promise<void> {
