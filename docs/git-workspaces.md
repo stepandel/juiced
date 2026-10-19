@@ -172,7 +172,7 @@ branches, and previously imported Git refs are retained.
 Deletion uses the SDK's `workspace.inspect()` and `workspace.delete()` with
 the same configured app credentials as Juiced's other SDK operations. It does
 not shell out to Cantelop or require account login or Claude sign-in. Juiced
-uses the published SDK 1.3.0 release, which includes
+uses the published SDK 1.4.0 release, which includes
 [SDK PR #57](https://github.com/stepandel/cantelop-sdk/pull/57).
 
 Platform support was added in

@@ -79,7 +79,7 @@ platform and Juiced runtime once; later token rotations are configuration update
 
 ## Use
 
-Arguments after `claude` configure the remote Claude process, except for Juiced's reserved subcommands and leading `--new` option. Use `juiced claude -- login` to send a literal prompt named `login`. Interactive launches add the JSON transport flags needed by the local UI. Explicit print/introspection/output-format invocations use native passthrough:
+Arguments after `claude` configure the remote Claude process, except for Juiced's reserved `login`, `sync`, `fast-forward`, `delete`, `ls`, and `peek` subcommands and the leading `--new` option. Use `juiced claude -- login` to send a literal prompt named `login`. Interactive launches add the JSON transport flags needed by the local UI. Explicit print/introspection/output-format invocations use native passthrough:
 
 ```sh
 juiced claude --model sonnet
@@ -178,6 +178,50 @@ A Claude process exits after two minutes idle; the next prompt or menu request r
 
 For another machine, configure Cantelop's app integration profile or supply `CANTELOP_APP_SLUG` and `CANTELOP_INTEGRATION_TOKEN`, with `CANTELOP_EDGE_URL` for a local endpoint. The compiled CLI already carries its runtime identity. Keep app tokens private; they grant access to the app's workspaces. `CANTELOP_PROFILE` selects a configured profile.
 
+## Inspect a workspace
+
+```sh
+juiced claude ls
+juiced claude peek
+juiced claude peek --changes-only
+juiced claude peek src/
+```
+
+`ls` lists the immediate remote entries. `peek` compares immediate local and
+remote entries side by side, including matching rows; `--changes-only` hides the
+matches. A directory row summarizes its descendants, so you drill down one level
+at a time by passing a path. Both commands read current Git-visible contents
+through the SDK without synchronizing files, changing the real index, or starting
+Claude, and neither needs Claude sign-in. Ignored untracked files are excluded;
+`--include-ignored` requires an explicit path. A completed view exits 0 even when
+it shows differences, while incomplete or excluded comparisons exit 2. See
+[workspace inspection](docs/workspace-inspection.md) for the comparison symbols,
+snapshot semantics, and limitations.
+
+## Delete a workspace
+
+```sh
+juiced claude delete
+juiced --workspace my-project claude delete
+# Explicit confirmation for scripts:
+juiced claude delete --yes
+```
+
+Deletion removes the entire remote workspace: its sessions, all project folders,
+remote Git history, uncommitted edits, Claude login, and database data. It prints
+the slug and canonical workspace ID, then asks you to type the slug; scripts must
+pass `--yes`. An absent workspace is a no-op and is never created just to be
+deleted. Local files, branches, and previously imported Git refs are kept, so
+import any remote commits you want to keep before deleting. Remote purge is
+asynchronous; a later launch creates a fresh workspace and requires Claude
+sign-in again.
+
+Deletion uses the SDK's `workspace.inspect()` and `workspace.delete()` with the
+same app credentials as Juiced's other SDK operations, without shelling out to
+Cantelop or needing account login. It needs an App Edge built with SDK 1.3.0 or
+newer; local `cantelop dev` returns
+`workspace_deletion_unavailable_in_local_dev`.
+
 ## Development
 
 ```sh
@@ -191,6 +235,29 @@ node bin/juiced.mjs --help
 After deployment, `npm link`, and `juiced claude login`, run `npm run test:live` to verify the installed command against Cantelop. It checks the remote Claude version and sends a small real prompt through stdin, asserting the exact streamed response and a successful exit. This uses your Claude subscription.
 
 `npm run test:agent:live` separately verifies the headless handshake, two turns sharing conversation context, explicit denial followed by approval of a remote Write, and interruption followed by another successful turn. It uses the configured workspace and Claude subscription, then verifies and removes its uniquely named smoke-test file with an explicitly approved Bash command.
+
+`npm run test:git:live` uses a uniquely named disposable Git project in
+`JUICED_WORKSPACE` (default `default`), which must already be signed in to
+Claude. It approves only exact fixture Bash commands, checks two concurrent
+sessions sharing one checkout, imports and fast-forwards an agent commit, and
+removes its remote fixture. It uses the Claude subscription.
+
+`npm run test:delete:local` exercises workspace deletion against a loopback
+fixture. `npm run test:delete:live` uses the configured app credentials to create
+its own randomly named disposable workspaces, then checks missing-workspace
+behavior, confirmation, deletion, database isolation on slug reuse, safe retries
+against the old ID, and local file preservation. Its child CLI runs with an empty
+PATH and no account credentials; it never starts Claude and cleans up its remote
+fixtures.
+
+`npm run test:inspection:local` covers `ls` and `peek`: the native runtime
+handler and session activity, plus the built CLI through the real SDK Edge
+adapter into a disposable platform fixture whose PATH contains Git only, with no
+account credentials or Cantelop CLI. It verifies that fixture working trees and
+Git directories keep their original bytes and metadata. These fixtures do not
+deploy a hosted release. `node --import tsx scripts/probe-workspace-inspection.mjs`
+regenerates the design evidence behind
+[workspace inspection](docs/workspace-inspection.md) and is not part of the CLI.
 
 Set `JUICED_DEBUG=1` to log session IDs, command types, request timing, and transport errors to stderr. Terminal input contents are excluded from these diagnostics.
 
@@ -226,6 +293,31 @@ Menus share a local renderer and command adapters. Opening a data view fetches a
 Live execution requires deploying the runtime and completing Claude sign-in. Local tests do not verify the hosted platform or your Claude subscription.
 
 ## Hosted verification
+
+Workspace deletion was verified on October 19, 2026 against release v9
+(`rel_b499d9481549a7f859bee02a37326346`) with SDK 1.3.0, alongside 87 local
+tests, the type check, and both builds. The check covered read-only inspection
+of a missing workspace without provisioning, a no-op deletion of an absent
+workspace with an empty PATH, refusal to delete noninteractively without
+`--yes`, deletion without a Cantelop CLI or account login, a fresh database on
+slug reuse, a safe retry against the old canonical ID leaving its replacement
+intact, and unchanged local files. Both disposable workspace IDs were archived
+for asynchronous purge.
+[Deletion evidence](diagnostics/workspace-delete-2026-10-19.json).
+
+Git workspaces were verified on October 19, 2026 against release v8
+(`rel_a8791118a314bb0d4dbc310041d12810`), alongside 59 local tests and both
+builds, with no platform or SDK changes required. It transferred an unpublished
+`HEAD` and staged snapshot without changing the local index, attached two
+separate Claude sessions to one checkout, refused outbound checkout replacement
+while they were active, imported a remote commit with its original identity,
+refused a fast-forward over dirty local work and then advanced the clean source
+branch, and completed an outbound sync once both sessions closed.
+[Git evidence](diagnostics/git-release-2026-10-19.json).
+
+Workspace inspection (`ls` and `peek`) is verified locally only, with 99 passing
+tests on October 19, 2026 and no hosted deployment. See
+[the inspection evidence](diagnostics/workspace-inspection-2026-10-19.json).
 
 Release v4 (`rel_0760c39bd457205a9bdbf5a8f1a9d56c`) was activated on October 16,
 2026 with published SDK 1.2.0. Signed and notarized Cantelop CLI 0.16.1
