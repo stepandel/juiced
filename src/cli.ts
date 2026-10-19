@@ -12,6 +12,7 @@ import { createGitSession, GitWorkspaceClient } from './git-workspace.js';
 import { deleteWorkspace } from './delete-workspace.js';
 import { inspectWorkspace } from './inspect-workspace.js';
 import { syncFiles } from './file-sync.js';
+import { agentSessionId } from './session-state.js';
 
 const controller = new AbortController();
 let interrupted = 0;
@@ -64,15 +65,18 @@ try {
           }
         } finally { await client.close().catch(() => {}); }
       } else {
-        if (repository) {
+        const localTui = useLocalTui(args.argv, Boolean(process.stdin.isTTY && process.stdout.isTTY));
+        if (args.resume && !localTui) throw new Error('Juiced session recovery requires an interactive terminal.');
+        if (repository && !args.resume) {
           if (process.stderr.isTTY) process.stderr.write(`Preparing Git workspace ${project.remoteDirectory}…\n`);
           const client = new GitWorkspaceClient(workspace, project, repository, controller.signal);
           try { await client.send(false, true); } finally { await client.close().catch(() => {}); }
         }
-        const session = repository ? createGitSession(workspace, project) : workspace.session({ keepAliveSeconds: 120 });
+        const id = localTui ? await agentSessionId(project, args.resume, args.session) : undefined;
+        const session = repository ? createGitSession(workspace, project, id) : workspace.session({ keepAliveSeconds: 120, ...(id ? { id } : {}) });
         const directoryName = introspection ? undefined : project.directoryName;
         const git = repository ? { binding: repository.binding, relativeDirectory: repository.relativeDirectory } : undefined;
-        process.exitCode = useLocalTui(args.argv, Boolean(process.stdin.isTTY && process.stdout.isTTY))
+        process.exitCode = localTui
           ? await runLocalTui(new RemoteAgent(session, { ...(directoryName ? { directoryName } : {}), ...(git ? { git } : {}) }), args.argv, project.workspace, process, controller.signal)
           : await runRemoteTerminal(session, args.argv, process, { ...(directoryName ? { directoryName } : {}), ...(git ? { git } : {}), signal: controller.signal, term: process.env.TERM ?? 'xterm-256color' });
       }

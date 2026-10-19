@@ -1,0 +1,276 @@
+import assert from 'node:assert/strict';
+import { EventEmitter, once } from 'node:events';
+import { mkdtemp, mkdir, writeFile, rm, appendFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import test from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
+import type { SessionContext, SessionHarnessContext } from '@cantelop/sdk/session';
+import type { SessionEvent, SessionEventCursor } from '@cantelop/sdk';
+import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
+import { ClaudeDecoder, object, type ClaudeFrame } from '../src/agent-protocol.js';
+import { createDurableAgent } from '../src/runtime/durable-agent.js';
+import { AgentJournal } from '../src/runtime/agent-journal.js';
+import type { createTerminal } from '../src/runtime/terminal.js';
+import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
+import { agentSessionId } from '../src/session-state.js';
+import { parseArguments } from '../src/args.js';
+
+async function until(check: () => boolean, ms = 10_000) {
+  const end = Date.now() + ms;
+  while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
+}
+
+async function fixture(t: test.TestContext, idleTimeoutMs = 60_000) {
+  const root = await mkdtemp('/tmp/juiced-durable-');
+  const lifetime = new AbortController(), events = new EventEmitter();
+  const stored: SessionEvent<TerminalEvent>[] = [];
+  const prompts: string[] = [], launches: string[][] = [], requests: TerminalCommand[] = [];
+  const requestIds: Array<{ command: TerminalCommand; id: string | undefined }> = [];
+  let currentOutput: { send(event: TerminalEvent): Promise<void> };
+  let clientOffline = false, loseReply = false, expired = false, stops = 0, initializations = 0;
+  let viewCursor: SessionEventCursor | undefined;
+  let viewState: unknown;
+  let activityTimeout = 0;
+  const output = { async send(data: TerminalEvent) {
+    stored.push({ data, sessionId: 'test', messageId: `msg_${'1'.repeat(32)}`, createdAt: new Date(), cursor: { streamId: 'a'.repeat(32), sequence: stored.length + 1 } });
+    events.emit('event');
+  } };
+  const raw = async (value: Buffer) => currentOutput.send({ type: 'output', channel: 'stdout', data: value.toString('base64') });
+  const frame = async (value: ClaudeFrame) => raw(Buffer.from(JSON.stringify(value) + '\n'));
+  const context = { signal: lifetime.signal, session: { id: 'test', keepAliveSeconds: 120 }, env: {}, database: async () => { throw new Error('unused'); } } as SessionHarnessContext;
+  const factory = () => {
+    let decoder = new ClaudeDecoder(), finish!: () => void;
+    const done = new Promise<void>(resolve => { finish = resolve; });
+    return {
+      async run(command: Extract<TerminalCommand, { type: 'start' }>, work: { output: typeof output; signal: AbortSignal }) {
+        launches.push(command.argv); currentOutput = work.output;
+        await work.output.send({ type: 'ready' });
+        const abort = () => finish();
+        work.signal.addEventListener('abort', abort, { once: true });
+        try { await done; } finally { work.signal.removeEventListener('abort', abort); }
+        return { ok: true };
+      },
+      async input(command: TerminalCommand) {
+        if (command.type === 'eof') { finish(); return { ok: true }; }
+        if (command.type !== 'input') return { ok: true };
+        for (const value of decoder.push(Buffer.from(command.data, 'base64'))) {
+          if (value.type === 'control_request') {
+            const subtype = object(value.request).subtype;
+            if (subtype === 'initialize') initializations++;
+            await frame({ type: 'control_response', response: { subtype: 'success', request_id: value.request_id,
+              response: subtype === 'initialize' ? { commands: [{ name: 'compact' }], models: [{ value: 'sonnet' }] } : {} } });
+          } else if (value.type === 'user') {
+            prompts.push(String(object(value.message).content));
+            const argv = launches.at(-1)!;
+            const id = argv.at(-1)!;
+            await mkdir(join(root, '.claude', 'projects', 'test'), { recursive: true });
+            await writeFile(join(root, '.claude', 'projects', 'test', `${id}.jsonl`), 'native checkpoint');
+            await frame({ type: 'user', uuid: value.uuid, message: { role: 'user', content: object(value.message).content } });
+          }
+        }
+        return { ok: true };
+      },
+      cancel() { finish(); return true; },
+    } as unknown as ReturnType<typeof createTerminal>;
+  };
+  const service = createDurableAgent(context, factory, root, { idleTimeoutMs });
+  let activity = Promise.resolve();
+  const intake = { ...context, output, activity: { queue(work: (context: unknown) => Promise<void>, options: { timeoutMs: number }) {
+    activityTimeout = options.timeoutMs;
+    activity = activity.then(() => work({ output, signal: lifetime.signal, view: { async commit(state: unknown) { viewState = state; viewCursor = stored.at(-1)?.cursor; } } }));
+    void activity.catch(() => {});
+  } } } as unknown as SessionContext<TerminalCommand, TerminalEvent, TerminalReply>;
+  const network = () => { if (clientOffline) throw new Error('network unavailable'); };
+  const session: AgentSession = {
+    id: 'test',
+    async request(command, options) {
+      network(); requests.push(command); requestIds.push({ command, id: options?.id });
+      if (command.type === 'start') return service.open(command, intake);
+      if (command.type === 'agent-replay') return service.replay(command.after);
+      if (command.type === 'save-settings') return service.input(command);
+      if (command.type === 'agent-input') {
+        await service.send(command);
+        if (loseReply && command.frame.type === 'user') { loseReply = false; throw new Error('network response lost'); }
+      }
+      return { ok: true };
+    },
+    async dispatch() { throw new Error('Durable input must await an idempotent application receipt'); },
+    async view() {
+      network();
+      if (!viewCursor) throw Object.assign(new Error('missing view'), { code: 'session_view_not_found', status: 404 });
+      return { revision: 'view', updatedAt: new Date(), state: viewState, cursor: viewCursor };
+    },
+    async *stream(options) {
+      network();
+      if (expired) { expired = false; throw Object.assign(new Error('expired'), { code: 'event_cursor_expired', status: 409 }); }
+      let index = options?.after?.sequence ?? 0;
+      while (!options?.signal?.aborted) {
+        network();
+        if (!stored[index]) await once(events, 'event', { signal: options?.signal });
+        network();
+        if (expired) { expired = false; throw Object.assign(new Error('expired'), { code: 'event_cursor_expired', status: 409 }); }
+        if (stored[index]) yield stored[index++]!;
+      }
+    },
+    async stop() { stops++; lifetime.abort(); await activity; },
+  };
+  const agent = new RemoteAgent(session, { controlTimeoutMs: 10_000 });
+  const received: ClaudeFrame[] = [];
+  agent.on('frame', value => received.push(value));
+  t.after(async () => { await agent.close(false); lifetime.abort(); await activity; await service.dispose(); await rm(root, { recursive: true, force: true }); });
+  return { root, agent, session, service, frame, raw, prompts, launches, requests, requestIds, received,
+    get stops() { return stops; }, get initializations() { return initializations; }, get activityTimeout() { return activityTimeout; },
+    offline(value: boolean) { clientOffline = value; events.emit('event'); },
+    loseReply() { loseReply = true; },
+    expireStream() { expired = true; events.emit('event'); },
+  };
+}
+
+test('a disconnected client does not own work lifetime; missed output is paginated and deduplicated', { timeout: 20_000 }, async t => {
+  const f = await fixture(t);
+  await f.agent.start(); await f.agent.submit('Keep working while the laptop sleeps');
+  assert.equal(f.activityTimeout, 24 * 60 * 60 * 1000);
+  f.offline(true);
+  for (let index = 0; index < 330; index++) await f.frame({ type: 'assistant', message: { id: `answer-${index}`, content: [{ type: 'text', text: `${index} ` + '🍈'.repeat(1000) }] } });
+  await f.frame({ type: 'result', result: 'Complete' });
+  assert.equal(f.stops, 0); assert.equal(f.prompts.length, 1);
+  f.offline(false);
+  await until(() => f.received.some(value => value.type === 'result'));
+  assert.equal(f.received.filter(value => value.type === 'assistant').length, 330);
+  assert.equal(f.received.filter(value => value.type === 'result').length, 1);
+  assert.equal(f.prompts.length, 1);
+  assert.equal(f.requests.some(value => value.type === 'heartbeat'), false);
+  assert.ok(f.requests.filter(value => value.type === 'agent-replay').length > 10);
+});
+
+test('an ambiguous input acknowledgment retries the same identity without delivering twice', async t => {
+  const f = await fixture(t); await f.agent.start();
+  f.loseReply(); await f.agent.submit('Only once');
+  assert.deepEqual(f.prompts, ['Only once']);
+  const sent = f.requestIds.filter(value => value.command.type === 'agent-input' && value.command.frame.type === 'user');
+  assert.equal(sent.length, 2); assert.equal(sent[0]?.id, sent[1]?.id);
+});
+
+test('connection retries continue beyond three attempts and remain cancellable', { timeout: 10_000 }, async t => {
+  const f = await fixture(t); let reconnects = 0;
+  f.agent.on('reconnecting', () => reconnects++); f.offline(true);
+  const started = f.agent.start();
+  await until(() => reconnects >= 4); assert.equal(f.stops, 0);
+  f.offline(false); await started; assert.equal(f.agent.status, 'ready');
+});
+
+test('input receipts reject conflicting payloads and stale native process epochs', async t => {
+  const f = await fixture(t); await f.agent.start(); await f.agent.submit('Original');
+  const receipt = f.requestIds.find(value => value.command.type === 'agent-input' && value.command.frame.type === 'user')!.command;
+  assert.equal(receipt.type, 'agent-input');
+  if (receipt.type !== 'agent-input') return;
+  await assert.rejects(f.service.send({ ...receipt, frame: { type: 'user', message: { content: 'Different' } } }), /identity conflict/);
+  await assert.rejects(f.service.send({ ...receipt, id: randomUUID(), epoch: randomUUID() }), /process changed/);
+  assert.deepEqual(f.prompts, ['Original']);
+});
+
+test('permission answers cannot splice native output split inside a UTF-8 JSON frame', async t => {
+  const f = await fixture(t); await f.agent.start(); await f.agent.submit('Permission');
+  await f.frame({ type: 'control_request', request_id: 'approve', request: { subtype: 'can_use_tool', tool_name: 'Write', input: {} } });
+  await until(() => f.agent.approvals.has('approve'));
+  const output = Buffer.from(JSON.stringify({ type: 'assistant', message: { id: 'split', content: [{ type: 'text', text: 'A split 🍈 response' }] } }) + '\n');
+  const split = output.indexOf(Buffer.from('🍈')) + 1;
+  await f.raw(output.subarray(0, split)); await f.agent.answer('approve', false);
+  await f.raw(output.subarray(split)); await f.frame({ type: 'result', result: 'Complete' });
+  await until(() => f.received.some(value => value.type === 'result'));
+  const assistant = f.received.filter(value => value.type === 'assistant');
+  assert.equal(assistant.length, 1); assert.match(JSON.stringify(assistant), /A split 🍈 response/);
+});
+
+test('an expired transport cursor recovers journal history without duplicating a completed turn', async t => {
+  const f = await fixture(t); await f.agent.start(); await f.agent.submit('First');
+  await f.frame({ type: 'result', result: 'One completed turn' });
+  await until(() => f.received.some(value => value.type === 'result'));
+  const before = f.requests.filter(value => value.type === 'agent-replay').length;
+  f.expireStream();
+  await until(() => f.requests.filter(value => value.type === 'agent-replay').length > before);
+  await f.agent.submit('Second'); await f.frame({ type: 'result', result: 'Two' });
+  await until(() => f.received.filter(value => value.type === 'result').length === 2);
+  assert.deepEqual(f.prompts, ['First', 'Second']);
+});
+
+test('reattachment restores the whole conversation and pending permissions without starting another process', async t => {
+  const f = await fixture(t); await f.agent.start(); await f.agent.submit('Wait for approval');
+  await f.frame({ type: 'control_request', request_id: 'permission', request: { subtype: 'can_use_tool', tool_name: 'Write', input: { file_path: 'test' } } });
+  await until(() => f.agent.approvals.size === 1); await f.agent.close(false);
+  const next = new RemoteAgent(f.session); t.after(() => next.close(false));
+  const frames: ClaudeFrame[] = []; next.on('frame', frame => frames.push(frame));
+  await next.start();
+  assert.equal(next.status, 'working'); assert.equal(next.approvals.size, 1);
+  assert.equal(f.launches.length, 1); assert.equal(f.initializations, 1);
+  assert.ok(frames.some(value => value.type === 'juiced_user' && value.text === 'Wait for approval'));
+  await next.answer('permission', false);
+  await until(() => next.approvals.size === 0);
+});
+
+test('idle processes exit and the next prompt resumes the native conversation', async t => {
+  const f = await fixture(t, 50); await f.agent.start(); await f.agent.submit('First');
+  await f.frame({ type: 'result', result: 'Saved first turn' });
+  await until(() => !f.service.active);
+  await f.agent.submit('Second');
+  assert.equal(f.launches.length, 2);
+  assert.equal(f.launches[0]?.at(-1), f.launches[1]?.at(-1));
+  assert.ok(f.launches[1]?.includes('--resume'));
+  assert.deepEqual(f.prompts, ['First', 'Second']);
+});
+
+test('confirmed menu model choices override launch flags after idle native resumption', async t => {
+  const f = await fixture(t, 50); await f.agent.start(['--model', 'opus']);
+  await f.agent.setModel('sonnet'); await f.agent.submit('First');
+  await f.frame({ type: 'result', result: 'Saved' }); await until(() => !f.service.active);
+  await f.agent.submit('Second');
+  const argv = f.launches.at(-1)!;
+  assert.equal(argv[argv.indexOf('--model') + 1], 'sonnet');
+  assert.ok(argv.includes('--resume'));
+});
+
+test('journal replacement retains all bytes, repairs a partial final append, and preserves uncertain input receipts', async t => {
+  const root = await mkdtemp('/tmp/juiced-journal-');
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const first = new AgentJournal(root, 'session'); await first.open();
+  await first.input('input', 'hash', 'epoch', false);
+  for (let index = 0; index < 300; index++) await first.event({ type: 'bytes', channel: 'stdout', data: Buffer.from('🍈'.repeat(1000)).toString('base64') });
+  await first.close();
+  const { createHash } = await import('node:crypto');
+  await appendFile(join(root, '.juiced', 'sessions', createHash('sha256').update('session').digest('hex'), 'events.jsonl'), '{"incomplete');
+  const next = new AgentJournal(root, 'session'); await next.open();
+  assert.equal(next.latest, 300); assert.equal(next.inputs.get('input')?.delivered, false);
+  let after = 0;
+  while (after < next.latest) { const page = await next.page(after); assert.ok(Buffer.byteLength(JSON.stringify(page)) < 64 * 1024); after = page.entries.at(-1)!.sequence; }
+  assert.equal(after, 300); await next.close();
+});
+
+test('a replacement runtime reports interruption and never resends an uncertain native input', async t => {
+  const root = await mkdtemp('/tmp/juiced-replacement-'); t.after(() => rm(root, { recursive: true, force: true }));
+  const id = randomUUID(), frame: ClaudeFrame = { type: 'user', message: { content: 'May already have changed files' } };
+  const { createHash } = await import('node:crypto');
+  const hash = createHash('sha256').update(JSON.stringify(frame) + '\n').digest('hex');
+  const journal = new AgentJournal(root, 'test'); await journal.open();
+  await journal.input(id, hash, 'old-process', false);
+  await journal.event({ type: 'state', state: 'working' }); await journal.close();
+  const controller = new AbortController();
+  const service = createDurableAgent({ signal: controller.signal, session: { id: 'test', keepAliveSeconds: 120 }, env: {}, database: async () => { throw Error('unused'); } }, () => { throw Error('Recovery must not start or resend work'); }, root);
+  const reply = await service.replay(0);
+  assert.ok(reply.ok && reply.replay?.entries.some(entry => entry.event.type === 'reset' && entry.event.interrupted));
+  await assert.rejects(service.send({ type: 'agent-input', id, epoch: 'old-process', frame }), /interrupted/);
+  await service.dispose();
+});
+
+test('resume pointers distinguish workspaces and validate explicit session identities', async t => {
+  const root = await mkdtemp('/tmp/juiced-session-pointer-'); t.after(() => rm(root, { recursive: true, force: true }));
+  const project = { localDirectory: root, workspace: 'one' };
+  const id = await agentSessionId(project); assert.equal(await agentSessionId(project, true), id);
+  await assert.rejects(agentSessionId({ ...project, workspace: 'two' }, true), /No saved/);
+  const explicit = `ses_${randomUUID().replaceAll('-', '')}`;
+  assert.equal(await agentSessionId(project, true, explicit), explicit);
+  assert.equal(await agentSessionId(project, true), explicit);
+  assert.deepEqual(parseArguments(['--resume', 'claude'], {}), { command: 'claude', action: 'run', workspace: undefined, argv: [], resume: true });
+  assert.equal(parseArguments(['--session', explicit, 'claude'], {}).command, 'claude');
+  assert.throws(() => parseArguments(['--resume', 'claude', 'sync', '--files'], {}), /interactive/);
+});

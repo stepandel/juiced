@@ -129,7 +129,7 @@ function Permission({ approval, answer, cancel }: { approval: Approval; answer(a
   </Box>;
 }
 
-function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; argv: string[]; workspace: string; rows: number; quit(code: number): void }) {
+function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; argv: string[]; workspace: string; rows: number; quit(code: number, stop?: boolean): void }) {
   const [conversation, setConversation] = useState(emptyConversation);
   const [editor, setEditor] = useDraft();
   const [status, setStatus] = useState<AgentStatus>(agent.status);
@@ -145,12 +145,13 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
     const frame = (value: ClaudeFrame) => setConversation(previous => receiveFrame(previous, value));
     const state = (value: AgentStatus) => { setStatus(value); if (value === 'ready') setNotice(''); };
     const permission = () => setApprovals([...agent.approvals.values()]);
-    const failure = (error: Error) => { setClosing(true); setNotice(plain(error.message)); quit(1); };
+    const failure = (error: Error) => { setClosing(true); setNotice(plain(error.message)); quit(1, false); };
     const reconnect = () => setNotice('Reconnecting to the output stream… Your draft is kept locally.');
+    const reconnected = () => setNotice('');
     const model = (value: string) => setConversation(previous => ({ ...previous, model: plain(value) }));
-    agent.on('frame', frame).on('status', state).on('approvals', permission).on('commands', setCommands).on('model', model).on('failure', failure).on('reconnecting', reconnect);
+    agent.on('frame', frame).on('status', state).on('approvals', permission).on('commands', setCommands).on('model', model).on('failure', failure).on('reconnecting', reconnect).on('reconnected', reconnected);
     void agent.start(argv).catch(() => {});
-    return () => { agent.off('frame', frame).off('status', state).off('approvals', permission).off('commands', setCommands).off('model', model).off('failure', failure).off('reconnecting', reconnect); };
+    return () => { agent.off('frame', frame).off('status', state).off('approvals', permission).off('commands', setCommands).off('model', model).off('failure', failure).off('reconnecting', reconnect).off('reconnected', reconnected); };
   }, [agent]);
   const cancel = () => { if (['working', 'interrupting'].includes(agent.status)) action(agent.interrupt()); };
   useInput((input, key) => {
@@ -166,6 +167,7 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
     if (menuOpen.current) return;
     if (!text.trim()) return;
     if (text.trim() === '/exit' || text.trim() === '/quit') { exit(); return; }
+    if (text.trim() === '/detach') { setClosing(true); quit(0, false); return; }
     const modelCommand = /^\/model(?:\s+(.+))?$/u.exec(text.trim());
     if (modelCommand?.[1]) {
       if (agent.status !== 'ready') { setNotice('Wait for Claude to finish before switching models.'); return; }
@@ -202,7 +204,7 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
   const height = Math.max(1, rows - 1);
   return <Box flexDirection="column">
     <Static items={[{ id: 'header', entries: [] }, ...conversation.history.map(turn => ({ id: String(turn.id), entries: turn.entries }))]}>{item => item.id === 'header'
-      ? <Box key="header" flexDirection="column" marginBottom={1}><Text bold color="green">JUICED</Text><Text dimColor>Claude on Cantelop · workspace {workspace} · local keyboard and interface</Text></Box>
+      ? <Box key="header" flexDirection="column" marginBottom={1}><Text bold color="green">JUICED</Text><Text dimColor>Claude on Cantelop · workspace {workspace} · local keyboard and interface</Text><Text dimColor>Session {agent.session.id} · reattach with juiced --resume claude</Text></Box>
       : <Entries key={item.id} entries={item.entries} />}</Static>
     <Box flexDirection="column" maxHeight={height} overflow="hidden">
       <Clipped tail><Entries entries={conversation.live.slice(-12)} /></Clipped>
@@ -225,9 +227,9 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
 export async function runLocalTui(agent: RemoteAgent, argv: string[], workspace: string, io: TerminalIO, signal: AbortSignal): Promise<number> {
   let code = 0;
   let quitting: Promise<void> | undefined;
-  const quit = (nextCode: number) => {
+  const quit = (nextCode: number, stop = true) => {
     code = Math.max(code, nextCode);
-    quitting ??= agent.close().catch(error => { code = 1; io.stderr.write(`juiced: ${plain((error as Error).message)}\n`); }).finally(() => instance.unmount());
+    quitting ??= agent.close(stop).catch(error => { code = 1; io.stderr.write(`juiced: ${plain((error as Error).message)}\n`); }).finally(() => instance.unmount());
   };
   const ui = () => <Juiced agent={agent} argv={argv} workspace={workspace} rows={io.stdout.rows || 24} quit={quit} />;
   const instance = render(ui(), { stdin: io.stdin as NodeJS.ReadStream, stdout: io.stdout as NodeJS.WriteStream, stderr: io.stderr as NodeJS.WriteStream, exitOnCtrlC: false, interactive: true });
@@ -235,8 +237,8 @@ export async function runLocalTui(agent: RemoteAgent, argv: string[], workspace:
   // otherwise paint one frame using the old height in the smaller terminal.
   const resize = () => instance.rerender(ui());
   io.stdout.prependListener('resize', resize);
-  const abort = () => quit(0);
-  const ioError = (error: Error) => { io.stderr.write(`juiced: ${plain(error.message)}\n`); quit(1); };
+  const abort = () => quit(0, false);
+  const ioError = (error: Error) => { io.stderr.write(`juiced: ${plain(error.message)}\n`); quit(1, false); };
   signal.addEventListener('abort', abort, { once: true });
   io.stdin.once('end', abort);
   io.stdin.once('error', ioError);

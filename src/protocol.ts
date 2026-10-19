@@ -1,9 +1,21 @@
 import type { GitCommand, GitEvent, GitResult, StaleLease } from './git-protocol.js';
 import type { InspectionCommand, InspectionEvent } from './inspection-protocol.js';
 import type { SavedSettings } from './settings.js';
+import type { ClaudeFrame } from './agent-protocol.js';
+
+export type AgentJournalEvent =
+  | { type: 'bytes'; channel: 'stdout' | 'stderr'; data: string }
+  | { type: 'user'; id: string; data: string; final: boolean }
+  | { type: 'approval-answer'; id: string }
+  | { type: 'reset'; epoch: string; interrupted: boolean }
+  | { type: 'state'; state: 'ready' | 'working' | 'sleeping' | 'interrupted' };
+export type AgentJournalEntry = { sequence: number; event: AgentJournalEvent };
+export type AgentConnection = { epoch: string; initialized?: ClaudeFrame };
 
 export type TerminalCommand =
-  | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string; directoryName?: string; git?: { binding: string; relativeDirectory: string } }
+  | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string; directoryName?: string; git?: { binding: string; relativeDirectory: string }; durable?: boolean }
+  | { type: 'agent-input'; id: string; epoch: string; frame: ClaudeFrame }
+  | { type: 'agent-replay'; after: number }
   | { type: 'input'; data: string }
   | { type: 'resize'; columns: number; rows: number }
   | { type: 'signal'; signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP' }
@@ -14,6 +26,7 @@ export type TerminalCommand =
   | InspectionCommand;
 
 export type TerminalEvent =
+  | ({ type: 'agent-output' } & AgentJournalEntry)
   | { type: 'ready' }
   | { type: 'output'; channel: 'stdout' | 'stderr'; data: string }
   | { type: 'exit'; code: number }
@@ -21,7 +34,7 @@ export type TerminalEvent =
   | GitEvent
   | InspectionEvent;
 
-export type TerminalReply = { ok: true; git?: GitResult } | { ok: false; error: string; stale?: StaleLease[]; busy?: 'sessions' | 'maintenance' };
+export type TerminalReply = { ok: true; git?: GitResult; agent?: AgentConnection; replay?: { entries: AgentJournalEntry[]; latest: number } } | { ok: false; error: string; stale?: StaleLease[]; busy?: 'sessions' | 'maintenance' };
 
 export const MAX_INPUT_BYTES = 16 * 1024;
 export const MAX_BUFFERED_INPUT = 1024 * 1024;

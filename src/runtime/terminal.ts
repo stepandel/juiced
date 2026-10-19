@@ -12,6 +12,7 @@ import { acquireCheckout, acquireSessionCheckout, CheckoutBusy } from './project
 import { inspectRemote } from './inspection.js';
 import { INSPECTION_TIMEOUT_MS, validateInspectionCommand } from '../inspection-protocol.js';
 import { saveSettings } from './settings.js';
+import { createDurableAgent } from './durable-agent.js';
 
 type Work = { signal: AbortSignal; output: SessionOutput<TerminalEvent> };
 type Start = Extract<TerminalCommand, { type: 'start' }>;
@@ -25,6 +26,7 @@ function write(stream: Writable, data: string | Buffer): Promise<void> {
 function validateStart(command: Start): void {
   dimensions(command.columns, command.rows);
   if (typeof command.tty !== 'boolean' || !Array.isArray(command.argv) ||
+      (command.durable !== undefined && typeof command.durable !== 'boolean') ||
       (command.directoryName !== undefined && !validProjectName(command.directoryName)) ||
       (command.git !== undefined && (!command.directoryName || !/^[a-f0-9]{64}$/.test(command.git.binding) || !relativeProjectPath(command.git.relativeDirectory))) ||
       command.argv.some(arg => typeof arg !== 'string' || arg.includes('\0')) ||
@@ -248,14 +250,28 @@ export function createTerminal(
 // Each Session has its own runtime process and its own terminal instance.
 let terminal: ReturnType<typeof createTerminal>;
 let gitRuntime: ReturnType<typeof createGitRuntime>;
+let agent: ReturnType<typeof createDurableAgent>;
 
 export function activateTerminal(context: SessionActivationContext<TerminalCommand, TerminalEvent>): void {
   terminal = createTerminal(context);
   gitRuntime = createGitRuntime(context);
+  agent = createDurableAgent(context, () => createTerminal(context));
 }
 
 export async function receiveTerminal(context: SessionContext<TerminalCommand, TerminalEvent, TerminalReply>): Promise<void> {
   const command = context.message.payload;
+  if (command.type === 'agent-replay' || command.type === 'agent-input' || command.type === 'start' && command.durable) {
+    try {
+      if (command.type === 'start') { validateStart(command); context.reply(await agent.open(command, context)); }
+      else if (command.type === 'agent-replay') context.reply(await agent.replay(command.after));
+      else { await agent.send(command); context.reply({ ok: true }); }
+    } catch (error) { context.reply({ ok: false, error: error instanceof Error ? error.message : 'Durable agent operation failed' }); }
+    return;
+  }
+  if (command.type === 'save-settings' && agent.active) {
+    context.reply(await agent.input(command));
+    return;
+  }
   if (command.type === 'inspect') {
     validateInspectionCommand(command);
     context.activity.queue(async activity => {

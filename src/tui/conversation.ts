@@ -18,6 +18,10 @@ export function userTurn(state: Conversation, text: string): Conversation {
 
 /** Partial events and final assistant snapshots describe the same blocks. */
 export function receiveFrame(state: Conversation, frame: ClaudeFrame): Conversation {
+  if (frame.type === 'juiced_user' && typeof frame.text === 'string') {
+    if (state.live.some(entry => entry.kind === 'user' && entry.text === plain(frame.text))) return state;
+    return userTurn(state, frame.text);
+  }
   let live = [...state.live];
   let streamIndex = state.streamIndex;
   const put = (entry: Entry) => {

@@ -2,11 +2,11 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionEventCursor, SessionRef } from '@cantelop/sdk';
-import { MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
+import { MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, type Approval, type ClaudeFrame, type ModelOption, type SlashCommand } from './agent-protocol.js';
 import type { SavedSettings } from './settings.js';
 
-export type AgentSession = Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'>;
+export type AgentSession = Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'> & Partial<Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'view'>>;
 export type AgentStatus = 'connecting' | 'ready' | 'working' | 'configuring' | 'interrupting' | 'closed' | 'failed';
 type Control = { resolve(value: ClaudeFrame): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> };
 export type MenuQuery = { subtype: 'get_settings' | 'mcp_status' | 'get_session_cost' | 'list_models' | 'get_hooks_listing' | 'list_permission_rules' }
@@ -40,14 +40,25 @@ export class RemoteAgent extends EventEmitter {
   private pendingBytes = 0;
   private submission = 0;
   private reader: Promise<void> | undefined;
-  private heartbeat: ReturnType<typeof setInterval> | undefined;
+  private durable = false;
+  private epoch = '';
+  private sequence = 0;
+  private userChunks = new Map<string, Buffer[]>();
+  private sleeping = false;
+  private remoteState = 'ready';
+  private nativeInitialization: ClaudeFrame | undefined;
+  private submitting = false;
+  private initializing = false;
+  private startCommand?: Extract<TerminalCommand, { type: 'start' }>;
+  private reopening: Promise<void> | undefined;
+  private caughtUp: (() => void) | undefined;
   private closing: Promise<void> | undefined;
   private started = false;
   private cursor: SessionEventCursor | undefined;
   private diagnostic = '';
   private unsupportedQueries = new Set<string>();
 
-  constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string } } = {}) { super(); }
+  constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; stopTimeoutMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string } } = {}) { super(); }
 
   private debug(event: string, detail: object = {}) {
     if (process.env.JUICED_DEBUG) console.error(JSON.stringify({ session: this.session.id, event, ...detail }));
@@ -69,26 +80,24 @@ export class RemoteAgent extends EventEmitter {
   async start(argv: string[] = []): Promise<void> {
     if (this.started) throw new Error('The agent has already started');
     this.started = true;
+    this.initializing = true;
     let requestedModel: string | undefined;
     for (let i = 0; i < argv.length; i++) {
       if (argv[i] === '--model' && argv[i + 1]) requestedModel = argv[++i]!;
       else if (argv[i]!.startsWith('--model=')) requestedModel = argv[i]!.slice('--model='.length);
     }
     try {
-      const reply = await this.session.request({ type: 'start', argv: headlessArguments(argv), tty: false, columns: 120, rows: 36, term: 'dumb', ...(this.options.directoryName ? { directoryName: this.options.directoryName } : {}), ...(this.options.git ? { git: this.options.git } : {}) }, { timeoutMs: 120_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(125_000)]) });
+      this.startCommand = { type: 'start', durable: true, argv: headlessArguments(argv), tty: false, columns: 120, rows: 36, term: 'dumb', ...(this.options.directoryName ? { directoryName: this.options.directoryName } : {}), ...(this.options.git ? { git: this.options.git } : {}) };
+      const reply = await this.request(this.startCommand);
       if (reply?.ok !== true) throw new Error('Cantelop could not start Claude');
+      this.durable = Boolean(reply.agent);
+      if (reply.agent) { this.epoch = reply.agent.epoch; this.nativeInitialization = reply.agent.initialized; }
+      const caughtUp = new Promise<void>(resolve => { this.caughtUp = resolve; });
       this.reader = this.read();
       void this.reader.catch(error => this.fail(error));
-      this.heartbeat = setInterval(() => {
-        void this.enqueue({ type: 'heartbeat' }, 0).catch(error => this.fail(error));
-      }, this.options.heartbeatMs ?? 30_000);
-      this.heartbeat.unref();
-      const initialized = await this.control({ subtype: 'initialize', hooks: null });
-      this.updateCommands(initialized.commands);
-      this.models = modelOptions(initialized.models);
-      for (const key of ['agents', 'output_style', 'available_output_styles', 'current_permission_mode', 'fast_mode_state', 'fast_mode_disabled_reason']) {
-        if (initialized[key] !== undefined) this.info[key] = initialized[key];
-      }
+      if (this.durable) await Promise.race([caughtUp, this.reader]);
+      if (this.sleeping) await this.ensureProcess();
+      this.initialize(this.nativeInitialization ?? await this.control({ subtype: 'initialize', hooks: null }));
       // initialize does not report the model loaded from settings.json.
       const settings = await this.control({ subtype: 'get_settings' });
       // Keep the chosen alias when available; applied.model is a resolved ID.
@@ -96,8 +105,40 @@ export class RemoteAgent extends EventEmitter {
       if (typeof model === 'string' && model) this.model = model;
       this.emit('models', this.models);
       this.emit('model', this.model);
-      this.setStatus('ready');
-    } catch (error) { this.fail(error); throw error; }
+      this.initializing = false;
+      this.setStatus(this.remoteState === 'working' ? 'working' : 'ready');
+    } catch (error) { this.initializing = false; this.fail(error); throw error; }
+  }
+
+  private initialize(frame: ClaudeFrame) {
+    this.nativeInitialization = frame;
+    this.updateCommands(frame.commands); this.models = modelOptions(frame.models);
+    for (const key of ['agents', 'output_style', 'available_output_styles', 'current_permission_mode', 'fast_mode_state', 'fast_mode_disabled_reason']) {
+      if (frame[key] !== undefined) this.info[key] = frame[key];
+    }
+    this.emit('models', this.models);
+  }
+
+  private retryable(error: unknown): boolean {
+    const remote = error as { status?: number; name?: string; message?: string };
+    return remote.status !== undefined ? remote.status === 0 || remote.status >= 500 : remote.name === 'AbortError' || /stream|fetch|network|socket|terminated|connection|timed out/i.test(remote.message ?? '');
+  }
+
+  private async request(command: TerminalCommand, id = `msg_${randomUUID().replaceAll('-', '')}`): Promise<TerminalReply> {
+    for (let failures = 0; ; failures++) {
+      this.controller.signal.throwIfAborted();
+      try {
+        const reply = await this.session.request(command, { id, timeoutMs: 120_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(125_000)]) });
+        if (!reply.ok) throw new RemoteProcessError(reply.error);
+        if (failures) this.emit('reconnected');
+        return reply;
+      } catch (error) {
+        if (this.controller.signal.aborted) throw this.controller.signal.reason;
+        if (!this.retryable(error) || error instanceof RemoteProcessError) throw error;
+        this.emit('reconnecting', failures + 1);
+        await delay(Math.min(5000, 250 * 2 ** Math.min(failures, 5)), undefined, { signal: this.controller.signal });
+      }
+    }
   }
 
   private enqueue(command: TerminalCommand, bytes: number): Promise<void> {
@@ -107,12 +148,13 @@ export class RemoteAgent extends EventEmitter {
       this.controller.signal.throwIfAborted();
       const start = Date.now();
       this.debug('control.dispatch', { type: command.type });
-      // Await durable acceptance to preserve input order, rather than waiting
-      // for the runtime's reply to every submitted prompt or control message.
-      await this.session.dispatch(command, { signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(35_000)]) });
+      // Serialize durable handoff receipts and legacy dispatch acceptance;
+      // keyboard editing remains independent of this queue.
+      if (command.type === 'agent-input') await this.request(command, `msg_${command.id.replaceAll('-', '')}`);
+      else await this.session.dispatch(command, { signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(35_000)]) });
       this.debug('control.accepted', { type: command.type, elapsedMs: Date.now() - start });
     }).finally(() => { this.pendingBytes -= bytes; });
-    this.pending = next;
+    this.pending = next.catch(() => {});
     void next.catch(error => this.fail(error));
     return next;
   }
@@ -127,6 +169,11 @@ export class RemoteAgent extends EventEmitter {
   private async send(frame: ClaudeFrame): Promise<void> { await this.sendBytes(this.encode(frame)); }
 
   private async sendBytes(bytes: Buffer): Promise<void> {
+    if (this.durable) {
+      if (bytes.length > 768 * 1024) throw new Error('The submitted message is too large');
+      await this.enqueue({ type: 'agent-input', id: randomUUID(), epoch: this.epoch, frame: JSON.parse(bytes.toString()) as ClaudeFrame }, bytes.length);
+      return;
+    }
     // Queue all fragments synchronously: no other frame may interleave them.
     const writes: Promise<void>[] = [];
     for (let offset = 0; offset < bytes.length; offset += MAX_INPUT_BYTES) {
@@ -136,7 +183,8 @@ export class RemoteAgent extends EventEmitter {
     await Promise.all(writes);
   }
 
-  private control(request: ClaudeFrame): Promise<ClaudeFrame> {
+  private async control(request: ClaudeFrame): Promise<ClaudeFrame> {
+    if (this.sleeping) await this.ensureProcess();
     const id = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.controls.delete(id); reject(new Error(`Claude timed out handling ${String(request.subtype)}`)); }, this.options.controlTimeoutMs ?? 60_000);
@@ -147,11 +195,23 @@ export class RemoteAgent extends EventEmitter {
     });
   }
 
+  private ensureProcess(force = false): Promise<void> {
+    if (!this.durable || !this.sleeping && !force) return Promise.resolve();
+    return this.reopening ??= (async () => {
+      const reply = await this.request(this.startCommand!);
+      if (!reply.ok || !reply.agent) throw new Error('Cantelop could not restore Claude');
+      if (this.epoch !== reply.agent.epoch) this.nativeInitialization = undefined;
+      this.epoch = reply.agent.epoch; this.sleeping = false;
+      if (!this.nativeInitialization) this.initialize(reply.agent.initialized ?? await this.control({ subtype: 'initialize', hooks: null }));
+    })().finally(() => { this.reopening = undefined; });
+  }
+
   async setModel(model: string): Promise<void> {
     if (this.status !== 'ready') throw new Error('Wait for Claude to finish before switching models');
     if (!model || /\s|[\x00-\x1f\x7f-\x9f]/u.test(model)) throw new Error('Specify one model alias or full model ID');
     this.setStatus('configuring');
     try {
+      await this.ensureProcess(true);
       await this.control({ subtype: 'set_model', model });
       this.model = model;
       this.emit('model', model);
@@ -176,7 +236,7 @@ export class RemoteAgent extends EventEmitter {
   async query(request: MenuQuery): Promise<ClaudeFrame> {
     if (!['ready', 'working', 'interrupting', 'configuring'].includes(this.status)) throw new Error('Claude is not connected yet');
     if (this.unsupportedQueries.has(request.subtype)) throw new Error(`Unsupported control request subtype: ${request.subtype}`);
-    try { return await this.control(request); }
+    try { await this.ensureProcess(true); return await this.control(request); }
     catch (error) {
       if (/Unsupported control request subtype/u.test((error as Error).message)) this.unsupportedQueries.add(request.subtype);
       throw error;
@@ -188,6 +248,7 @@ export class RemoteAgent extends EventEmitter {
     if (this.status !== 'ready') throw new Error('Wait for Claude to finish before changing settings');
     this.setStatus('configuring');
     try {
+      await this.ensureProcess(true);
       const response = await this.control(request);
       if (request.subtype === 'set_permission_mode') {
         this.info.current_permission_mode = request.mode;
@@ -216,20 +277,22 @@ export class RemoteAgent extends EventEmitter {
   }
 
   async submit(text: string): Promise<void> {
-    if (this.status !== 'ready') throw new Error('Claude is still working; your draft is kept locally');
+    if (this.status !== 'ready' || this.submitting) throw new Error('Claude is still working; your draft is kept locally');
     if (!text.trim()) return;
     if (Buffer.byteLength(text) > 512 * 1024) throw new Error('The prompt is too large (maximum 512 KiB)');
     const bytes = this.encode({ type: 'user', uuid: randomUUID(), session_id: '', parent_tool_use_id: null, message: { role: 'user', content: text } });
     const submission = ++this.submission;
+    this.submitting = true;
     this.setStatus('working');
     try {
+      await this.ensureProcess(true);
       this.controller.signal.throwIfAborted();
       if (submission !== this.submission) throw new Error('Prompt submission was interrupted before sending');
       await this.sendBytes(bytes);
     } catch (error) {
       if (!this.controller.signal.aborted && submission === this.submission) this.setStatus('ready');
       throw error;
-    }
+    } finally { this.submitting = false; }
   }
 
   async answer(id: string, allow: boolean, answers?: Record<string, string>): Promise<void> {
@@ -298,12 +361,94 @@ export class RemoteAgent extends EventEmitter {
       this.approvals.delete(String(frame.request_id)); this.emit('approvals');
     } else if (frame.type === 'result') {
       if (this.status === 'interrupting') frame = { ...frame, juiced_interrupted: true };
-      this.approvals.clear(); this.emit('approvals'); this.setStatus('ready');
+      this.approvals.clear(); this.emit('approvals'); if (!this.initializing) this.setStatus('ready');
     }
     this.emit('frame', frame);
   }
 
+  private journalEntry(entry: AgentJournalEntry) {
+    if (entry.sequence <= this.sequence) return;
+    if (entry.sequence !== this.sequence + 1) throw new Error('Agent history contains a gap');
+    const event = entry.event;
+    if (event.type === 'bytes') {
+      const bytes = Buffer.from(event.data, 'base64');
+      if (event.channel === 'stderr') {
+        this.diagnostic = (this.diagnostic + bytes.toString()).slice(-8000);
+        this.emit('diagnostic', bytes.toString());
+      } else for (const frame of this.decoder.push(bytes)) this.frame(frame);
+    } else if (event.type === 'user') {
+      const chunks = this.userChunks.get(event.id) ?? [];
+      chunks.push(Buffer.from(event.data, 'base64'));
+      if (event.final) { this.userChunks.delete(event.id); this.frame({ type: 'juiced_user', text: Buffer.concat(chunks).toString() }); }
+      else this.userChunks.set(event.id, chunks);
+    } else if (event.type === 'approval-answer') {
+      this.approvals.delete(event.id); this.emit('approvals');
+    } else if (event.type === 'reset') {
+      this.decoder = new ClaudeDecoder(); this.approvals.clear(); this.emit('approvals');
+      this.userChunks.clear();
+      this.sleeping = !event.epoch || event.epoch !== this.epoch;
+      if (event.interrupted) this.frame({ type: 'result', juiced_interrupted: true, result: 'The remote process stopped. Saved output was recovered; the interrupted prompt was not resubmitted.' });
+    } else if (event.type === 'state') {
+      this.remoteState = event.state;
+      this.sleeping = event.state === 'sleeping';
+      if (!this.initializing) this.setStatus(event.state === 'working' ? 'working' : 'ready');
+    }
+    this.sequence = entry.sequence;
+  }
+
+  private async replay(): Promise<void> {
+    for (;;) {
+      const reply = await this.request({ type: 'agent-replay', after: this.sequence });
+      if (!reply.ok || !reply.replay) throw new Error('Cantelop did not return agent history');
+      const before = this.sequence;
+      for (const entry of reply.replay.entries) this.journalEntry(entry);
+      if (this.sequence >= reply.replay.latest) return;
+      if (this.sequence === before) throw new Error('Agent history made no progress');
+    }
+  }
+
+  private async readDurable(): Promise<void> {
+    let failures = 0, recover = true;
+    while (!this.controller.signal.aborted) {
+      let watchdog: AbortSignal | undefined;
+      try {
+        const view = await this.session.view?.({ signal: this.controller.signal }).catch(error => {
+          if (['session_view_not_found', 'session_not_found', 'resource_not_found'].includes(String((error as { code?: string }).code))) return undefined;
+          throw error;
+        });
+        if (recover || Number(object(view?.state).agentSequence) > this.sequence) await this.replay();
+        if (failures) this.emit('reconnected');
+        recover = false;
+        this.caughtUp?.(); this.caughtUp = undefined;
+        // A read watchdog also recovers half-open connections after laptop sleep.
+        // View and stream reads do not activate compute or extend a work lease.
+        watchdog = AbortSignal.timeout(30_000);
+        const signal = AbortSignal.any([this.controller.signal, watchdog]);
+        const after = view?.cursor ?? this.cursor;
+        for await (const event of this.session.stream({ ...(after ? { after } : {}), signal })) {
+          if (event.data.type === 'agent-output') {
+            if (event.data.sequence > this.sequence + 1) await this.replay();
+            this.journalEntry(event.data);
+          } else if (event.data.type === 'error') throw new RemoteProcessError(event.data.message);
+          this.cursor = event.cursor;
+          if (failures) this.emit('reconnected');
+          failures = 0;
+        }
+        throw new Error('The Claude output stream ended unexpectedly');
+      } catch (error) {
+        if (this.controller.signal.aborted) return;
+        if (watchdog?.aborted) { recover = this.remoteState === 'working'; continue; }
+        const expired = ['event_cursor_expired', 'event_stream_reset'].includes(String((error as { code?: string }).code));
+        if (error instanceof RemoteProcessError || !expired && !this.retryable(error)) throw error;
+        recover = true;
+        this.emit('reconnecting', ++failures);
+        await delay(Math.min(5000, 250 * 2 ** Math.min(failures - 1, 5)), undefined, { signal: this.controller.signal });
+      }
+    }
+  }
+
   private async read(): Promise<void> {
+    if (this.durable) return this.readDurable();
     let failures = 0;
     while (!this.controller.signal.aborted) {
       try {
@@ -330,23 +475,23 @@ export class RemoteAgent extends EventEmitter {
         if (this.controller.signal.aborted) return;
         const remote = error as { status?: number; name?: string; message?: string };
         const retryable = remote.status !== undefined ? remote.status === 0 || remote.status >= 500 : remote.name === 'AbortError' || /stream|fetch|network|socket|terminated|connection/i.test(remote.message ?? '');
-        if (error instanceof RemoteProcessError || !retryable || ++failures > 3) throw error;
+        if (error instanceof RemoteProcessError || !retryable) throw error;
+        ++failures;
         this.debug('stream.retry', { attempt: failures, name: remote.name });
         this.emit('reconnecting', failures);
-        await delay(250 * 2 ** (failures - 1), undefined, { signal: this.controller.signal });
+        await delay(Math.min(5000, 250 * 2 ** Math.min(failures - 1, 5)), undefined, { signal: this.controller.signal });
       }
     }
   }
 
-  close(): Promise<void> {
+  close(stop = true): Promise<void> {
     return this.closing ??= (async () => {
       this.controller.abort();
-      if (this.heartbeat) clearInterval(this.heartbeat);
       this.rejectControls(new Error('Juiced disconnected'));
       this.approvals.clear();
       const timeout = new AbortController();
       try {
-        if (this.started) await Promise.race([this.session.stop(), delay(this.options.stopTimeoutMs ?? 10_000, undefined, { signal: timeout.signal, ref: false }).then(() => { throw new Error('Cantelop session cleanup timed out; its lease expires within 90 seconds'); })]);
+        if (this.started && stop) await Promise.race([this.session.stop(), delay(this.options.stopTimeoutMs ?? 10_000, undefined, { signal: timeout.signal, ref: false }).then(() => { throw new Error('Cantelop session cleanup timed out'); })]);
       } finally { timeout.abort(); }
       await this.reader?.catch(() => {});
       this.setStatus('closed');

@@ -3,7 +3,7 @@ import { inspectionScope } from './inspection-protocol.js';
 export type Arguments =
   | { command: 'env'; action: 'set' | 'unset'; name: string; secret: boolean; workspace: undefined; argv: [] }
   | { command: 'help' | 'version'; workspace: string | undefined; argv: string[] }
-  | ({ command: 'claude'; workspace: string | undefined; argv: string[] } & (
+  | ({ command: 'claude'; workspace: string | undefined; argv: string[]; resume?: boolean; session?: string } & (
     | { action: 'run' | 'login' | 'fast-forward' }
     | { action: 'delete'; yes: boolean }
     | { action: 'ls'; path: string; includeIgnored: boolean }
@@ -14,6 +14,7 @@ export type Arguments =
 
 export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.env): Arguments {
   let workspace = env.JUICED_WORKSPACE;
+  let resume = false, session: string | undefined;
   let index = 0;
   while (index < args.length) {
     const arg = args[index]!;
@@ -23,11 +24,16 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
     } else if (arg.startsWith('--workspace=')) {
       workspace = arg.slice('--workspace='.length);
       index++;
-    } else break;
+    } else if (arg === '--resume') { resume = true; index++; }
+    else if (arg === '--session') { session = args[++index] ?? ''; resume = true; index++; }
+    else break;
   }
   if (workspace !== undefined && !/^[a-z0-9][a-z0-9-]{0,62}$/.test(workspace)) throw new Error('Workspace must be 1–63 lowercase letters, numbers, or hyphens');
   const command = args[index];
   const argv = args.slice(index + 1);
+  if (session !== undefined && !/^ses_[a-f0-9]{32}$/.test(session)) throw new Error('Invalid Juiced session ID');
+  if (resume && (command !== 'claude' || ['login', 'sync', 'fast-forward', 'delete', 'ls', 'peek'].includes(argv[0] ?? ''))) throw new Error('--resume and --session apply to interactive juiced claude sessions.');
+  const connection = { ...(resume ? { resume: true } : {}), ...(session ? { session } : {}) };
   if (command === 'env') {
     const [action, name, ...flags] = argv;
     if (argv.length === 1 && ['--help', '-h'].includes(action!)) return { command: 'help', workspace: undefined, argv: [] };
@@ -38,7 +44,7 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
     return { command: 'env', action: action as 'set' | 'unset', name, secret: !flags.includes('--plain'), workspace: undefined, argv: [] };
   }
   if (command === 'claude') {
-    if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1) };
+    if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1), ...connection };
     if (argv[0] === 'ls' || argv[0] === 'peek') {
       const action = argv[0];
       const usage = `Usage: juiced claude ${action} [--include-ignored]${action === 'peek' ? ' [--changes-only]' : ''} [PATH]`;
@@ -81,7 +87,7 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
       if (argv.length !== 1) throw new Error('Usage: juiced claude fast-forward');
       return { command, action: 'fast-forward', workspace, argv: [] };
     }
-    return { command, action: 'run', workspace, argv };
+    return { command, action: 'run', workspace, argv, ...connection };
   }
   if (command === 'login') throw new Error('juiced login has moved. Run juiced claude login.');
   if (command === 'delete') throw new Error('Run juiced claude delete [--yes] to delete the workspace for this directory.');
@@ -117,6 +123,8 @@ Examples:
   echo "Explain this project" | juiced claude -p
 
 Options before the command:
+  --resume          Reattach to the last Juiced session in this project/workspace
+  --session ID      Reattach to a specific Juiced session
   --workspace SLUG  Override the workspace derived from the current directory
                    (JUICED_WORKSPACE also overrides automatic selection)
   -h, --help        Show this help
@@ -126,7 +134,10 @@ Interactive sessions use local prompt editing and streamed remote responses.
 Enter sends, Alt+Enter adds a line, Esc interrupts, and /exit quits.
 Claude flags configure the remote process. -p, --help, --version, and pipes
 use native CLI passthrough.
-Each invocation starts a new session. Files, Claude login, and confirmed menu
+Each invocation starts a new session unless --resume or --session is supplied.
+/detach leaves remote work running. Sleep and network interruptions reconnect
+automatically. Idle processes resume their saved conversation on the next input.
+Files, Claude login, and confirmed menu
 settings persist in the remote workspace. Git repositories initialize from local
 HEAD once, then retain remote commits and edits. Use sync to explicitly transfer
 commits; fast-forward

@@ -129,7 +129,7 @@ test('the real TUI edits and displays input while the network is stalled, withou
     assert.ok(stripVTControlCharacters(output).includes('pasted second line'));
     assert.equal(dispatches, 0, 'Pasted newlines must not submit a prompt');
   } finally { lifetime.abort(); await running; }
-  assert.equal(stops, 1);
+  assert.equal(stops, 0, 'Losing the local terminal must leave remote work running');
   assert.equal(stdin.isRaw, false);
 });
 

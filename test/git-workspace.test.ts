@@ -296,6 +296,22 @@ test('client session stop clears exact checkout registrations after sandbox term
   await lease.release();
 });
 
+test('stopping an old attachment preserves a reopened session checkout token', async t => {
+  const f = await fixture(t);
+  let replacement: Awaited<ReturnType<typeof acquireCheckout>> | undefined;
+  const session = createGitSession({
+    session() { return { id: 'reopened-session', async stop() {
+      replacement = await acquireCheckout(f.db, f.project.directoryName, 'reopened-session', 'session', () => {});
+    } } as ReturnType<Parameters<typeof createGitSession>[0]['session']>; },
+    async database() { return f.db as WorkspaceDatabase; },
+  }, f.project, 'reopened-session');
+  const original = await acquireCheckout(f.db, f.project.directoryName, session.id, 'session', () => {});
+  await session.stop();
+  const rows = (await f.db.execute('SELECT token FROM juiced_checkout_leases')).rows;
+  assert.deepEqual(rows.map(row => row.token), [replacement!.token]);
+  await original.release(); await replacement!.release();
+});
+
 test('remote metadata initializes and refreshes existing workspaces without changing files, index or HEAD', { timeout: 30_000 }, async t => {
   const f = await fixture(t);
   await git(f.local, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);

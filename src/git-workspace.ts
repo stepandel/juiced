@@ -14,10 +14,9 @@ export type GitWorkspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, Ter
 type Project = Awaited<ReturnType<typeof selectProject>>;
 type Action = GitCommand extends infer C ? C extends GitCommand ? Omit<C, 'type' | 'directoryName' | 'binding'> : never : never;
 
-/** Sandbox stop may be abrupt, so the backend also retires its confirmed-dead
- * Session's checkout registrations. Wrapped Session identities are never reused. */
-export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<TerminalCommand>, 'database'>, project: Pick<Project, 'directoryName'>): Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'> {
-  const session = workspace.session({ keepAliveSeconds: 120 });
+/** Retire only this attachment's observed checkout registrations after stopping. */
+export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<TerminalCommand>, 'database'>, project: Pick<Project, 'directoryName'>, id?: string): Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'view' | 'stop'> {
+  const session = workspace.session({ keepAliveSeconds: 120, ...(id ? { id } : {}) });
   let stopping: Promise<void> | undefined;
   const open = () => { if (stopping) throw new Error('This Git session has stopped. Start a new session.'); };
   return {
@@ -25,13 +24,17 @@ export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<Ter
     request(message, options) { open(); return session.request(message, options); },
     dispatch(message, options) { open(); return session.dispatch(message, options); },
     stream(options) { return session.stream(options); },
+    view(options) { return session.view(options); },
     stop() {
       return stopping ??= (async () => {
-        await session.stop();
-        const db = await workspace.database();
-        // Query after successful stop: the old runtime can no longer acquire or
-        // renew a token. Delete only the registrations belonging to that owner.
-        const rows = await db.execute({ sql: 'SELECT token FROM juiced_checkout_leases WHERE project = ? AND session = ?', args: [project.directoryName, session.id] });
+        const snapshot = (async () => {
+          const db = await workspace.database();
+          const rows = await db.execute({ sql: 'SELECT token FROM juiced_checkout_leases WHERE project = ? AND session = ?', args: [project.directoryName, session.id] });
+          return { db, rows };
+        })();
+        const { db, rows } = await snapshot.finally(() => session.stop());
+        // A new attachment may already have reopened this logical identity.
+        // Its newly acquired tokens must survive the old attachment's cleanup.
         for (const row of rows.rows) await db.execute({ sql: 'DELETE FROM juiced_checkout_leases WHERE project = ? AND session = ? AND token = ?', args: [project.directoryName, session.id, String(row.token)] });
       })();
     },
