@@ -89,7 +89,10 @@ export function CommandMenu({ load, rows, done, cancel, active = true }: { load(
     }
     if (key.return) {
       const item = items[current.index];
-      if (item?.run && !item.disabled) run(item.run);
+      if (item?.run && !item.disabled) {
+        if (item.current) done({ message: `${item.label} is already selected.` });
+        else run(item.run);
+      }
       return;
     }
     if (current.page.search !== false && !key.ctrl && !key.meta) {

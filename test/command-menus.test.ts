@@ -116,6 +116,54 @@ test('MCP server menus use remote names and send one confirmed control operation
   assert.deepEqual(a.submitted, []);
 });
 
+test('nested settings and data views reuse their snapshot until an action or a new visit', async () => {
+  const a = await agent();
+  const config = await commandMenu(a, 'config');
+  await choose(config, 'effort');
+  const permissions = page(await choose(config, 'permissions'));
+  const rules = page(await choose(permissions, 'allow'));
+  await rules.back!();
+  assert.deepEqual(a.queries, [{ subtype: 'get_settings' }]);
+  await commandMenu(a, 'config');
+  assert.equal(a.queries.length, 2, 'A new menu visit may read updated settings');
+  const context = await commandMenu(a, 'context');
+  const memory = page(await choose(context, 'memory'));
+  await choose(memory, '0'); await choose(memory, '0');
+  assert.equal(a.queries.filter(query => query.subtype === 'get_context_usage').length, 1);
+  assert.equal(a.queries.filter(query => query.subtype === 'read_file').length, 2, 'File reads still run permission checks each time');
+  const mcp = await commandMenu(a, 'mcp');
+  const server = page(await choose(mcp, 'remote-docs'));
+  await server.back!();
+  assert.equal(a.queries.filter(query => query.subtype === 'mcp_status').length, 1);
+  await choose(server, 'reconnect');
+  assert.equal(a.queries.filter(query => query.subtype === 'mcp_status').length, 2, 'Confirmed actions refresh their data');
+});
+
+test('failed menu snapshot loads can be retried from the same command browser', async () => {
+  const a = await agent();
+  const help = await commandMenu(a, 'help');
+  a.waitForQuery = async () => { throw new Error('Read failed'); };
+  await assert.rejects(choose(help, 'config'), /Read failed/);
+  a.waitForQuery = undefined;
+  assert.equal(page(await choose(help, 'config')).title, 'Workspace settings');
+});
+
+test('explicit setting arguments can save an unchanged running choice', async () => {
+  const a = await agent();
+  a.settings.applied.effort = 'high';
+  for (const [name, argument] of [['effort', 'high'], ['output-style', 'Provider style'], ['fast', 'off']] as const) {
+    const menu = await commandMenu(a, name, argument);
+    assert.equal(menu.items[0]?.current, false);
+    const result = await choose(menu, argument);
+    if (name === 'fast') await choose(page(result), 'confirm');
+  }
+  assert.deepEqual(a.changes, [
+    { subtype: 'apply_flag_settings', settings: { effortLevel: 'high' } },
+    { subtype: 'apply_flag_settings', settings: { outputStyle: 'Provider style' } },
+    { subtype: 'apply_flag_settings', settings: { fastMode: false } },
+  ]);
+});
+
 test('read-only menus use summary APIs, fallback on unsupported RPCs, and propagate real errors', async () => {
   const a = await agent();
   assert.equal((await commandMenu(a, 'hooks')).title, 'Configured hooks');
@@ -152,6 +200,25 @@ function ui(a: MenuAgent) {
   const command = async (text: string) => { stdin.write(text); await wait(() => latest.includes(text)); stdin.write('\r'); };
   return { stdin, stdout, frames, wait, command, get latest() { return latest; }, async close() { lifetime.abort(); await running; assert.equal(stdin.isRaw, false); } };
 }
+
+test('reselecting the current model or setting closes locally without applying or saving it', { timeout: 10000 }, async () => {
+  const a = await agent();
+  a.settings.applied.effort = 'high';
+  const f = ui(a);
+  try {
+    await f.wait(() => f.latest.includes('Enter send'));
+    for (const [command, title] of [['model', 'Choose model'], ['effort', 'Choose effort'], ['output-style', 'Choose output style'], ['fast', 'Fast mode'], ['permissions', 'Permissions']]) {
+      await f.command(`/${command}`);
+      await f.wait(() => f.latest.includes(title!) && f.latest.includes('(current)'));
+      const reads = a.queries.length;
+      f.stdin.write('\r');
+      await f.wait(() => f.latest.includes('is already selected.') && f.latest.includes('Enter send'));
+      assert.equal(a.queries.length, reads);
+      assert.deepEqual(a.changes, []);
+    }
+    assert.deepEqual(a.submitted, []);
+  } finally { await f.close(); }
+});
 
 test('settings and nested menus navigate locally, reject paste confirmation, and recover from a failed change', { timeout: 10000 }, async () => {
   const a = await agent();

@@ -3,8 +3,20 @@
 Juiced renders menus locally while the Claude process and its workspace remain
 on Cantelop. The renderer handles selection, filtering, nested pages, text input,
 resize, cancel, errors, and pending confirmations. Typing and back navigation do
-not send network requests. Opening a remote data view fetches a snapshot;
-confirming a change sends a control request to the existing Claude process.
+not send network requests. Settings pickers reuse the startup settings snapshot
+for up to 30 seconds, invalidated by setting changes, model turns, process
+boundaries, and connection recovery. Nested data views share a snapshot for the
+menu visit; reopening a dynamic view fetches new data. File and task-output reads
+remain fresh. A live data read sends its control request without a separate
+process-start check. If the runtime explicitly rejects an outdated process epoch
+before delivery, Juiced reopens the saved conversation and retries the read once.
+Mutations retain their process check and are never automatically resubmitted.
+
+Selecting a picker’s current value closes it locally without a remote apply or
+save. Explicit setting arguments, such as `/model sonnet`, `/effort high`,
+`/output-style Learning`, or `/fast off`, can still save an unchanged running
+choice as the workspace default. Confirming a new choice sends a control request
+to the existing Claude process.
 Model, effort, output style, fast mode, and permission mode changes apply to the
 running session after Claude acknowledges them, then save to the remote workspace’s
 `/workspace/.claude/settings.json`. New sessions load these defaults through

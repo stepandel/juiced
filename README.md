@@ -221,7 +221,7 @@ The tests exercise real subprocesses and PTYs plus the real SDK's request/SSE pr
 
 The local UI uses React and Ink. It communicates with stock Claude Code over its bidirectional JSONL control protocol: initialization, user messages, `can_use_tool` responses, and interruption. Cantelop carries commands and SSE notifications. Interactive Juiced sessions use pipes and a durable workspace journal on the server; native passthrough retains the Python PTY when needed. A supervised runtime activity keeps command intake responsive independently of the client connection.
 
-Menus share a local renderer and command adapters. Opening a data view fetches a snapshot; filtering, arrow keys, and back navigation use local state. Confirmed changes use Claude control requests and wait for acknowledgment. To verify compatibility with an installed Claude binary without deploying or sending a model prompt, run `node --import tsx scripts/test-menus-local.mjs /path/to/claude`.
+Menus share a local renderer and command adapters. Settings pickers reuse a recent settings snapshot; nested data views, filtering, arrow keys, and back navigation use local state. Selecting the current value closes locally. Fresh data reads send one Claude control request while its process is live; confirmed changes wait for acknowledgment and persistence. To verify compatibility with an installed Claude binary without deploying or sending a model prompt, run `node --import tsx scripts/test-menus-local.mjs /path/to/claude`.
 
 Live execution requires deploying the runtime and completing Claude sign-in. Local tests do not verify the hosted platform or your Claude subscription.
 

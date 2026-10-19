@@ -15,6 +15,7 @@ import type { createTerminal } from '../src/runtime/terminal.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
 import { agentSessionId, prepareAgentSession } from '../src/session-state.js';
 import { parseArguments } from '../src/args.js';
+import { commandMenu } from '../src/tui/command-menus.js';
 
 async function until(check: () => boolean, ms = 10_000) {
   const end = Date.now() + ms;
@@ -28,7 +29,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   const prompts: string[] = [], launches: string[][] = [], requests: TerminalCommand[] = [];
   const requestIds: Array<{ command: TerminalCommand; id: string | undefined }> = [];
   let currentOutput: { send(event: TerminalEvent): Promise<void> };
-  let clientOffline = false, loseReply = false, expired = false, stops = 0, initializations = 0;
+  let clientOffline = false, streamPaused = false, loseReply = false, expired = false, stops = 0, initializations = 0;
   let viewCursor: SessionEventCursor | undefined;
   let viewState: unknown;
   let activityTimeout = 0;
@@ -90,7 +91,8 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
       if (command.type === 'agent-replay') return service.replay(command.after);
       if (command.type === 'save-settings') return service.input(command);
       if (command.type === 'agent-input') {
-        await service.send(command);
+        try { await service.send(command); }
+        catch (error) { return { ok: false, error: (error as Error).message }; }
         if (loseReply && command.frame.type === 'user') { loseReply = false; throw new Error('network response lost'); }
       }
       return { ok: true };
@@ -107,10 +109,10 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
       let index = options?.after?.sequence ?? 0;
       while (!options?.signal?.aborted) {
         network();
-        if (!stored[index]) await once(events, 'event', { signal: options?.signal });
+        if (!stored[index] || streamPaused) await once(events, 'event', { signal: options?.signal });
         network();
         if (expired) { expired = false; throw Object.assign(new Error('expired'), { code: 'event_cursor_expired', status: 409 }); }
-        if (stored[index]) yield stored[index++]!;
+        if (stored[index] && !streamPaused) yield stored[index++]!;
       }
     },
     async stop() { stops++; lifetime.abort(); await activity; },
@@ -122,6 +124,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   return { root, agent, session, service, frame, raw, prompts, launches, requests, requestIds, received,
     get stops() { return stops; }, get initializations() { return initializations; }, get activityTimeout() { return activityTimeout; },
     offline(value: boolean) { clientOffline = value; events.emit('event'); },
+    pauseStream(value: boolean) { streamPaused = value; events.emit('event'); },
     loseReply() { loseReply = true; },
     expireStream() { expired = true; events.emit('event'); },
   };
@@ -238,6 +241,40 @@ test('idle processes exit and the next prompt resumes the native conversation', 
   assert.equal(f.launches[0]?.at(-1), f.launches[1]?.at(-1));
   assert.ok(f.launches[1]?.includes('--resume'));
   assert.deepEqual(f.prompts, ['First', 'Second']);
+});
+
+test('warm settings menus stay local and live data reads omit the process preflight', async t => {
+  const f = await fixture(t); await f.agent.start();
+  const before = f.requests.length;
+  const config = await commandMenu(f.agent, 'config');
+  await config.items.find(item => item.id === 'effort')!.run!();
+  await config.items.find(item => item.id === 'permissions')!.run!();
+  assert.equal(f.requests.length, before, 'Startup already fetched the settings used by these menus');
+  await f.agent.query({ subtype: 'mcp_status' });
+  assert.deepEqual(f.requests.slice(before).map(command => command.type), ['agent-input']);
+  assert.deepEqual(f.prompts, []);
+});
+
+test('a menu read resumes a sleeping process even when its sleep notification has not arrived', async t => {
+  const f = await fixture(t, 150); await f.agent.start(); await f.agent.submit('Remember this conversation');
+  await f.frame({ type: 'result', result: 'Saved' });
+  await until(() => f.agent.status === 'ready');
+  f.pauseStream(true);
+  await until(() => !f.service.active);
+  let failure: unknown;
+  f.agent.on('failure', error => { failure = error; });
+  const before = f.requests.length;
+  const reading = f.agent.query({ subtype: 'mcp_status' });
+  await until(() => f.requests.slice(before).some(command => command.type === 'start'));
+  f.pauseStream(false);
+  await reading;
+  assert.equal(failure, undefined);
+  assert.equal(f.agent.status, 'ready');
+  assert.equal(f.launches.length, 2);
+  assert.ok(f.launches[1]?.includes('--resume'));
+  const reads = f.requests.slice(before).filter(command => command.type === 'agent-input' && object(command.frame.request).subtype === 'mcp_status');
+  assert.equal(reads.length, 2, 'Retry only after the runtime explicitly rejected the stale epoch before delivery');
+  assert.deepEqual(f.prompts, ['Remember this conversation']);
 });
 
 test('confirmed menu model choices override launch flags after idle native resumption', async t => {

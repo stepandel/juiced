@@ -226,6 +226,68 @@ test('menu reads and changes use the same control channel without user turns', a
   assert.equal(f.commands.filter(command => command.type === 'start').length, 1);
 });
 
+test('settings menu snapshots reuse startup and refresh after changes and model turns', async t => {
+  const responses = { get_settings: { applied: { effort: 'low' } } };
+  const f = fixture({}, {}, 'success', responses);
+  t.after(() => f.agent.close()); await f.agent.start();
+  const reads = () => f.frames.filter(frame => object(frame.request).subtype === 'get_settings').length;
+  assert.equal(reads(), 1);
+  assert.equal(object((await f.agent.query({ subtype: 'get_settings' }, { cached: true })).applied).effort, 'low');
+  assert.equal(reads(), 1);
+  responses.get_settings = { applied: { effort: 'high' } };
+  await f.agent.configure({ subtype: 'apply_flag_settings', settings: { effortLevel: 'high' } });
+  assert.equal(object((await f.agent.query({ subtype: 'get_settings' }, { cached: true })).applied).effort, 'high');
+  assert.equal(reads(), 2);
+  await f.agent.query({ subtype: 'get_settings' }, { cached: true });
+  assert.equal(reads(), 2);
+  await f.agent.query({ subtype: 'get_settings' });
+  assert.equal(reads(), 3, 'Explicit fresh reads always reach Claude');
+  await f.agent.setModel('sonnet');
+  await f.agent.query({ subtype: 'get_settings' }, { cached: true });
+  assert.equal(reads(), 4);
+  await f.agent.submit('A tool might edit settings');
+  for (let index = 0; index < 2; index++) await f.agent.query({ subtype: 'get_settings' }, { cached: true });
+  assert.equal(reads(), 6, 'Settings may change while a model turn is running');
+  f.output({ type: 'result', result: 'Done' });
+  await until(() => f.agent.status === 'ready');
+  await f.agent.query({ subtype: 'get_settings' }, { cached: true });
+  assert.equal(reads(), 7);
+});
+
+test('a settings read started before a change cannot repopulate the menu cache', async t => {
+  const f = fixture(); t.after(() => f.agent.close()); await f.agent.start();
+  const dispatch = f.session.dispatch;
+  let pending: ClaudeFrame | undefined;
+  f.session.dispatch = async (command, options) => {
+    if (command.type === 'input') {
+      const frame = JSON.parse(Buffer.from(command.data, 'base64').toString()) as ClaudeFrame;
+      if (object(frame.request).subtype === 'get_settings') { pending = frame; return {} as Awaited<ReturnType<AgentSession['dispatch']>>; }
+    }
+    return dispatch(command, options);
+  };
+  const reading = f.agent.query({ subtype: 'get_settings' });
+  await until(() => !!pending);
+  await f.agent.configure({ subtype: 'set_permission_mode', mode: 'plan' });
+  f.output({ type: 'control_response', response: { subtype: 'success', request_id: pending!.request_id, response: { effective: { permissions: { defaultMode: 'default' } } } } });
+  await reading;
+  f.session.dispatch = dispatch;
+  const before = f.frames.length;
+  await f.agent.query({ subtype: 'get_settings' }, { cached: true });
+  assert.equal(f.frames.length, before + 1);
+});
+
+test('settings menu snapshots expire so external edits become visible', async t => {
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const responses = { get_settings: { applied: { effort: 'low' } } };
+  const f = fixture({}, {}, 'success', responses);
+  t.after(() => f.agent.close()); await f.agent.start();
+  responses.get_settings = { applied: { effort: 'high' } };
+  now += 30_001;
+  assert.equal(object((await f.agent.query({ subtype: 'get_settings' }, { cached: true })).applied).effort, 'high');
+  assert.equal(f.frames.filter(frame => object(frame.request).subtype === 'get_settings').length, 2);
+});
+
 test('rejected menu changes preserve metadata and unsupported read capabilities are cached per process', async t => {
   const f = fixture({}, { current_permission_mode: 'default' }, 'success', {
     set_permission_mode: new Error('Policy rejected the change'),

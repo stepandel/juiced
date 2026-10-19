@@ -22,6 +22,7 @@ export type MenuChange = { subtype: 'apply_flag_settings'; settings: ClaudeFrame
   | { subtype: 'rename_session'; title: string }
   | { subtype: 'stop_task'; task_id: string };
 class RemoteProcessError extends Error {}
+const processChanged = (error: unknown) => error instanceof RemoteProcessError && error.message === 'The Claude process changed. Reconnect before submitting input.';
 
 /** A headless Claude process on Cantelop. Keyboard editing never enters this class. */
 export class RemoteAgent extends EventEmitter {
@@ -57,6 +58,8 @@ export class RemoteAgent extends EventEmitter {
   private cursor: SessionEventCursor | undefined;
   private diagnostic = '';
   private unsupportedQueries = new Set<string>();
+  private settingsSnapshot: { value: ClaudeFrame; expires: number } | undefined;
+  private settingsRevision = 0;
 
   constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; stopTimeoutMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string } } = {}) { super(); }
 
@@ -76,6 +79,7 @@ export class RemoteAgent extends EventEmitter {
     for (const control of this.controls.values()) { clearTimeout(control.timer); control.reject(error); }
     this.controls.clear();
   }
+  private invalidateSettings() { this.settingsSnapshot = undefined; this.settingsRevision++; }
 
   async start(argv: string[] = []): Promise<void> {
     if (this.started) throw new Error('The agent has already started');
@@ -100,6 +104,7 @@ export class RemoteAgent extends EventEmitter {
       this.initialize(this.nativeInitialization ?? await this.control({ subtype: 'initialize', hooks: null }));
       // initialize does not report the model loaded from settings.json.
       const settings = await this.control({ subtype: 'get_settings' });
+      if (this.remoteState === 'ready') this.settingsSnapshot = { value: settings, expires: Date.now() + 30_000 };
       // Keep the chosen alias when available; applied.model is a resolved ID.
       const model = requestedModel ?? object(settings.effective).model ?? object(settings.applied).model;
       if (typeof model === 'string' && model) this.model = model;
@@ -111,6 +116,8 @@ export class RemoteAgent extends EventEmitter {
   }
 
   private initialize(frame: ClaudeFrame) {
+    this.invalidateSettings();
+    this.unsupportedQueries.clear();
     this.nativeInitialization = frame;
     this.updateCommands(frame.commands); this.models = modelOptions(frame.models);
     for (const key of ['agents', 'output_style', 'available_output_styles', 'current_permission_mode', 'fast_mode_state', 'fast_mode_disabled_reason']) {
@@ -141,7 +148,7 @@ export class RemoteAgent extends EventEmitter {
     }
   }
 
-  private enqueue(command: TerminalCommand, bytes: number): Promise<void> {
+  private enqueue(command: TerminalCommand, bytes: number, retryProcessChange = false): Promise<void> {
     if (this.pendingBytes + bytes > MAX_BUFFERED_INPUT) return Promise.reject(new Error('Too much input is waiting for Cantelop'));
     this.pendingBytes += bytes;
     const next = this.pending.then(async () => {
@@ -155,7 +162,11 @@ export class RemoteAgent extends EventEmitter {
       this.debug('control.accepted', { type: command.type, elapsedMs: Date.now() - start });
     }).finally(() => { this.pendingBytes -= bytes; });
     this.pending = next.catch(() => {});
-    void next.catch(error => this.fail(error));
+    void next.catch(error => {
+      // A menu read can reopen and retry an explicitly rejected stale epoch.
+      // Ambiguous delivery failures and mutations retain their normal handling.
+      if (!retryProcessChange || !processChanged(error)) this.fail(error);
+    });
     return next;
   }
 
@@ -166,12 +177,12 @@ export class RemoteAgent extends EventEmitter {
     return bytes;
   }
 
-  private async send(frame: ClaudeFrame): Promise<void> { await this.sendBytes(this.encode(frame)); }
+  private async send(frame: ClaudeFrame, retryProcessChange = false): Promise<void> { await this.sendBytes(this.encode(frame), retryProcessChange); }
 
-  private async sendBytes(bytes: Buffer): Promise<void> {
+  private async sendBytes(bytes: Buffer, retryProcessChange = false): Promise<void> {
     if (this.durable) {
       if (bytes.length > 768 * 1024) throw new Error('The submitted message is too large');
-      await this.enqueue({ type: 'agent-input', id: randomUUID(), epoch: this.epoch, frame: JSON.parse(bytes.toString()) as ClaudeFrame }, bytes.length);
+      await this.enqueue({ type: 'agent-input', id: randomUUID(), epoch: this.epoch, frame: JSON.parse(bytes.toString()) as ClaudeFrame }, bytes.length, retryProcessChange);
       return;
     }
     // Queue all fragments synchronously: no other frame may interleave them.
@@ -183,13 +194,13 @@ export class RemoteAgent extends EventEmitter {
     await Promise.all(writes);
   }
 
-  private async control(request: ClaudeFrame): Promise<ClaudeFrame> {
+  private async control(request: ClaudeFrame, retryProcessChange = false): Promise<ClaudeFrame> {
     if (this.sleeping) await this.ensureProcess();
     const id = randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.controls.delete(id); reject(new Error(`Claude timed out handling ${String(request.subtype)}`)); }, this.options.controlTimeoutMs ?? 60_000);
       this.controls.set(id, { resolve, reject, timer });
-      void this.send({ type: 'control_request', request_id: id, request }).catch(error => {
+      void this.send({ type: 'control_request', request_id: id, request }, retryProcessChange).catch(error => {
         clearTimeout(timer); this.controls.delete(id); reject(error);
       });
     });
@@ -209,6 +220,7 @@ export class RemoteAgent extends EventEmitter {
   async setModel(model: string): Promise<void> {
     if (this.status !== 'ready') throw new Error('Wait for Claude to finish before switching models');
     if (!model || /\s|[\x00-\x1f\x7f-\x9f]/u.test(model)) throw new Error('Specify one model alias or full model ID');
+    this.invalidateSettings();
     this.setStatus('configuring');
     try {
       await this.ensureProcess(true);
@@ -233,10 +245,26 @@ export class RemoteAgent extends EventEmitter {
   }
 
   /** Menu reads never occupy the prompt queue or submit a user/model turn. */
-  async query(request: MenuQuery): Promise<ClaudeFrame> {
+  async query(request: MenuQuery, options: { cached?: boolean } = {}): Promise<ClaudeFrame> {
     if (!['ready', 'working', 'interrupting', 'configuring'].includes(this.status)) throw new Error('Claude is not connected yet');
-    if (this.unsupportedQueries.has(request.subtype)) throw new Error(`Unsupported control request subtype: ${request.subtype}`);
-    try { await this.ensureProcess(true); return await this.control(request); }
+    if (options.cached && request.subtype === 'get_settings' && this.status === 'ready' && this.settingsSnapshot && this.settingsSnapshot.expires > Date.now()) return this.settingsSnapshot.value;
+    try {
+      await this.ensureProcess();
+      if (this.unsupportedQueries.has(request.subtype)) throw new Error(`Unsupported control request subtype: ${request.subtype}`);
+      let revision = this.settingsRevision;
+      let response: ClaudeFrame;
+      try { response = await this.control(request, true); }
+      catch (error) {
+        if (!processChanged(error)) throw error;
+        // The runtime rejected this input before delivery. Only reads take this
+        // shortcut; writes still check the process before their first attempt.
+        await this.ensureProcess(true);
+        revision = this.settingsRevision;
+        response = await this.control(request, true);
+      }
+      if (request.subtype === 'get_settings' && revision === this.settingsRevision && this.status === 'ready') this.settingsSnapshot = { value: response, expires: Date.now() + 30_000 };
+      return response;
+    }
     catch (error) {
       if (/Unsupported control request subtype/u.test((error as Error).message)) this.unsupportedQueries.add(request.subtype);
       throw error;
@@ -246,6 +274,7 @@ export class RemoteAgent extends EventEmitter {
   async configure(request: MenuChange): Promise<ClaudeFrame> {
     if (request.subtype === 'stop_task' && ['working', 'interrupting'].includes(this.status)) return this.control(request);
     if (this.status !== 'ready') throw new Error('Wait for Claude to finish before changing settings');
+    this.invalidateSettings();
     this.setStatus('configuring');
     try {
       await this.ensureProcess(true);
@@ -282,6 +311,7 @@ export class RemoteAgent extends EventEmitter {
     if (Buffer.byteLength(text) > 512 * 1024) throw new Error('The prompt is too large (maximum 512 KiB)');
     const bytes = this.encode({ type: 'user', uuid: randomUUID(), session_id: '', parent_tool_use_id: null, message: { role: 'user', content: text } });
     const submission = ++this.submission;
+    this.invalidateSettings();
     this.submitting = true;
     this.setStatus('working');
     try {
@@ -325,6 +355,7 @@ export class RemoteAgent extends EventEmitter {
 
   private frame(frame: ClaudeFrame) {
     if (frame.type === 'system' && frame.subtype === 'init') {
+      this.invalidateSettings();
       this.updateCommands(frame.slash_commands);
       if (Array.isArray(frame.plugins)) this.info.plugins = frame.plugins;
       if (typeof frame.permissionMode === 'string') this.info.current_permission_mode = frame.permissionMode;
@@ -360,6 +391,7 @@ export class RemoteAgent extends EventEmitter {
     } else if (frame.type === 'control_cancel_request') {
       this.approvals.delete(String(frame.request_id)); this.emit('approvals');
     } else if (frame.type === 'result') {
+      this.invalidateSettings();
       if (this.status === 'interrupting') frame = { ...frame, juiced_interrupted: true };
       this.approvals.clear(); this.emit('approvals'); if (!this.initializing) this.setStatus('ready');
     }
@@ -384,11 +416,14 @@ export class RemoteAgent extends EventEmitter {
     } else if (event.type === 'approval-answer') {
       this.approvals.delete(event.id); this.emit('approvals');
     } else if (event.type === 'reset') {
+      this.invalidateSettings();
+      this.unsupportedQueries.clear();
       this.decoder = new ClaudeDecoder(); this.approvals.clear(); this.emit('approvals');
       this.userChunks.clear();
       this.sleeping = !event.epoch || event.epoch !== this.epoch;
       if (event.interrupted) this.frame({ type: 'result', juiced_interrupted: true, result: 'The remote process stopped. Saved output was recovered; the interrupted prompt was not resubmitted.' });
     } else if (event.type === 'state') {
+      if (event.state === 'sleeping' || event.state === 'working') this.invalidateSettings();
       this.remoteState = event.state;
       this.sleeping = event.state === 'sleeping';
       if (!this.initializing) this.setStatus(event.state === 'working' ? 'working' : 'ready');
@@ -438,6 +473,7 @@ export class RemoteAgent extends EventEmitter {
       } catch (error) {
         if (this.controller.signal.aborted) return;
         if (watchdog?.aborted) { recover = this.remoteState === 'working'; continue; }
+        this.invalidateSettings();
         const expired = ['event_cursor_expired', 'event_stream_reset'].includes(String((error as { code?: string }).code));
         if (error instanceof RemoteProcessError || !expired && !this.retryable(error)) throw error;
         recover = true;
