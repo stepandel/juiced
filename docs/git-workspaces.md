@@ -114,14 +114,20 @@ database data. This includes other project folders sharing an overridden
 workspace. Import remote commits you want to keep before deleting. Local files,
 branches, and previously imported Git refs are retained.
 
-Deletion requires Cantelop account authentication (`cantelop login`), a Cantelop
-CLI with `workspace list/delete` support, and a console with
-`DELETE /v1/workspaces/{id}`. Claude sign-in and a runtime deployment are not
-required. The SDK remains at 1.2.0. Older Cantelop CLIs report an upgrade error.
-The required Cantelop changes are tracked in
-[Cantelop PR #355](https://github.com/stepandel/cantelop/pull/355) and are
-separate from the Git transfer feature. Deploy that console change and release
-its CLI before using deletion against production.
+Deletion uses the SDK's `workspace.inspect()` and `workspace.delete()` with
+the same configured app credentials as Juiced's other SDK operations. It does
+not shell out to Cantelop or require account login or Claude sign-in. Juiced
+pins the SDK source revision containing these methods until a registry release
+is available. The SDK API is tracked in
+[SDK PR #57](https://github.com/stepandel/cantelop-sdk/pull/57).
+
+The required platform support is tracked in
+[Cantelop PR #355](https://github.com/stepandel/cantelop/pull/355). Deploy its
+console, gateway, and outbound Worker changes and rebuild the Juiced App Edge
+with the updated SDK before using deletion against production. The two commands
+do not start a Session Sandbox or require a matching Session runtime identity.
+Local `cantelop dev` supports inspection but returns
+`workspace_deletion_unavailable_in_local_dev` for deletion.
 
 Remote purge is asynchronous. Wait for deletion to finish before launching
 again; a later launch creates a fresh workspace from the current local HEAD
@@ -132,6 +138,7 @@ again; a later launch creates a fresh workspace from the current local HEAD
 ```sh
 npm run check
 npm test
+npm run test:delete:local
 npm run build
 npm run build:runtime
 cantelop deploy

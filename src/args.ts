@@ -88,7 +88,7 @@ uncommitted work, run sync --to-workspace --include-uncommitted before launching
 Delete removes the entire remote workspace, including its files and Claude login.
 It asks for confirmation; --yes confirms deletion in scripts. Local files are kept.
 Use juiced claude -- <prompt> for literal prompts named login, sync, fast-forward,
-or delete. Deletion requires cantelop login and a CLI with workspace delete support.
+or delete. Deletion uses the configured Cantelop app credentials through the SDK.
 Non-Git directories keep continuous file sync, excluding .git, .env*,
 node_modules, dist, and coverage.
 Claude login is separate for each project workspace.

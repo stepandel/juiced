@@ -27,7 +27,7 @@ try {
   else if (args.command === 'version') process.stdout.write('juiced 0.1.0\n');
   else if (args.command === 'claude' && args.action === 'delete') {
     const project = await selectProject(process.cwd(), args.workspace);
-    await deleteWorkspace(claudeApp.name, project.workspace, args.yes, controller.signal);
+    await deleteWorkspace(claudeApp, project.workspace, args.yes, controller.signal);
   } else if (args.command === 'claude') {
     const project = await selectProject(process.cwd(), args.workspace);
     const workspace = claudeApp.workspace({ slug: project.workspace });

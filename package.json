@@ -25,10 +25,11 @@
     "probe:reconciliation": "node scripts/probe-cantelop-reconciliation.mjs",
     "prepack": "npm run build",
     "test:sync:live": "node scripts/test-sync-live.mjs",
-    "test:git:live": "node scripts/test-git-live.mjs"
+    "test:git:live": "node scripts/test-git-live.mjs",
+    "test:delete:local": "npm run build && node scripts/test-delete-local.mjs"
   },
   "dependencies": {
-    "@cantelop/sdk": "1.2.0",
+    "@cantelop/sdk": "git+https://github.com/stepandel/cantelop-sdk.git#cf94273c6c015753fcc96037de762f4a4bfebad0",
     "ink": "^8.0.0",
     "react": "^19.3.1"
   },
