@@ -6,6 +6,9 @@ import type { SessionActivationContext, SessionContext, SessionHarnessContext, S
 import { decodeInput, dimensions, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
 import { PTY_HELPER } from './pty.js';
 import { validProjectName } from '../project-name.js';
+import { relativeProjectPath } from '../git.js';
+import { createGitRuntime, projectPaths, readBinding } from './git.js';
+import { acquireCheckout, acquireSessionCheckout, CheckoutBusy } from './project-state.js';
 
 type Work = { signal: AbortSignal; output: SessionOutput<TerminalEvent> };
 type Start = Extract<TerminalCommand, { type: 'start' }>;
@@ -20,6 +23,7 @@ function validateStart(command: Start): void {
   dimensions(command.columns, command.rows);
   if (typeof command.tty !== 'boolean' || !Array.isArray(command.argv) ||
       (command.directoryName !== undefined && !validProjectName(command.directoryName)) ||
+      (command.git !== undefined && (!command.directoryName || !/^[a-f0-9]{64}$/.test(command.git.binding) || !relativeProjectPath(command.git.relativeDirectory))) ||
       command.argv.some(arg => typeof arg !== 'string' || arg.includes('\0')) ||
       Buffer.byteLength(JSON.stringify(command.argv)) > 64 * 1024 ||
       typeof command.term !== 'string' || !/^[A-Za-z0-9._+-]{1,64}$/.test(command.term)) {
@@ -65,7 +69,7 @@ export function createTerminal(
     return { ok: true };
   }
 
-  async function run(command: Start, work: Work): Promise<TerminalReply> {
+  async function runTerminal(command: Start, work: Work): Promise<TerminalReply> {
     validateStart(command);
     if (started) throw new Error('Each session can start exactly one terminal');
     started = true;
@@ -84,6 +88,11 @@ export function createTerminal(
         await work.output.send({ type: 'error', message }).catch(() => {});
         throw new Error(message, { cause });
       }
+    }
+    if (command.git?.relativeDirectory) {
+      const candidate = join(workingDirectory, command.git.relativeDirectory);
+      if (await realpath(candidate) !== candidate || !(await lstat(candidate)).isDirectory()) throw new Error('Unsafe Git project working directory');
+      workingDirectory = candidate;
     }
     await mkdir(join(workspace, '.claude'), { recursive: true, mode: 0o700 });
     const env: NodeJS.ProcessEnv = {
@@ -175,7 +184,27 @@ export function createTerminal(
   }
 
   return {
-    run,
+    async run(command: Start, work: Work): Promise<TerminalReply> {
+      validateStart(command);
+      const workspace = options.workspace ?? process.cwd();
+      const controller = new AbortController();
+      let lease: Awaited<ReturnType<typeof acquireCheckout>> | undefined;
+      try {
+        if (command.directoryName) {
+          let paths;
+          try { paths = await projectPaths(workspace, command.directoryName); }
+          catch (error) { await work.output.send({ type: 'error', message: 'The project directory is unavailable or unsafe.' }); throw error; }
+          if (command.git) {
+            lease = await acquireSessionCheckout(await context.database(), command.directoryName, context.session.id, AbortSignal.any([context.signal, work.signal]), error => { controller.abort(error); stop?.(); });
+            const binding = await readBinding(paths.metadata);
+            if (binding?.binding !== command.git.binding) throw new Error('The Git workspace binding changed. Reconnect with Juiced.');
+            const gitInfo = await lstat(join(paths.target, '.git'));
+            if (!gitInfo.isDirectory() || gitInfo.isSymbolicLink()) throw new Error('Unsafe Git workspace directory');
+          } else if (await readBinding(paths.metadata)) throw new Error('This Git workspace requires a matching Juiced Git session. Rebuild the local CLI.');
+        }
+        return await runTerminal(command, { ...work, signal: AbortSignal.any([work.signal, controller.signal]) });
+      } finally { await lease?.release(); }
+    },
     input,
     cancel() {
       if (!stop) return false;
@@ -187,17 +216,34 @@ export function createTerminal(
 
 // Each Session has its own runtime process and its own terminal instance.
 let terminal: ReturnType<typeof createTerminal>;
+let gitRuntime: ReturnType<typeof createGitRuntime>;
 
 export function activateTerminal(context: SessionActivationContext<TerminalCommand, TerminalEvent>): void {
   terminal = createTerminal(context);
+  gitRuntime = createGitRuntime(context);
 }
 
 export async function receiveTerminal(context: SessionContext<TerminalCommand, TerminalEvent, TerminalReply>): Promise<void> {
   const command = context.message.payload;
+  if (command.type === 'git') {
+    try {
+      if (command.action === 'download') {
+        context.activity.start(async activity => {
+          try { await gitRuntime.handle(command, activity.output, activity.signal); }
+          catch (error) { await activity.output.send({ type: 'git-error', id: command.id, message: error instanceof Error ? error.message : 'Git download failed' }); }
+        }, { timeoutMs: 240_000 });
+        context.reply({ ok: true });
+      } else context.reply({ ok: true, git: await gitRuntime.handle(command) });
+    } catch (error) {
+      context.reply({ ok: false, error: error instanceof Error ? error.message : 'Git workspace operation failed', ...(error instanceof CheckoutBusy ? { busy: error.kind, ...(error.stale.length ? { stale: error.stale } : {}) } : {}) });
+    }
+    return;
+  }
   if (command.type === 'start') {
     validateStart(command);
     context.activity.start(async activity => {
-      await terminal.run(command, activity);
+      try { await terminal.run(command, activity); }
+      catch (error) { if (!activity.signal.aborted) await activity.output.send({ type: 'error', message: error instanceof Error ? error.message : 'Remote terminal failed' }); throw error; }
     }, { timeoutMs: 90_000, onCancel: () => { terminal.cancel(); } });
   } else {
     try {

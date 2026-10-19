@@ -1,18 +1,22 @@
+import type { GitCommand, GitEvent, GitResult, StaleLease } from './git-protocol.js';
+
 export type TerminalCommand =
-  | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string; directoryName?: string }
+  | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string; directoryName?: string; git?: { binding: string; relativeDirectory: string } }
   | { type: 'input'; data: string }
   | { type: 'resize'; columns: number; rows: number }
   | { type: 'signal'; signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP' }
   | { type: 'eof' }
-  | { type: 'heartbeat' };
+  | { type: 'heartbeat' }
+  | GitCommand;
 
 export type TerminalEvent =
   | { type: 'ready' }
   | { type: 'output'; channel: 'stdout' | 'stderr'; data: string }
   | { type: 'exit'; code: number }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | GitEvent;
 
-export type TerminalReply = { ok: true };
+export type TerminalReply = { ok: true; git?: GitResult } | { ok: false; error: string; stale?: StaleLease[]; busy?: 'sessions' | 'maintenance' };
 
 export const MAX_INPUT_BYTES = 16 * 1024;
 export const MAX_BUFFERED_INPUT = 1024 * 1024;

@@ -28,7 +28,7 @@ export class RemoteAgent extends EventEmitter {
   private cursor: SessionEventCursor | undefined;
   private diagnostic = '';
 
-  constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; directoryName?: string; beforeSubmit?: () => Promise<void> } = {}) { super(); }
+  constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string }; beforeSubmit?: () => Promise<void> } = {}) { super(); }
 
   private debug(event: string, detail: object = {}) {
     if (process.env.JUICED_DEBUG) console.error(JSON.stringify({ session: this.session.id, event, ...detail }));
@@ -51,7 +51,7 @@ export class RemoteAgent extends EventEmitter {
     if (this.started) throw new Error('The agent has already started');
     this.started = true;
     try {
-      const reply = await this.session.request({ type: 'start', argv: headlessArguments(argv), tty: false, columns: 120, rows: 36, term: 'dumb', ...(this.options.directoryName ? { directoryName: this.options.directoryName } : {}) }, { timeoutMs: 120_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(125_000)]) });
+      const reply = await this.session.request({ type: 'start', argv: headlessArguments(argv), tty: false, columns: 120, rows: 36, term: 'dumb', ...(this.options.directoryName ? { directoryName: this.options.directoryName } : {}), ...(this.options.git ? { git: this.options.git } : {}) }, { timeoutMs: 120_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(125_000)]) });
       if (reply?.ok !== true) throw new Error('Cantelop could not start Claude');
       this.reader = this.read();
       void this.reader.catch(error => this.fail(error));

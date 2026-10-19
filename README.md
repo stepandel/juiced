@@ -1,5 +1,7 @@
 # Juiced
 
+Git repositories now use explicit Git transfers. See [Git workspaces](docs/git-workspaces.md) for snapshot transfer, importing commits, optional fast-forwarding, and migration from file sync. The continuous-sync description below applies to non-Git directories.
+
 Run the real Claude Code CLI in a Cantelop session, attached to your local terminal:
 
 ```sh

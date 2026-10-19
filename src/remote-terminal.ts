@@ -31,7 +31,7 @@ export async function runRemoteTerminal(
   session: TerminalSession,
   argv: string[],
   io: TerminalIO,
-  options: { signal?: AbortSignal; term?: string; startupTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; inputBatchMs?: number; directoryName?: string } = {},
+  options: { signal?: AbortSignal; term?: string; startupTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; inputBatchMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string } } = {},
 ): Promise<number> {
   const controller = new AbortController();
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
@@ -149,7 +149,7 @@ export async function runRemoteTerminal(
   try {
     signal.throwIfAborted();
     startAttempted = true;
-    await session.request({ type: 'start', argv, tty, ...size(io.stdout), term: options.term ?? 'xterm-256color', ...(options.directoryName ? { directoryName: options.directoryName } : {}) },
+    await session.request({ type: 'start', argv, tty, ...size(io.stdout), term: options.term ?? 'xterm-256color', ...(options.directoryName ? { directoryName: options.directoryName } : {}), ...(options.git ? { git: options.git } : {}) },
       { timeoutMs: 120_000, signal });
     let failures = 0;
     while (true) {

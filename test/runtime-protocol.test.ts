@@ -8,8 +8,10 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { createSessionRuntimeHandler } from '@cantelop/sdk/runtime';
+import { createClient } from '@libsql/client';
+import type { WorkspaceDatabase } from '@cantelop/sdk/session';
 import { activateTerminal, receiveTerminal } from '../src/runtime/terminal.js';
-import type { TerminalCommand, TerminalEvent } from '../src/protocol.js';
+import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
 
 test('native runtime keeps terminal work alive after start intake and handles input, heartbeat, output acknowledgments and exit', { timeout: 10_000 }, async t => {
   const previousDirectory = process.cwd();
@@ -75,4 +77,38 @@ test('native runtime keeps terminal work alive after start intake and handles in
   const text = events.filter(event => event.type === 'output').map(event => Buffer.from(event.data, 'base64').toString()).join('');
   assert.match(text, /native intake 🍈/);
   assert.deepEqual(events.at(-1), { type: 'exit', code: 4 });
+});
+
+test('native runtime routes Git maintenance without starting Claude and returns actionable errors', { timeout: 10_000 }, async t => {
+  const previous = process.cwd();
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'juiced-git-native-')));
+  const db = createClient({ url: `file:${join(root, 'db')}` });
+  process.chdir(root);
+  const sandboxId = `sbx-${'3'.repeat(32)}`;
+  const server = createServer(createSessionRuntimeHandler<TerminalCommand, TerminalEvent, TerminalReply>({
+    onActivate(context) { activateTerminal({ ...context, database: async () => db as WorkspaceDatabase }); },
+    receive(context) { return receiveTerminal({ ...context, database: async () => db as WorkspaceDatabase }); },
+  }, { sandboxId }));
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const origin = `http://127.0.0.1:${address.port}`;
+  t.after(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); process.chdir(previous); db.close(); await rm(root, { recursive: true, force: true }); });
+  const request = async (path: string, body?: unknown) => {
+    const response = await fetch(origin + path, { headers: { 'X-Cantelop-Sandbox-ID': sandboxId, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }) });
+    assert.ok(response.ok); return response.json();
+  };
+  const call = async (payload: TerminalCommand) => {
+    const id = `msg_${randomUUID().replaceAll('-', '')}`;
+    await request('/__cantelop/v2/messages', { session: { id: 'git-test', workspace_id: `wsp_${'4'.repeat(32)}`, keep_alive_seconds: 120 }, message: { id, payload }, reply: true });
+    for (let i = 0; i < 100; i++) {
+      const state = await request(`/__cantelop/v2/messages/${id}`);
+      if (state.state === 'succeeded') return (await request(`/__cantelop/v2/messages/${id}/reply`)).reply;
+      assert.notEqual(state.state, 'failed', JSON.stringify(state)); await delay(5);
+    }
+    throw new Error('Git command timed out');
+  };
+  const base = { type: 'git' as const, directoryName: 'project', binding: 'a'.repeat(64) };
+  assert.deepEqual(await call({ ...base, action: 'status' }), { ok: true, git: { status: { initialized: false } } });
+  assert.deepEqual(await call({ ...base, action: 'export', id: randomUUID(), known: 'b'.repeat(40) }), { ok: false, error: 'Initialize or recover this Git workspace before importing commits.' });
+  assert.equal((await request('/__cantelop/v2/runtime')).activity, null);
 });
