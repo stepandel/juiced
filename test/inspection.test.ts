@@ -11,7 +11,7 @@ import { CantelopClient, type AppCommandEnvelope, type SessionEvent } from '@can
 import { parseArguments } from '../src/args.js';
 import { discoverRepository, git, gitText, sha256 } from '../src/git.js';
 import { captureInspection } from '../src/inspection-snapshot.js';
-import { compareInspection, renderInspection } from '../src/inspection-view.js';
+import { compareInspection, renderInspection, renderRemoteListing } from '../src/inspection-view.js';
 import { InspectionIncomplete, validateInspectionSnapshot, type InspectionCommand, type InspectionEvent } from '../src/inspection-protocol.js';
 import { inspectWorkspace, remoteSnapshot } from '../src/inspect-workspace.js';
 import { inspectRemote } from '../src/runtime/inspection.js';
@@ -53,7 +53,7 @@ async function state(root: string, prefix = ''): Promise<unknown[]> {
 
 test('inspection commands validate paths/options and preserve literal Claude prompts', () => {
   for (const action of ['ls', 'peek'] as const) {
-    assert.deepEqual(parseArguments(['--workspace', 'chosen', 'claude', action], {}), { command: 'claude', action, workspace: 'chosen', path: '.', includeIgnored: false, argv: [] });
+    assert.deepEqual(parseArguments(['--workspace', 'chosen', 'claude', action], {}), { command: 'claude', action, workspace: 'chosen', path: '.', includeIgnored: false, ...(action === 'peek' ? { changesOnly: false } : {}), argv: [] });
     assert.equal(parseArguments(['claude', action, '--help'], {}).command, 'help');
     const selected = parseArguments(['claude', action, '--include-ignored', 'src/'], {});
     assert.equal(selected.command === 'claude' && selected.action === action && 'path' in selected && selected.path, 'src/');
@@ -61,6 +61,11 @@ test('inspection commands validate paths/options and preserve literal Claude pro
     for (const extra of [['--include-ignored'], ['--wat'], ['a', 'b'], ['../other'], ['/etc'], ['.git/config'], ['a/../../b'], ['a\\b']]) assert.throws(() => parseArguments(['claude', action, ...extra], {}));
     assert.deepEqual(parseArguments(['claude', '--', action], {}), { command: 'claude', action: 'run', workspace: undefined, argv: [action] });
   }
+  assert.deepEqual(parseArguments(['claude', 'peek', '--changes-only', 'src/'], {}), { command: 'claude', action: 'peek', workspace: undefined, path: 'src/', includeIgnored: false, changesOnly: true, argv: [] });
+  assert.throws(() => parseArguments(['claude', 'ls', '--changes-only'], {}), /Usage: juiced claude ls/);
+  assert.throws(() => parseArguments(['claude', 'peek', '--changes-only', '--changes-only'], {}), /Usage: juiced claude peek/);
+  const literal = parseArguments(['claude', 'peek', '--', '--changes-only'], {});
+  assert.equal(literal.command === 'claude' && literal.action === 'peek' && literal.path, '--changes-only');
 });
 
 test('Git snapshots include dirty/untracked work and summarize descendants without changing repositories', async t => {
@@ -170,17 +175,28 @@ test('large descendant sets remain one directory row and rendering wraps safely'
   assert.equal(comparison.rows.length, 5);
   const base = { localRoot: f.local, remoteRoot: f.remote, workspace: 'chosen', workspaceId: `wsp_${'a'.repeat(32)}`, includeIgnored: false };
   for (const columns of [80, 40, 20]) {
-    const view = renderInspection(comparison, { ...base, action: 'peek', columns });
+    const view = renderInspection(comparison, { ...base, changesOnly: false, columns });
     assert.ok(view.split('\n').every(line => stringWidth(line) <= columns), `${columns}-column overflow`);
     assert.ok(!view.includes('\u001b'));
     assert.ok(!view.includes('generated-'));
+    const listing = renderRemoteListing(comparison.local, { ...base, columns });
+    assert.ok(listing.split('\n').every(line => stringWidth(line) <= columns));
+    assert.ok(!listing.includes('\u001b'));
+    assert.match(listing.replace(/\n/g, ''), /\\u000a\\u001b/);
   }
-  const ls = renderInspection(comparison, { ...base, action: 'ls', columns: undefined });
-  const peek = renderInspection(comparison, { ...base, action: 'peek', columns: undefined });
-  assert.match(ls, /README\.md\s+=\s+README\.md/);
-  assert.doesNotMatch(peek, /README\.md\s+=/);
-  assert.equal(ls.trim().split('\n').at(-2), peek.trim().split('\n').at(-2));
-  assert.match(ls, /\\u000a\\u001b/);
+  const peek = renderInspection(comparison, { ...base, changesOnly: false, columns: undefined });
+  const changes = renderInspection(comparison, { ...base, changesOnly: true, columns: undefined });
+  const listing = renderRemoteListing(comparison.remote, { ...base, columns: undefined });
+  assert.match(peek, /README\.md\s+=\s+README\.md/);
+  assert.doesNotMatch(changes, /README\.md\s+=/);
+  assert.equal(peek.trim().split('\n').at(-2), changes.trim().split('\n').at(-2));
+  assert.match(peek, /\\u000a\\u001b/);
+  assert.match(listing, /^README\.md$/m);
+  assert.match(listing, /^src\/$/m);
+  assert.doesNotMatch(listing, /Local:|Local HEAD:|matching|different|generated-/);
+  const matching = compareInspection(comparison.remote, comparison.remote);
+  assert.match(renderInspection(matching, { ...base, changesOnly: false, columns: undefined }), /README\.md\s+=\s+README\.md/);
+  assert.match(renderInspection(matching, { ...base, changesOnly: true, columns: undefined }), /No differences observed/);
 });
 
 test('remote inspection preserves missing state and publication journals without recovery', async t => {
@@ -237,7 +253,7 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
     },
   } });
   const stdout = new PassThrough(); let text = ''; stdout.on('data', bytes => text += String(bytes));
-  const options = { action: 'peek' as const, path: '.', includeIgnored: false };
+  const options = { action: 'peek' as const, path: '.', includeIgnored: false, changesOnly: false };
   assert.equal(await inspectWorkspace(app, f.local, options, f.controller.signal, stdout), 2);
   assert.deepEqual(calls.map(call => call.command.type), ['workspace.inspect']);
   calls.length = 0; exists = true; text = '';
@@ -247,6 +263,19 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
   assert.ok(calls.every(call => ['workspace.inspect', 'request', 'stream', 'stop'].includes(call.command.type)));
   assert.equal(calls.filter(call => call.command.type === 'stop').length, 1);
   assert.deepEqual(await state(f.workspace), before);
+  await writeFile(join(f.local, 'local-only.txt'), 'local\n');
+  await writeFile(join(f.remote, 'remote-only.txt'), 'remote\n');
+  const remoteBefore = await state(f.workspace);
+  if (process.getuid?.() !== 0) await chmod(join(f.local, 'README.md'), 0o000);
+  text = ''; calls.length = 0;
+  try {
+    assert.equal(await inspectWorkspace(app, f.local, { action: 'ls', path: '.', includeIgnored: false }, f.controller.signal, stdout), 0);
+    assert.match(text, /^remote-only\.txt$/m);
+    assert.match(text, /^README\.md$/m);
+    assert.doesNotMatch(text, /local-only|Local:|Local HEAD:|matching|different/);
+    assert.equal(calls.filter(call => call.command.type === 'stop').length, 1);
+    assert.deepEqual(await state(f.workspace), remoteBefore);
+  } finally { await chmod(join(f.local, 'README.md'), 0o644); }
 });
 
 test('invalid, truncated and reordered streams cannot produce a successful comparison', async t => {

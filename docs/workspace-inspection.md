@@ -1,7 +1,8 @@
 # Workspace inspection
 
-`juiced claude ls` shows immediate local and remote entries side by side.
-`juiced claude peek` shows the same view with matching entries hidden. A directory
+`juiced claude ls` lists immediate remote files and directories.
+`juiced claude peek` compares immediate local and remote entries side by side,
+including matching entries. Use `peek --changes-only` to hide matches. A directory
 row compares everything beneath it; child files appear when you drill into that
 directory. The commands inspect Git working trees through the SDK without
 starting Claude or synchronizing files.
@@ -10,27 +11,35 @@ starting Claude or synchronizing files.
 
 ```sh
 juiced claude ls
+juiced claude ls src/
 juiced claude peek
+juiced claude peek --changes-only
 juiced claude peek src/
 juiced claude peek src/index.ts
 juiced claude peek --include-ignored .env
 juiced --workspace my-project claude peek
 ```
 
-A typical root view contains one row per immediate entry:
+`ls` shows remote names in a single column, with `/` after directories and `@`
+after symlinks. Its header identifies the workspace and remote path; it has no
+local column or comparison counts. Local-only files are absent from this list,
+and local file contents are not inspected.
+
+A typical `peek` root view contains one row per immediate entry:
 
 ```text
 LOCAL             REMOTE
+README.md       = README.md
 src/            ! src/
 docs/           L -
 -               R scripts/
 package.json    ! package.json
 ```
 
-`ls` also shows matching rows marked `=`. `peek src/` displays the immediate
-entries in `src`, including summaries of its subdirectories. The footer counts
-entries at the selected level, including matching entries hidden by `peek`.
-The symbols mean:
+`peek src/` displays the immediate entries in `src`, including summaries of its
+subdirectories. The footer counts entries at the selected level, including
+matching entries hidden by `--changes-only`. That flag is supported only by
+`peek`; `ls --changes-only` is rejected. The comparison symbols mean:
 
 | Symbol | Meaning |
 | --- | --- |
@@ -40,7 +49,7 @@ The symbols mean:
 | `R` | Included only in the remote Git snapshot |
 | `?` | Comparison excluded by one side's ignore rules |
 
-Headers identify the selected workspace and canonical ID, local and remote
+Comparison headers identify the selected workspace and canonical ID, local and remote
 paths, and both actual branch names and HEADs. Symlinks have an `@` suffix;
 comparison uses their target text. Directory rows have a `/` suffix. Long paths
 wrap independently in both columns without truncation. Below 30 terminal
@@ -58,16 +67,19 @@ existing Git workspace commands, including linked local worktrees.
 Exit status is 0 for a completed view, including views containing differences;
 1 for usage, authentication, or transport failures; and 2 for incomplete or
 excluded comparisons. Missing workspaces and unavailable project checkouts are
-reported explicitly. A path confirmed absent on both sides has no rows and
-exits 0. SIGINT retains the CLI's status 130.
+reported explicitly. `ls` also exits 2 for a missing or excluded remote path.
+A `peek` path confirmed absent on both sides has no rows and exits 0. SIGINT
+retains the CLI's status 130.
 
 ## Git snapshots and ignored files
 
-Git supplies the comparison model. Each side seeds a private index from its
+Git supplies the comparison model. For `peek`, each side seeds a private index from its
 existing index entries, stages current contents into a temporary object
 directory, and writes a temporary tree. This captures tracked edits, deletions,
 staged additions, and non-ignored untracked files. The real index, Git object
 store, refs, and working files are unchanged. No temporary commit is created.
+`ls` obtains only the remote snapshot, using local repository metadata to resolve
+the existing workspace pairing and relative path.
 
 A directory's tree ID represents its descendants, allowing the client to compare
 directory summaries without downloading files or importing bundles. Only the
@@ -92,7 +104,7 @@ directory, including `.`. Git metadata is always outside the comparison.
 
 ## Live reads and failures
 
-The header labels the view as sequential live reads. Git captures each side
+The `peek` header labels the view as sequential live reads. Git captures each side
 independently, so the view is not an atomic snapshot across machines and cannot
 guarantee that a later sync succeeds. Git checks the temporary index against the
 working tree after capture; root identity, HEAD, branch, real index bytes,
@@ -112,7 +124,7 @@ and may start the inspection's own sandbox.
 
 ## SDK and runtime implementation
 
-The client first uses SDK 1.3.0 `workspace.inspect()` on the selected slug. Missing
+The client first uses SDK `workspace.inspect()` on the selected slug. Missing
 workspaces stop there. Existing workspaces are addressed by their inspected
 canonical ID for subsequent requests, preventing a replacement slug from
 redirecting the operation.
@@ -124,6 +136,9 @@ size and SHA-256 digest. The client rejects malformed, reordered, truncated, or
 corrupt streams and validates the snapshot schema. Inventory data is bounded to
 64 MiB and the operation to 240 seconds. Completion or failure stops only the
 inspection's own session and removes its temporary files.
+
+The distinction between `ls`, `peek`, and `peek --changes-only` is handled in the
+client, using the same remote snapshot protocol.
 
 No SDK or platform changes are required. The runtime image already includes
 Git. Juiced uses the SDK request/stream transport directly; these commands do not
@@ -140,7 +155,8 @@ npm test
 npm run test:inspection:local
 ```
 
-The focused inspection tests cover native Git semantics, dirty and staged work,
+The focused inspection tests cover remote-only listing, complete and filtered
+comparisons, listing with unreadable local files, native Git semantics, dirty and staged work,
 binaries, symlinks, modes, ignored files and directories, literal paths, narrow
 terminals, directory summaries, linked worktrees, unavailable checkouts, preserved
 journals, and invalid streams. Preservation checks compare complete fixture
@@ -151,6 +167,7 @@ acknowledgments, and successful inspection while database access is rejected and
 the Claude executable is absent. The built CLI test passes through the real SDK
 Edge adapter into a disposable platform fixture. Its PATH contains Git only,
 with no account credentials or Cantelop CLI. It covers missing-workspace lookup,
-canonical IDs, root summaries, drill-down, ignored inclusion, and recovery
-refusal. These local fixtures verify the protocol and client; they do not deploy
+canonical IDs, remote listings, complete and filtered root summaries, drill-down,
+ignored inclusion, and recovery refusal. These local fixtures verify the protocol
+and client; they do not deploy
 a hosted app release.

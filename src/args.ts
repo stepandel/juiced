@@ -5,7 +5,8 @@ export type Arguments =
   | ({ command: 'claude'; workspace: string | undefined; argv: string[] } & (
     | { action: 'run' | 'login' | 'fast-forward' }
     | { action: 'delete'; yes: boolean }
-    | { action: 'ls' | 'peek'; path: string; includeIgnored: boolean }
+    | { action: 'ls'; path: string; includeIgnored: boolean }
+    | { action: 'peek'; path: string; includeIgnored: boolean; changesOnly: boolean }
     | { action: 'sync'; direction: 'to-workspace' | 'from-workspace'; includeUncommitted: boolean }
   ));
 
@@ -29,17 +30,20 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
     if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1) };
     if (argv[0] === 'ls' || argv[0] === 'peek') {
       const action = argv[0];
+      const usage = `Usage: juiced claude ${action} [--include-ignored]${action === 'peek' ? ' [--changes-only]' : ''} [PATH]`;
       if (argv.length === 2 && ['--help', '-h'].includes(argv[1]!)) return { command: 'help', workspace, argv: [] };
-      let path: string | undefined, includeIgnored = false, literal = false;
+      let path: string | undefined, includeIgnored = false, changesOnly = false, literal = false;
       for (const arg of argv.slice(1)) {
         if (!literal && arg === '--') { literal = true; continue; }
         if (!literal && arg === '--include-ignored' && !includeIgnored) { includeIgnored = true; continue; }
-        if ((!literal && arg.startsWith('-')) || path !== undefined) throw new Error(`Usage: juiced claude ${action} [--include-ignored] [PATH]`);
+        if (!literal && arg === '--changes-only' && action === 'peek' && !changesOnly) { changesOnly = true; continue; }
+        if ((!literal && arg.startsWith('-')) || path !== undefined) throw new Error(usage);
         path = arg;
       }
       if (includeIgnored && path === undefined) throw new Error('--include-ignored requires an explicit PATH.');
       inspectionScope(path);
-      return { command, action, workspace, path: path ?? '.', includeIgnored, argv: [] };
+      const options = { command: 'claude' as const, workspace, path: path ?? '.', includeIgnored, argv: [] };
+      return action === 'peek' ? { ...options, action, changesOnly } : { ...options, action };
     }
     if (argv[0] === 'delete') {
       if (argv.length !== 1 && !(argv.length === 2 && argv[1] === '--yes')) throw new Error('Usage: juiced claude delete [--yes]');
@@ -80,7 +84,7 @@ Usage:
   juiced [--workspace SLUG] claude fast-forward
   juiced [--workspace SLUG] claude delete [--yes]
   juiced [--workspace SLUG] claude ls [--include-ignored] [PATH]
-  juiced [--workspace SLUG] claude peek [--include-ignored] [PATH]
+  juiced [--workspace SLUG] claude peek [--include-ignored] [--changes-only] [PATH]
 
 Examples:
   juiced claude login
@@ -106,7 +110,8 @@ optionally applies imported commits to a clean local source branch. To include
 uncommitted work, run sync --to-workspace --include-uncommitted before launching.
 Delete removes the entire remote workspace, including its files and Claude login.
 It asks for confirmation; --yes confirms deletion in scripts. Local files are kept.
-ls compares immediate local/remote entries; peek hides matching entries. Directory
+ls lists immediate remote entries. peek compares local and remote entries side
+by side, including matches; --changes-only hides matching entries. Directory
 status includes descendants. Pass a path to drill down one level. Both inspect
 current Git-visible contents without syncing, changing the real index, or starting
 Claude. Ignored files are excluded; --include-ignored requires an explicit PATH.

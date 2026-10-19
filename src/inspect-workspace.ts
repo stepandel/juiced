@@ -5,13 +5,16 @@ import type { WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
 import { discoverRepository, sha256 } from './git.js';
 import { selectProject } from './project.js';
 import { captureInspection } from './inspection-snapshot.js';
-import { compareInspection, renderInspection } from './inspection-view.js';
+import { compareInspection, renderInspection, renderRemoteListing } from './inspection-view.js';
 import { INSPECTION_CHUNK_BYTES, INSPECTION_TIMEOUT_MS, MAX_INSPECTION_BYTES, InspectionIncomplete, inspectionScope, validateInspectionSnapshot, type InspectionSnapshot } from './inspection-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
 
 type Workspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'inspect' | 'session'>;
 type InspectionApp = { workspace(selector: WorkspaceSelector): Workspace };
-export type InspectionOptions = { action: 'ls' | 'peek'; workspace?: string | undefined; path: string; includeIgnored: boolean };
+export type InspectionOptions = { workspace?: string | undefined; path: string; includeIgnored: boolean } & (
+  | { action: 'ls' }
+  | { action: 'peek'; changesOnly: boolean }
+);
 
 export async function remoteSnapshot(workspace: Pick<Workspace, 'session'>, command: Extract<TerminalCommand, { type: 'inspect' }>, signal: AbortSignal): Promise<InspectionSnapshot> {
   const session = workspace.session({ keepAliveSeconds: 120 });
@@ -63,9 +66,16 @@ export async function inspectWorkspace(app: InspectionApp, directory: string, op
   const controller = new AbortController();
   const combined = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]);
   try {
+    const command: Extract<TerminalCommand, { type: 'inspect' }> = { type: 'inspect', id: randomUUID(), directoryName: project.directoryName, binding: repository.binding, scope, includeIgnored: options.includeIgnored };
+    const view = { remoteRoot: posix.join(project.remoteDirectory, scope), workspace: project.workspace, workspaceId: existing.id, includeIgnored: options.includeIgnored, columns: stdout.isTTY ? stdout.columns ?? 80 : undefined };
+    if (options.action === 'ls') {
+      const remote = await remoteSnapshot(app.workspace({ id: existing.id }), command, combined);
+      stdout.write(renderRemoteListing(remote, view));
+      return remote.kind === 'ignored' || remote.kind === 'missing' ? 2 : 0;
+    }
     const work = [
       captureInspection(repository.root, scope, options.includeIgnored, combined),
-      remoteSnapshot(app.workspace({ id: existing.id }), { type: 'inspect', id: randomUUID(), directoryName: project.directoryName, binding: repository.binding, scope, includeIgnored: options.includeIgnored }, combined),
+      remoteSnapshot(app.workspace({ id: existing.id }), command, combined),
     ];
     // Abort the sibling operation on failure and let both release their resources.
     const settled = await Promise.allSettled(work.map(promise => promise.catch(error => { controller.abort(error); throw error; })));
@@ -74,9 +84,7 @@ export async function inspectWorkspace(app: InspectionApp, directory: string, op
     const [local, remote] = settled.map(result => (result as PromiseFulfilledResult<InspectionSnapshot>).value) as [InspectionSnapshot, InspectionSnapshot];
     const comparison = compareInspection(local, remote);
     stdout.write(renderInspection(comparison, {
-      action: options.action, localRoot: repository.root, remoteRoot: posix.join(project.remoteDirectory, scope),
-      workspace: project.workspace, workspaceId: existing.id, includeIgnored: options.includeIgnored,
-      columns: stdout.isTTY ? stdout.columns ?? 80 : undefined,
+      ...view, changesOnly: options.changesOnly, localRoot: repository.root,
     }));
     return comparison.rows.some(row => row.status === 'excluded') || local.kind === 'ignored' || remote.kind === 'ignored' ? 2 : 0;
   } finally { controller.abort(); }

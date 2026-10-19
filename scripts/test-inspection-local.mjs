@@ -67,6 +67,7 @@ try {
   await writeFile(join(local, 'README.md'), 'matching\n'); await writeFile(join(local, '.gitignore'), '.env\n');
   await git(local, ['add', '.']); await git(local, ['commit', '-m', 'fixture']); await git(root, ['clone', '--no-hardlinks', local, remote]);
   await writeFile(join(remote, 'src', 'entry.ts'), 'remote dirty\n'); await writeFile(join(remote, 'src', 'new.bin'), Buffer.from([0, 1, 255]));
+  await writeFile(join(local, 'local-only.txt'), 'local\n'); await writeFile(join(remote, 'remote-only.txt'), 'remote\n');
   await writeFile(join(local, '.env'), 'local ignored\n'); await writeFile(join(remote, '.env'), 'remote ignored\n');
   const repository = await discoverRepository(local);
   await mkdir(join(workspace, '.juiced', 'project'), { recursive: true });
@@ -81,8 +82,18 @@ try {
   const run = (...args) => execute(process.execPath, [fileURLToPath(new URL('../bin/juiced.mjs', import.meta.url)), '--workspace', 'chosen', 'claude', ...args], { cwd: local, env, timeout: 20_000 });
   await assert.rejects(run('peek'), error => error.code === 2 && /does not exist/.test(error.stdout));
   assert.deepEqual(calls, ['/commands/workspace.inspect']); exists = true; calls.length = 0;
-  assert.match((await run('peek')).stdout, /src\/\s+!\s+src\//);
-  const all = (await run('ls')).stdout; assert.match(all, /README.md\s+=\s+README.md/); assert.doesNotMatch(all, /new.bin/);
+  const peek = (await run('peek')).stdout;
+  assert.match(peek, /src\/\s+!\s+src\//); assert.match(peek, /README\.md\s+=\s+README\.md/);
+  const changes = (await run('peek', '--changes-only')).stdout;
+  assert.match(changes, /src\/\s+!\s+src\//); assert.doesNotMatch(changes, /README\.md\s+=/);
+  const listing = (await run('ls')).stdout;
+  assert.match(listing, /^README\.md$/m); assert.match(listing, /^remote-only\.txt$/m);
+  assert.doesNotMatch(listing, /Local:|Local HEAD:|matching|different|local-only|new.bin/);
+  const listedChildren = (await run('ls', 'src/')).stdout;
+  assert.match(listedChildren, /^new\.bin$/m); assert.doesNotMatch(listedChildren, /README|Local:|matching/);
+  const listedFile = (await run('ls', '--include-ignored', '.env')).stdout;
+  assert.match(listedFile, /^\.env$/m); assert.doesNotMatch(listedFile, /remote ignored|local ignored/);
+  await assert.rejects(run('ls', 'missing'), error => error.code === 2 && /Path absent in the remote workspace/.test(error.stdout));
   const nested = (await run('peek', 'src/')).stdout; assert.match(nested, /new.bin/); assert.match(nested, /entry.ts/);
   await assert.rejects(run('peek', '.env'), error => error.code === 2 && /\[ignored\]/.test(error.stdout));
   assert.match((await run('peek', '--include-ignored', '.env')).stdout, /\.env\s+!\s+\.env/);
@@ -90,8 +101,8 @@ try {
   await assert.rejects(run('peek'), error => error.code === 2 && /pending recovery/.test(error.stderr));
   assert.equal(await readFile(journal, 'utf8'), 'pending'); assert.equal(await readFile(join(local, '.env'), 'utf8'), 'local ignored\n');
   assert.ok(calls.every(path => ['/commands/workspace.inspect', '/commands/request', '/commands/stream', '/commands/stop'].includes(path)));
-  assert.equal(stopped.length, 6);
-  console.log('Passed built CLI and SDK Edge inspection: compact directories, drill-down, ignored files, missing workspace, preserved journal, canonical IDs, and Git-only PATH.');
+  assert.equal(stopped.length, 10);
+  console.log('Passed built CLI and SDK Edge inspection: remote-only ls, complete peek, changes-only filter, drill-down, ignored files, missing paths/workspace, preserved journal, canonical IDs, and Git-only PATH.');
 } finally {
   lifetime.abort(); server.closeAllConnections(); await new Promise(resolve => server.close(() => resolve()));
   await rm(root, { recursive: true, force: true });

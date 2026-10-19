@@ -33,9 +33,28 @@ function wrap(value: string, columns: number): string[] {
   lines.push(line); return lines;
 }
 const pad = (value: string, width: number) => value + ' '.repeat(Math.max(0, width - stringWidth(value)));
-export function renderInspection(comparison: InspectionComparison, options: { action: 'ls' | 'peek'; localRoot: string; remoteRoot: string; workspace: string; workspaceId: string; includeIgnored: boolean; columns: number | undefined }): string {
+type ListingOptions = { remoteRoot: string; workspace: string; workspaceId: string; includeIgnored: boolean; columns: number | undefined };
+const entryText = (entry: TreeEntry) => inspectionText(entry.name) + (entry.mode === '040000' ? '/' : entry.mode === '120000' ? ' @' : '');
+export function renderRemoteListing(snapshot: InspectionSnapshot, options: ListingOptions): string {
+  const lines: string[] = [];
+  const line = (text: string) => lines.push(...(options.columns ? wrap(text, Math.max(1, options.columns)) : [text]));
+  line(`Workspace: ${inspectionText(options.workspace)} (${options.workspaceId})`);
+  line(`Remote: ${inspectionText(options.remoteRoot)}`);
+  line(options.includeIgnored ? 'Git view; ignored files included in the selected path.' : 'Git view; ignored files excluded.');
+  lines.push('');
+  if (snapshot.kind === 'ignored') line('Path is ignored. Use --include-ignored PATH to list it.');
+  else if (snapshot.kind === 'missing') line('Path absent in the remote workspace.');
+  else {
+    const entries = snapshot.kind === 'file' ? [snapshot.entry!] : snapshot.entries;
+    for (const entry of [...entries].sort((a, b) => Buffer.compare(Buffer.from(a.name), Buffer.from(b.name)))) line(entryText(entry));
+    if (!entries.length) line('No Git-visible entries in this scope.');
+    lines.push(''); line(`${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`);
+  }
+  return lines.join('\n') + '\n';
+}
+export function renderInspection(comparison: InspectionComparison, options: ListingOptions & { changesOnly: boolean; localRoot: string }): string {
   const { local, remote } = comparison;
-  const rows = comparison.rows.filter(row => options.action === 'ls' || row.status !== 'matching');
+  const rows = comparison.rows.filter(row => !options.changesOnly || row.status !== 'matching');
   const columns = options.columns === undefined ? undefined : Math.max(1, options.columns);
   const lines: string[] = [];
   const line = (text: string) => lines.push(...(columns ? wrap(text, columns) : [text]));
@@ -47,7 +66,7 @@ export function renderInspection(comparison: InspectionComparison, options: { ac
   line(options.includeIgnored ? 'Git view; ignored files included in the selected path.' : 'Git view; ignored files excluded.');
   line('One level; directory status includes descendants. Sequential live reads.');
   lines.push('');
-  const cell = (entry: TreeEntry | undefined, ignored: boolean) => ignored ? '[ignored]' : entry ? inspectionText(entry.name) + (entry.mode === '040000' ? '/' : entry.mode === '120000' ? ' @' : '') : '-';
+  const cell = (entry: TreeEntry | undefined, ignored: boolean) => ignored ? '[ignored]' : entry ? entryText(entry) : '-';
   const cells = rows.map(row => ({ left: cell(row.local, row.localIgnored), right: cell(row.remote, row.remoteIgnored), status: row.status }));
   const leftWidth = columns ? Math.max(1, Math.floor((columns - 3) / 2)) : Math.max(5, ...cells.map(row => stringWidth(row.left)));
   const rightWidth = columns ? Math.max(1, columns - leftWidth - 3) : undefined;
