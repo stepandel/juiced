@@ -9,10 +9,12 @@ and starts Claude in the corresponding remote subdirectory. Linked local Git
 worktrees are supported.
 
 Git repositories use explicit transfers. Local edits and remote edits do not
-automatically appear on the other side after the initial checkout. Automatic
-file sync is disabled for all directories. Non-Git directories use a persistent
-remote project folder, initially empty; existing remote files are retained.
-Explicit transfer commands require a Git repository.
+automatically appear on the other side after the initial checkout. Normal
+Claude launches do not sync files. Non-Git directories use a persistent remote
+project folder, initially empty; existing remote files are retained. They can
+explicitly reconcile files with `juiced claude sync --files`, or keep syncing
+in a separate terminal with `juiced claude sync --files --watch` until Ctrl+C.
+Git repositories use the commit and snapshot transfer commands below.
 
 ## Inspect local and remote work
 

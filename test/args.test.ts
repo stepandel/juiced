@@ -72,6 +72,20 @@ test('reserved subcommand names can still be sent as literal Claude prompts', ()
   }
 });
 
+test('file sync requires explicit opt-in and rejects Git transfer options', () => {
+  assert.deepEqual(parseArguments(['claude', 'sync', '--files'], {}), {
+    command: 'claude', action: 'file-sync', workspace: undefined, watch: false, argv: [],
+  });
+  assert.deepEqual(parseArguments(['--workspace', 'chosen', 'claude', 'sync', '--watch', '--files'], {}), {
+    command: 'claude', action: 'file-sync', workspace: 'chosen', watch: true, argv: [],
+  });
+  assert.equal(parseArguments(['claude', 'sync', '--help'], {}).command, 'help');
+  for (const flags of [['--watch'], ['--files', '--files'], ['--files', '--watch', '--watch'], ['--files', '--to-workspace'], ['--files', '--from-workspace'], ['--files', '--include-uncommitted'], ['--files', '--force']]) {
+    assert.throws(() => parseArguments(['claude', 'sync', ...flags], {}), /Usage/);
+  }
+  assert.match(HELP, /claude sync --files \[--watch\]/);
+});
+
 test('deletion is a Claude action and requires an explicit flag to bypass confirmation', () => {
   assert.deepEqual(parseArguments(['--workspace', 'chosen', 'claude', 'delete', '--yes'], {}), {
     command: 'claude', action: 'delete', workspace: 'chosen', yes: true, argv: [],

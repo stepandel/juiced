@@ -9,6 +9,7 @@ export type Arguments =
     | { action: 'ls'; path: string; includeIgnored: boolean }
     | { action: 'peek'; path: string; includeIgnored: boolean; changesOnly: boolean }
     | { action: 'sync'; direction: 'to-workspace' | 'from-workspace'; includeUncommitted: boolean }
+    | { action: 'file-sync'; watch: boolean }
   ));
 
 export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.env): Arguments {
@@ -65,9 +66,14 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
     }
     if (argv[0] === 'sync') {
       const flags = argv.slice(1);
+      if (flags.length === 1 && ['--help', '-h'].includes(flags[0]!)) return { command: 'help', workspace, argv: [] };
+      if (flags.includes('--files')) {
+        if (flags.some(arg => !['--files', '--watch'].includes(arg)) || new Set(flags).size !== flags.length) throw new Error('Usage: juiced claude sync --files [--watch]');
+        return { command, action: 'file-sync', workspace, watch: flags.includes('--watch'), argv: [] };
+      }
       const directions = flags.filter(arg => arg === '--to-workspace' || arg === '--from-workspace');
       if (directions.length !== 1 || flags.some(arg => !['--to-workspace', '--from-workspace', '--include-uncommitted'].includes(arg)) || new Set(flags).size !== flags.length || flags.includes('--include-uncommitted') && directions[0] !== '--to-workspace') {
-        throw new Error('Usage: juiced claude sync --to-workspace [--include-uncommitted] | --from-workspace');
+        throw new Error('Usage: juiced claude sync --to-workspace [--include-uncommitted] | --from-workspace | --files [--watch]');
       }
       return { command, action: 'sync', workspace, direction: directions[0]!.slice(2) as 'to-workspace' | 'from-workspace', includeUncommitted: flags.includes('--include-uncommitted'), argv: [] };
     }
@@ -93,6 +99,7 @@ Usage:
   juiced [--workspace SLUG] claude login
   juiced [--workspace SLUG] claude sync --to-workspace [--include-uncommitted]
   juiced [--workspace SLUG] claude sync --from-workspace
+  juiced [--workspace SLUG] claude sync --files [--watch]
   juiced [--workspace SLUG] claude fast-forward
   juiced [--workspace SLUG] claude delete [--yes]
   juiced [--workspace SLUG] claude ls [--include-ignored] [PATH]
@@ -135,7 +142,12 @@ Claude. Ignored files are excluded; --include-ignored requires an explicit PATH.
 Use juiced claude -- <prompt> for literal prompts named login, sync, fast-forward,
 delete, ls, or peek. Workspace operations use app credentials through the SDK.
 Non-Git directories use a persistent remote project folder, initially empty.
-Local and remote files never sync automatically during a session or on exit.
+Normal Claude launches never sync local and remote files. For non-Git folders,
+sync --files explicitly reconciles files in both directions and exits. Add
+--watch to keep syncing in a separate terminal until Ctrl+C. These commands use
+app credentials and do not start Claude or require Claude login. File sync
+excludes .git, .cantelop, .env*, node_modules, dist, and coverage; conflicts
+preserve both copies and stop the command.
 Claude login is separate for each project workspace.
 
 First run: deploy this project's runtime with cantelop deploy, then run

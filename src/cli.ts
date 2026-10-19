@@ -11,6 +11,7 @@ import { discoverRepository } from './git.js';
 import { createGitSession, GitWorkspaceClient } from './git-workspace.js';
 import { deleteWorkspace } from './delete-workspace.js';
 import { inspectWorkspace } from './inspect-workspace.js';
+import { syncFiles } from './file-sync.js';
 
 const controller = new AbortController();
 let interrupted = 0;
@@ -36,6 +37,9 @@ try {
   else if (args.command === 'claude' && args.action === 'delete') {
     const project = await selectProject(process.cwd(), args.workspace);
     await deleteWorkspace(claudeApp, project.workspace, args.yes, controller.signal);
+  } else if (args.command === 'claude' && args.action === 'file-sync') {
+    const project = await selectProject(process.cwd(), args.workspace);
+    await syncFiles(claudeApp.workspace({ slug: project.workspace }), project, args.watch, controller.signal);
   } else if (args.command === 'claude') {
     const project = await selectProject(process.cwd(), args.workspace);
     const workspace = claudeApp.workspace({ slug: project.workspace });

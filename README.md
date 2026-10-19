@@ -1,6 +1,6 @@
 # Juiced
 
-Automatic file sync is disabled. Git repositories initialize from local `HEAD` once; later transfers are explicit. Non-Git directories use a persistent remote project folder, initially empty. See [Git workspaces](docs/git-workspaces.md) for snapshot transfer, importing commits, optional fast-forwarding, and migration from file sync.
+File sync is off by default. Git repositories initialize from local `HEAD` once; later transfers are explicit. Non-Git directories use a persistent remote project folder, initially empty, with optional file sync through `juiced claude sync --files [--watch]`. See [Git workspaces](docs/git-workspaces.md) for snapshot transfer, importing commits, optional fast-forwarding, and migration from file sync.
 
 Run the real Claude Code CLI in a Cantelop session, attached to your local terminal:
 
@@ -111,10 +111,28 @@ with `juiced claude sync --from-workspace` and optionally apply them with
 `juiced claude fast-forward`.
 
 Non-Git directories start in a persistent remote project folder that is created
-empty on first use. Existing remote files are retained. Local files and remote
-edits are never automatically uploaded, downloaded, reconciled, or flushed
-before prompts, tool approvals, or exit. Automatic file sync has been removed.
-Explicit transfer commands currently require a Git repository.
+empty on first use. Existing remote files are retained. Normal Claude launches
+do not upload, download, or reconcile files before prompts, tool approvals, or
+exit. To explicitly sync a non-Git folder:
+
+```sh
+# Reconcile files in both directions once, then exit:
+juiced claude sync --files
+# Or keep syncing in a separate terminal until Ctrl+C:
+juiced claude sync --files --watch
+```
+
+Both commands use the selected workspace and its matching project folder. They
+need Cantelop app credentials and do not start Claude or require Claude sign-in.
+The SDK's bundled adapter syncs files on macOS and Linux (arm64 and x64), without
+the Cantelop CLI. `.git`, `.cantelop`, `.env*`, `node_modules`, `dist`, and
+`coverage` are excluded. File sync is bidirectional, including deletions after
+the first reconciliation. Conflicting edits preserve both copies and stop the
+command. Watch mode stops after 30 seconds offline and releases its local lock
+on exit; one local directory can have one active sync command.
+
+File sync is for non-Git folders. In Git repositories, use `sync --to-workspace`
+or `sync --from-workspace` to transfer commits and snapshots explicitly.
 
 Claude's HOME and account state remain at `/workspace`, including `.claude` and
 `.local`. Each project workspace needs its own Claude login. An existing login
