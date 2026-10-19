@@ -8,7 +8,7 @@ Run the real Claude Code CLI in a Cantelop session, attached to your local termi
 juiced claude
 ```
 
-Interactive invocations open the **Juiced TUI on your machine**, connected to a headless Claude Code process on Cantelop. Typing, cursor movement, multiline editing, and pasting happen locally. Only submitted prompts, permission answers, and interrupts cross the network. Claude's agent loop, tools, files, and authentication stay in the persistent remote workspace. Your local project is not uploaded.
+Interactive invocations open the **Juiced TUI on your machine**, connected to a headless Claude Code process on Cantelop. Typing, cursor movement, multiline editing, and pasting happen locally. Submitted prompts, menu data requests, confirmed actions, permission answers, and interrupts cross the network. Claude's agent loop, tools, files, and authentication stay in the persistent remote workspace. Your local project is not uploaded.
 
 The local interface streams Claude's responses, shows tool activity, and asks before actions that Claude requires permission to run. Each invocation starts a fresh remote process and conversation; turns within that invocation share the same Claude process and context. Piped commands and explicit `-p`, `--help`, and `--version` invocations retain the native CLI passthrough.
 
