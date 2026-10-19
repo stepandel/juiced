@@ -246,7 +246,7 @@ test('submodules and embedded repositories exclude only affected rows and preser
   assert.equal(comparison.rows.find(row => row.name === 'submodule')?.status, 'excluded');
   assert.equal(comparison.rows.find(row => row.name === 'src')?.status, 'excluded');
   assert.deepEqual(local.submodules, ['submodule']); assert.deepEqual(remote.submodules, ['src']);
-  const options = { localRoot: f.local, remoteRoot: f.remote, workspace: 'chosen', workspaceId: `wsp_${'a'.repeat(32)}`, includeIgnored: false, changesOnly: false, columns: undefined };
+  const options = { localRoot: f.local, remoteRoot: f.remote, workspace: 'chosen', workspaceId: `wsp_${'a'.repeat(32)}`, includeIgnored: false, changesOnly: false, columns: undefined, color: false };
   const view = renderInspection(comparison, options);
   assert.match(view, /submodule\/ \[submodule\]\s+\?/);
   assert.match(view, /src\/ \[contains submodule\]/);
@@ -306,16 +306,22 @@ test('large descendant sets remain one directory row and rendering wraps safely'
   const comparison = compareInspection(await f.snapshot(f.local), await f.snapshot(f.remote));
   assert.equal(comparison.rows.filter(row => row.name === 'src').length, 1);
   assert.equal(comparison.rows.length, 5);
-  const base = { localRoot: f.local, remoteRoot: f.remote, workspace: 'chosen', workspaceId: `wsp_${'a'.repeat(32)}`, includeIgnored: false };
+  const base = { localRoot: f.local, remoteRoot: f.remote, workspace: 'chosen', workspaceId: `wsp_${'a'.repeat(32)}`, includeIgnored: false, color: false };
+  const unstyle = (value: string) => value.replace(/\u001b\[[\d;]*m/g, '');
   for (const columns of [80, 40, 20]) {
     const view = renderInspection(comparison, { ...base, changesOnly: false, columns });
     assert.ok(view.split('\n').every(line => stringWidth(line) <= columns), `${columns}-column overflow`);
     assert.ok(!view.includes('\u001b'));
     assert.ok(!view.includes('generated-'));
+    // Styling is applied after the width maths, so colour never moves a column.
+    const styled = renderInspection(comparison, { ...base, changesOnly: false, columns, color: true });
+    assert.ok(styled.split('\n').every(line => stringWidth(line) <= columns), `${columns}-column styled overflow`);
+    assert.equal(unstyle(styled), view);
     const listing = renderRemoteListing(comparison.local, { ...base, columns });
     assert.ok(listing.split('\n').every(line => stringWidth(line) <= columns));
+    assert.equal(unstyle(renderRemoteListing(comparison.local, { ...base, columns, color: true })), listing);
     assert.ok(!listing.includes('\u001b'));
-    assert.match(listing.replace(/\n/g, ''), /\\u000a\\u001b/);
+    assert.match(listing.replace(/\n\s*/g, ''), /\\u000a\\u001b/);
   }
   const peek = renderInspection(comparison, { ...base, changesOnly: false, columns: undefined });
   const changes = renderInspection(comparison, { ...base, changesOnly: true, columns: undefined });
@@ -324,9 +330,18 @@ test('large descendant sets remain one directory row and rendering wraps safely'
   assert.doesNotMatch(changes, /README\.md\s+=/);
   assert.equal(peek.trim().split('\n').at(-2), changes.trim().split('\n').at(-2));
   assert.match(peek, /\\u000a\\u001b/);
-  assert.match(listing, /^README\.md$/m);
-  assert.match(listing, /^src\/$/m);
-  assert.doesNotMatch(listing, /Local:|Local HEAD:|matching|different|generated-/);
+  // The counts legend names the glyphs the table uses and omits statuses no row has.
+  assert.match(peek, /^\s+= 3 matching\s+! 1 different\s+L 1 local only$/m);
+  assert.doesNotMatch(peek, /remote only/);
+  assert.match(peek, /^\s+LOCAL\s+REMOTE$/m);
+  // Terminals too narrow for two columns name each entry once and annotate the difference.
+  const narrow = renderInspection(comparison, { ...base, changesOnly: false, columns: 20 });
+  assert.doesNotMatch(narrow, /LOCAL\s+REMOTE/);
+  assert.match(narrow, /^\s+! src\/$/m);
+  assert.match(narrow, /^\s+only in local$/m);
+  assert.match(listing, /^\s+README\.md$/m);
+  assert.match(listing, /^\s+src\/$/m);
+  assert.doesNotMatch(listing, /Local|HEAD|matching|different|generated-/);
   const matching = compareInspection(comparison.remote, comparison.remote);
   assert.match(renderInspection(matching, { ...base, changesOnly: false, columns: undefined }), /README\.md\s+=\s+README\.md/);
   assert.match(renderInspection(matching, { ...base, changesOnly: true, columns: undefined }), /No differences observed/);
@@ -403,6 +418,18 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
   assert.match(inspectionSession, /^ses_inspect_[a-f0-9]{32}$/);
   assert.equal(calls.filter(call => call.command.type === 'stop').length, 0);
   assert.deepEqual(await state(f.workspace), before);
+  // Width and colour follow the real stdout: a terminal gets both, NO_COLOR or a dumb terminal gets neither.
+  const environment = { TERM: process.env.TERM, NO_COLOR: process.env.NO_COLOR };
+  t.after(() => { for (const [key, value] of Object.entries(environment)) if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+  for (const [term, noColor, colored] of [['xterm-256color', undefined, true], ['xterm-256color', '1', false], ['dumb', undefined, false]] as const) {
+    process.env.TERM = term;
+    if (noColor === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = noColor;
+    const terminal = Object.assign(new PassThrough(), { isTTY: true, columns: 100 }); let styled = '';
+    terminal.on('data', bytes => styled += String(bytes));
+    assert.equal(await inspectWorkspace(app, f.local, options, f.controller.signal, terminal), 0);
+    assert.match(styled, /LOCAL\s+REMOTE/);
+    assert.equal(styled.includes('\u001b['), colored, `${term} ${noColor ?? 'colour'} styling`);
+  }
   await writeFile(join(f.local, 'local-only.txt'), 'local\n');
   await writeFile(join(f.remote, 'remote-only.txt'), 'remote\n');
   const remoteBefore = await state(f.workspace);
@@ -410,9 +437,9 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
   text = ''; calls.length = 0;
   try {
     assert.equal(await inspectWorkspace(app, f.local, { action: 'ls', path: '.', includeIgnored: false }, f.controller.signal, stdout), 0);
-    assert.match(text, /^remote-only\.txt$/m);
-    assert.match(text, /^README\.md$/m);
-    assert.doesNotMatch(text, /local-only|Local:|Local HEAD:|matching|different/);
+    assert.match(text, /^\s+remote-only\.txt$/m);
+    assert.match(text, /^\s+README\.md$/m);
+    assert.doesNotMatch(text, /local-only|Local|HEAD|matching|different/);
     assert.equal(calls.find(call => call.command.type === 'request')!.session!.id, inspectionSession);
     assert.ok(calls.some(call => call.command.type === 'request' && call.command.message.type === 'inspect' && call.command.message.mode === 'listing'));
     assert.ok(calls.some(call => call.command.type === 'stream' && call.command.after?.sequence));
