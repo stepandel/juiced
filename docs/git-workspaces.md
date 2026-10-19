@@ -78,15 +78,15 @@ preserved. Select a fresh workspace to adopt Git mode:
 
 ```sh
 juiced --workspace my-project-git claude sync --to-workspace --include-uncommitted
-juiced --workspace my-project-git login
+juiced --workspace my-project-git claude login
 juiced --workspace my-project-git claude
 ```
 
 Maintenance commands use Cantelop authentication and do not require Claude
 sign-in. Launching Claude still requires sign-in for the selected workspace.
 All Git commands are nested under `claude`. Reserved subcommand names can be
-sent as literal prompts with `juiced claude -- sync` or
-`juiced claude -- fast-forward`.
+sent as literal prompts with `juiced claude -- login`, `juiced claude -- sync`,
+or `juiced claude -- fast-forward`.
 
 The first version requires a repository with an initial commit and complete
 history. Submodule transfer is not supported; Git LFS object transfer is not

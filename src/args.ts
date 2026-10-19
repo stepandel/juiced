@@ -1,7 +1,9 @@
 export type Arguments =
-  | { command: 'claude' | 'login' | 'help' | 'version'; workspace: string | undefined; argv: string[] }
-  | { command: 'sync'; workspace: string | undefined; direction: 'to-workspace' | 'from-workspace'; includeUncommitted: boolean; argv: string[] }
-  | { command: 'fast-forward'; workspace: string | undefined; argv: string[] };
+  | { command: 'help' | 'version'; workspace: string | undefined; argv: string[] }
+  | ({ command: 'claude'; workspace: string | undefined; argv: string[] } & (
+    | { action: 'run' | 'login' | 'fast-forward' }
+    | { action: 'sync'; direction: 'to-workspace' | 'from-workspace'; includeUncommitted: boolean }
+  ));
 
 export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.env): Arguments {
   let workspace = env.JUICED_WORKSPACE;
@@ -20,22 +22,26 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
   const command = args[index];
   const argv = args.slice(index + 1);
   if (command === 'claude') {
-    if (argv[0] === '--') return { command, workspace, argv: argv.slice(1) };
+    if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1) };
+    if (argv[0] === 'login') {
+      if (argv.length !== 1) throw new Error('Usage: juiced claude login');
+      return { command, action: 'login', workspace, argv: [] };
+    }
     if (argv[0] === 'sync') {
       const flags = argv.slice(1);
       const directions = flags.filter(arg => arg === '--to-workspace' || arg === '--from-workspace');
       if (directions.length !== 1 || flags.some(arg => !['--to-workspace', '--from-workspace', '--include-uncommitted'].includes(arg)) || new Set(flags).size !== flags.length || flags.includes('--include-uncommitted') && directions[0] !== '--to-workspace') {
         throw new Error('Usage: juiced claude sync --to-workspace [--include-uncommitted] | --from-workspace');
       }
-      return { command: 'sync', workspace, direction: directions[0]!.slice(2) as 'to-workspace' | 'from-workspace', includeUncommitted: flags.includes('--include-uncommitted'), argv: [] };
+      return { command, action: 'sync', workspace, direction: directions[0]!.slice(2) as 'to-workspace' | 'from-workspace', includeUncommitted: flags.includes('--include-uncommitted'), argv: [] };
     }
     if (argv[0] === 'fast-forward') {
       if (argv.length !== 1) throw new Error('Usage: juiced claude fast-forward');
-      return { command: 'fast-forward', workspace, argv: [] };
+      return { command, action: 'fast-forward', workspace, argv: [] };
     }
-    return { command, workspace, argv };
+    return { command, action: 'run', workspace, argv };
   }
-  if (command === 'login' && argv.length === 0) return { command, workspace, argv };
+  if (command === 'login') throw new Error('juiced login has moved. Run juiced claude login.');
   if (command === '--version' || command === '-v') return { command: 'version', workspace, argv: [] };
   if (command === undefined || command === '--help' || command === '-h' || command === 'help') return { command: 'help', workspace, argv: [] };
   throw new Error(`Unknown command: ${command}. Run juiced --help.`);
@@ -45,12 +51,13 @@ export const HELP = `Run Claude Code on Cantelop with Juiced's local terminal in
 
 Usage:
   juiced [--workspace SLUG] claude [Claude arguments...]
+  juiced [--workspace SLUG] claude login
   juiced [--workspace SLUG] claude sync --to-workspace [--include-uncommitted]
   juiced [--workspace SLUG] claude sync --from-workspace
   juiced [--workspace SLUG] claude fast-forward
-  juiced [--workspace SLUG] login
 
 Examples:
+  juiced claude login
   juiced claude
   juiced claude --model sonnet
   juiced --workspace my-project claude
@@ -71,10 +78,11 @@ remote workspace. Git repositories initialize from local HEAD once, then retain
 remote commits and edits. Use sync to explicitly transfer commits; fast-forward
 optionally applies imported commits to a clean local source branch. To include
 uncommitted work, run sync --to-workspace --include-uncommitted before launching.
-Use claude -- sync to send a literal prompt named sync. Non-Git directories keep
-continuous file sync, excluding .git, .env*, node_modules, dist, and coverage.
+Use juiced claude -- <prompt> for literal prompts named login, sync, or fast-forward.
+Non-Git directories keep continuous file sync, excluding .git, .env*,
+node_modules, dist, and coverage.
 Claude login is separate for each project workspace.
 
-First run: deploy this project's runtime with cantelop deploy, then run juiced
-login to sign in to Claude inside the remote workspace. See README.md.
+First run: deploy this project's runtime with cantelop deploy, then run
+juiced claude login to sign in to Claude inside the remote workspace. See README.md.
 `;

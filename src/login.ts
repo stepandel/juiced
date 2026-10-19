@@ -4,7 +4,7 @@ import type { WorkspaceAuthRef } from '@cantelop/sdk';
 export async function ensureLogin(auth: WorkspaceAuthRef, signal: AbortSignal): Promise<void> {
   if (await auth.status({ signal })) return;
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
-    throw new Error('Claude sign-in required in this workspace. Run juiced login in an interactive terminal first.');
+    throw new Error('Claude sign-in required in this workspace. Run juiced claude login in an interactive terminal first.');
   }
   const attempt = await auth.login({ signal });
   if (attempt.authenticated) return;

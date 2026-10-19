@@ -31,11 +31,14 @@ The app is named `juiced` in `src/cantelop.ts`. If you need another deployment n
 Sign in to Claude once for your remote workspace:
 
 ```sh
-juiced login
+juiced claude login
 juiced claude
 ```
 
-`juiced login` prints Claude's sign-in URL and asks for the returned authorization code. The native Claude login runs inside Cantelop; credentials persist in the workspace. Interactive `juiced claude` also starts this login flow when needed. Piped commands require an existing login.
+`juiced claude login` prints Claude's sign-in URL and asks for the returned authorization code. The native Claude login runs inside Cantelop; credentials persist in the workspace. Interactive `juiced claude` also starts this login flow when needed. Piped commands require an existing login.
+
+Commands that use a harness's runtime and authentication live under its name.
+Claude sign-in is `juiced claude login`; there is no top-level `juiced login`.
 
 `juiced claude --version` and `juiced claude --help` work before Claude sign-in and can verify connectivity to the deployed runtime.
 
@@ -43,7 +46,7 @@ The local UI uses Claude's programmatic mode in the remote workspace you have ch
 
 ## Use
 
-Arguments after `claude` configure the remote Claude process. Interactive launches add the JSON transport flags needed by the local UI. Explicit print/introspection/output-format invocations use native passthrough:
+Arguments after `claude` configure the remote Claude process, except for Juiced's reserved `login`, `sync`, and `fast-forward` subcommands. Use `juiced claude -- login` to send a literal prompt named `login`. Interactive launches add the JSON transport flags needed by the local UI. Explicit print/introspection/output-format invocations use native passthrough:
 
 ```sh
 juiced claude --model sonnet
@@ -56,7 +59,7 @@ juiced claude -p "Summarize the project" > summary.txt
 Select another persistent workspace with an option **before** the command:
 
 ```sh
-juiced --workspace my-project login
+juiced --workspace my-project claude login
 juiced --workspace my-project claude
 # Or choose a default for this shell:
 export JUICED_WORKSPACE=my-project
@@ -113,7 +116,7 @@ npm run build:runtime
 node bin/juiced.mjs --help
 ```
 
-After deployment, `npm link`, and `juiced login`, run `npm run test:live` to verify the installed command against Cantelop. It checks the remote Claude version and sends a small real prompt through stdin, asserting the exact streamed response and a successful exit. This uses your Claude subscription.
+After deployment, `npm link`, and `juiced claude login`, run `npm run test:live` to verify the installed command against Cantelop. It checks the remote Claude version and sends a small real prompt through stdin, asserting the exact streamed response and a successful exit. This uses your Claude subscription.
 
 `npm run test:agent:live` separately verifies the headless handshake, two turns sharing conversation context, explicit denial followed by approval of a remote Write, and interruption followed by another successful turn. It uses the configured workspace and Claude subscription, then verifies and removes its uniquely named smoke-test file with an explicitly approved Bash command.
 

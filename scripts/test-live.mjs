@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
 // Uses the installed command, the configured Cantelop app, and a real Claude call.
-// Run juiced login first. This intentionally stays out of the offline test suite.
+// Run juiced claude login first. This intentionally stays out of the offline test suite.
 function run(args, input = '') {
   return new Promise((resolve, reject) => {
     const child = execFile('juiced', ['claude', ...args], { timeout: 180_000, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
