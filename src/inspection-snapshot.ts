@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, lstat, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { git, GitError, relativeProjectPath } from './git.js';
-import { InspectionIncomplete, type InspectionSnapshot, type TreeEntry } from './inspection-protocol.js';
+import { InspectionIncomplete, submoduleContents, type InspectionSnapshot, type TreeEntry } from './inspection-protocol.js';
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
 function strings(bytes: Buffer): string[] {
@@ -13,8 +13,8 @@ function strings(bytes: Buffer): string[] {
 }
 function parseTree(bytes: Buffer): TreeEntry[] {
   return strings(bytes).map(line => {
-    const match = /^(040000|100644|100755|120000) (?:tree|blob) ([a-f0-9]{40}|[a-f0-9]{64})\t([\s\S]+)$/.exec(line);
-    if (!match) throw new InspectionIncomplete('Unsupported Git entry, such as a submodule, in the selected scope.');
+    const match = /^(040000|100644|100755|120000|160000) (?:tree|blob|commit) ([a-f0-9]{40}|[a-f0-9]{64})\t([\s\S]+)$/.exec(line);
+    if (!match) throw new InspectionIncomplete('Unsupported Git entry in the selected scope.');
     return { mode: match[1] as TreeEntry['mode'], oid: match[2]!, name: match[3]! };
   });
 }
@@ -51,6 +51,8 @@ export async function captureInspection(root: string, scope: string, includeIgno
       try {
         const info = await lstat(ancestor);
         if (!info.isDirectory() || info.isSymbolicLink()) throw new InspectionIncomplete('The selected path has a non-directory or symlink ancestor.');
+        try { await lstat(join(ancestor, '.git')); submoduleContents(posix.relative(root, ancestor)); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; break; }
     }
     const indexPath = await text(['rev-parse', '--path-format=absolute', '--git-path', 'index']);
@@ -63,13 +65,8 @@ export async function captureInspection(root: string, scope: string, includeIgno
     const ignoredPaths = () => run(['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z', ...paths]);
     const before = await inventory(), ignoredBefore = await ignoredPaths();
     const staged = await run(['ls-files', '--stage', '-z']);
-    const checkSubmodules = (bytes: Buffer) => {
-      for (const line of strings(bytes)) {
-        const path = line.slice(line.indexOf('\t') + 1);
-        if (line.startsWith('160000 ') && (!scope || path === scope || path.startsWith(scope + '/'))) throw new InspectionIncomplete('Submodule contents cannot be inspected. Select a different path.');
-      }
-    };
-    checkSubmodules(staged);
+    const submodulePaths = (bytes: Buffer) => strings(bytes).filter(line => line.startsWith('160000 ')).map(line => line.slice(line.indexOf('\t') + 1));
+    for (const path of submodulePaths(staged)) if (scope.startsWith(path + '/')) submoduleContents(path);
     // Git silently skips some special files; report those instead of false absence.
     const eligible = new Set([...strings(before), ...(includeIgnored ? strings(await run(['ls-files', '--others', '--ignored', '--exclude-standard', '-z', ...paths])) : [])]);
     for (const path of eligible) {
@@ -96,20 +93,24 @@ export async function captureInspection(root: string, scope: string, includeIgno
       if (present || tracked) await run(['add', '-A', ...(includeIgnored ? ['-f'] : []), ...paths], { env: temporary });
     }
     // Git also turns previously untracked embedded repositories into gitlinks.
-    checkSubmodules(await run(['ls-files', '--stage', '-z', ...paths], { env: temporary }));
+    const submodules = [...new Set(submodulePaths(await run(['ls-files', '--stage', '-z', ...paths], { env: temporary }))
+      .filter(path => !scope || path === scope || path.startsWith(scope + '/'))
+      .map(path => path === scope ? posix.basename(path) : path.slice(scope ? scope.length + 1 : 0).split('/')[0]!))];
     const tree = decoder.decode(await run(['write-tree'], { env: temporary })).trim();
     const selected = scope ? parseTree(await run(['ls-tree', '-z', tree, '--', scope], { env: temporary }))[0] : { name: '.', mode: '040000' as const, oid: tree };
     const kind = selectedIgnored && !includeIgnored ? 'ignored' : !selected ? 'missing' : selected.mode === '040000' ? 'directory' : 'file';
     const entries = kind === 'directory' ? parseTree(await run(['ls-tree', '-z', selected!.oid], { env: temporary })) : [];
     const prefix = scope ? scope + '/' : '';
     const ignored = [...new Set(strings(ignoredBefore).filter(path => path.startsWith(prefix)).map(path => path.slice(prefix.length).split('/')[0]!).filter(Boolean))];
-    try { await run(['diff', '--quiet', '--no-ext-diff', '--no-textconv', ...paths], { env: temporary }); }
+    // Nested repository contents are explicitly excluded from the comparison.
+    try { await run(['diff', '--quiet', '--no-ext-diff', '--no-textconv', '--ignore-submodules=all', ...paths], { env: temporary }); }
     catch (error) { if (error instanceof GitError && error.code === 1) throw new InspectionIncomplete('Files changed during inspection. Retry the command.'); throw error; }
     const rootAfter = await lstat(root, { bigint: true });
     const currentBranch = await text(['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(error => { if (error instanceof GitError && error.code === 1) return null; throw error; });
     if (rootAfter.dev !== rootBefore.dev || rootAfter.ino !== rootBefore.ino || branch !== currentBranch || head !== await text(['rev-parse', 'HEAD']) ||
         !originalIndex.equals(await indexBytes(indexPath)) || !before.equals(await inventory()) || !ignoredBefore.equals(await ignoredPaths())) throw new InspectionIncomplete('The checkout changed during inspection. Retry the command.');
     const result: InspectionSnapshot = { version: 1, scope, kind, entries, ignored: includeIgnored ? [] : ignored, head, branch, objectFormat, startedAt, finishedAt: new Date().toISOString() };
+    if (submodules.length) result.submodules = submodules;
     if (selected && kind !== 'ignored') result.entry = { ...selected, name: posix.basename(scope) || '(root)' };
     return result;
   } catch (error) {

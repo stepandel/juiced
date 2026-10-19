@@ -1,7 +1,7 @@
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 import { git, GitError, relativeProjectPath } from './git.js';
-import { InspectionIncomplete, type InspectionListing, type ListingEntry } from './inspection-protocol.js';
+import { InspectionIncomplete, submoduleContents, type InspectionListing, type ListingEntry } from './inspection-protocol.js';
 
 function paths(bytes: Buffer): string[] {
   if (!bytes.length) return [];
@@ -49,6 +49,7 @@ export async function captureListing(root: string, scope: string, includeIgnored
         if (!directories.has(current)) {
           const stat = await info(join(root, current));
           if (strict && stat && (!stat.isDirectory() || stat.isSymbolicLink())) throw new InspectionIncomplete('The selected path has a non-directory or symlink ancestor.');
+          if (strict && stat?.isDirectory() && await info(join(root, current, '.git'))) submoduleContents(current);
           directories.set(current, !!stat?.isDirectory() && !stat.isSymbolicLink());
         }
         if (!directories.get(current)) return false;
@@ -62,10 +63,11 @@ export async function captureListing(root: string, scope: string, includeIgnored
     const inventory = () => run(['ls-files', '--cached', '--others', '--exclude-standard', '-z', ...selectedPaths]);
     const ignored = () => includeIgnored ? run(['ls-files', '--others', '--ignored', '--exclude-standard', '-z', ...selectedPaths]) : Promise.resolve(Buffer.alloc(0));
     const before = await inventory(), ignoredBefore = await ignored();
-    const staged = paths(await run(['ls-files', '--stage', '-z', ...selectedPaths]));
-    if (staged.some(line => line.startsWith('160000 '))) throw new InspectionIncomplete('Submodule contents cannot be inspected. Select a different path.');
+    const staged = paths(await run(['ls-files', '--stage', '-z']));
+    const submodules = new Set(staged.filter(line => line.startsWith('160000 ')).map(line => line.slice(line.indexOf('\t') + 1)));
+    for (const path of submodules) if (scope.startsWith(path + '/')) submoduleContents(path);
     const selected = await info(join(root, scope));
-    const tracked = staged.length > 0;
+    const tracked = staged.some(line => { const path = line.slice(line.indexOf('\t') + 1); return !scope || path === scope || path.startsWith(scope + '/'); });
     let selectedIgnored = false;
     if (scope && selected && !tracked && !includeIgnored) {
       // check-ignore interprets stdin paths literally, independently of pathspecs.
@@ -82,8 +84,8 @@ export async function captureListing(root: string, scope: string, includeIgnored
       const stat = await info(join(root, path));
       if (!stat) continue;
       mode(stat);
-      if (stat.isDirectory() && await info(join(root, path, '.git'))) throw new InspectionIncomplete('Submodule contents cannot be inspected. Select a different path.');
-      if (stat.isDirectory()) continue; // Git never lists empty directories.
+      const submodule = stat.isDirectory() && (submodules.has(path) || !!await info(join(root, path, '.git')));
+      if (stat.isDirectory() && !submodule) continue; // Git never lists empty directories.
       visible = true;
       if (path === scope) continue;
       const relative = scope ? path.slice(scope.length + 1) : path;
@@ -91,15 +93,16 @@ export async function captureListing(root: string, scope: string, includeIgnored
       if (!entries.has(name)) {
         const child = await info(join(root, scope, name));
         if (!child) throw new InspectionIncomplete('The checkout changed during inspection. Retry the command.');
-        entries.set(name, { name, mode: mode(child) });
+        entries.set(name, { name, mode: submodule && relative === name ? '160000' : mode(child) });
       }
     }
-    const kind = selectedIgnored ? 'ignored' : !selected || !visible ? 'missing' : selected.isDirectory() ? 'directory' : 'file';
+    const selectedSubmodule = selected?.isDirectory() && (submodules.has(scope) || !!scope && !!await info(join(root, scope, '.git')));
+    const kind = selectedIgnored ? 'ignored' : selectedSubmodule ? 'file' : !selected || !visible ? 'missing' : selected.isDirectory() ? 'directory' : 'file';
     const rootAfter = await info(root);
     if (rootAfter?.dev !== rootBefore.dev || rootAfter?.ino !== rootBefore.ino || !originalIndex.equals(await index(indexPath)) ||
         !before.equals(await inventory()) || !ignoredBefore.equals(await ignored())) throw new InspectionIncomplete('The checkout changed during inspection. Retry the command.');
     return { version: 1, scope, kind, entries: kind === 'directory' ? [...entries.values()] : [],
-      ...(['directory', 'file'].includes(kind) ? { entry: { name: posix.basename(scope) || '(root)', mode: mode(selected!) } } : {}),
+      ...(['directory', 'file'].includes(kind) ? { entry: { name: posix.basename(scope) || '(root)', mode: selectedSubmodule ? '160000' as const : mode(selected!) } } : {}),
     };
   } catch (error) {
     signal.throwIfAborted();

@@ -144,8 +144,6 @@ test('listing preserves Git-visible names and types without reading file content
   } finally { await chmod(join(f.remote, 'README.md'), 0o644); }
   await symlink('../project', join(f.remote, 'outside'));
   await assert.rejects(captureListing(f.remote, 'outside/src', false, f.controller.signal), /symlink ancestor/);
-  await git(f.remote, ['update-index', '--add', '--cacheinfo', `160000,${f.repository.head},submodule`]);
-  await assert.rejects(captureListing(f.remote, '', false, f.controller.signal), /Submodule/);
 });
 
 test('inspection sessions are stable across scopes, isolated by workspace and binding, and preserved on abort', async () => {
@@ -232,13 +230,59 @@ test('linked worktrees use their own index and native object format without writ
   const before = await readFile(indexPath);
   assert.equal(compareInspection(await f.snapshot(linked), await f.snapshot(f.remote)).rows.find(row => row.name === 'src')?.status, 'different');
   assert.deepEqual(await readFile(indexPath), before);
-  await git(f.local, ['update-index', '--add', '--cacheinfo', `160000,${f.repository.head},submodule`]);
-  await assert.rejects(f.snapshot(f.local), /Submodule contents/);
+});
+
+test('submodules and embedded repositories exclude only affected rows and preserve all Git state', async t => {
+  const f = await fixture(t);
+  await git(f.root, ['clone', '--no-hardlinks', f.remote, join(f.local, 'submodule')]);
+  await git(f.local, ['add', 'submodule']);
+  await writeFile(join(f.local, 'submodule', 'README.md'), 'dirty nested contents\n');
+  await git(f.root, ['clone', '--no-hardlinks', f.local, join(f.remote, 'src', 'embedded')]);
+  const before = await Promise.all([state(f.local), state(f.remote)]);
+  const local = await f.snapshot(f.local), remote = await f.snapshot(f.remote);
+  validateInspectionSnapshot(local, ''); validateInspectionSnapshot(remote, '');
+  const comparison = compareInspection(local, remote);
+  assert.equal(comparison.rows.find(row => row.name === 'README.md')?.status, 'matching');
+  assert.equal(comparison.rows.find(row => row.name === 'submodule')?.status, 'excluded');
+  assert.equal(comparison.rows.find(row => row.name === 'src')?.status, 'excluded');
+  assert.deepEqual(local.submodules, ['submodule']); assert.deepEqual(remote.submodules, ['src']);
+  const options = { localRoot: f.local, remoteRoot: f.remote, workspace: 'chosen', workspaceId: `wsp_${'a'.repeat(32)}`, includeIgnored: false, changesOnly: false, columns: undefined };
+  const view = renderInspection(comparison, options);
+  assert.match(view, /submodule\/ \[submodule\]\s+\?/);
+  assert.match(view, /src\/ \[contains submodule\]/);
+  assert.match(view, /nested Git repository contents are excluded/);
+  assert.doesNotMatch(view, /use --include-ignored/);
+  for (const [root, scope, name] of [[f.local, '', 'submodule'], [f.local, 'submodule', 'submodule'], [f.remote, 'src', 'embedded'], [f.remote, 'src/embedded', 'embedded']] as const) {
+    const listing = await captureListing(root, scope, false, f.controller.signal);
+    validateInspectionListing(listing, scope);
+    assert.equal((listing.kind === 'file' ? listing.entry : listing.entries.find(entry => entry.name === name))?.mode, '160000');
+    assert.match(renderRemoteListing(listing, options), new RegExp(`${name}/ \\[submodule\\]`));
+  }
+  const selected = await f.snapshot(f.local, 'submodule');
+  assert.equal(selected.kind, 'file'); assert.equal(selected.entry?.mode, '160000');
+  assert.equal(compareInspection(selected, selected).rows[0]?.status, 'excluded');
   assert.equal((await f.snapshot(f.local, 'README.md')).kind, 'file');
-  const embedded = join(f.remote, 'src', 'embedded'); await mkdir(embedded);
-  await git(embedded, ['init', '-b', 'main']); await git(embedded, ['config', 'user.name', 'Test']); await git(embedded, ['config', 'user.email', 'test@example.test']);
-  await writeFile(join(embedded, 'file'), 'nested repo'); await git(embedded, ['add', '.']); await git(embedded, ['commit', '-m', 'nested']);
-  await assert.rejects(f.snapshot(f.remote), /Submodule contents/);
+  assert.equal(compareInspection(await f.snapshot(f.local, '', true), remote).rows.find(row => row.name === 'submodule')?.status, 'excluded');
+  for (const capture of [captureInspection, captureListing]) {
+    await assert.rejects(capture(f.local, 'submodule/README.md', false, f.controller.signal), /nested Git repository "submodule"/);
+    await assert.rejects(capture(f.remote, 'src/embedded/README.md', false, f.controller.signal), /nested Git repository "src\/embedded"/);
+  }
+  assert.deepEqual(await Promise.all([state(f.local), state(f.remote)]), before);
+
+  // An uninitialized gitlink still bounds inspection, even without a .git entry.
+  await rm(join(f.local, 'submodule', '.git'), { recursive: true });
+  for (const capture of [captureInspection, captureListing]) {
+    const selected = await capture(f.local, 'submodule', false, f.controller.signal);
+    assert.equal(selected.entry?.mode, '160000');
+    await assert.rejects(capture(f.local, 'submodule/README.md', false, f.controller.signal), /nested Git repository "submodule"/);
+  }
+  // A working file replacing a gitlink must be listed and compared as a file.
+  await rm(join(f.local, 'submodule'), { recursive: true });
+  await writeFile(join(f.local, 'submodule'), 'replacement\n');
+  for (const capture of [captureInspection, captureListing]) {
+    const selected = await capture(f.local, 'submodule', false, f.controller.signal);
+    assert.equal(selected.entry?.mode, '100644');
+  }
 });
 
 test('file/directory conflicts, missing scopes, literal names and symlink ancestors are explicit', async t => {

@@ -18,6 +18,13 @@ export type InspectionOptions = { workspace?: string | undefined; path: string; 
 
 type InspectionWorkspace = Pick<Workspace, 'session' | 'selector'>;
 type Inspect = Extract<TerminalCommand, { type: 'inspect' }>;
+async function checkoutContext<T>(side: 'Local' | 'Remote', work: Promise<T>): Promise<T> {
+  try { return await work; }
+  catch (error) {
+    if (error instanceof InspectionIncomplete) throw new InspectionIncomplete(`${side} checkout: ${error.message}`);
+    throw error;
+  }
+}
 export function remoteSnapshot(workspace: InspectionWorkspace, command: Inspect, signal: AbortSignal): Promise<InspectionSnapshot> {
   return remoteInventory(workspace, command, signal, validateInspectionSnapshot);
 }
@@ -97,13 +104,13 @@ export async function inspectWorkspace(app: InspectionApp, directory: string, op
     const command: Extract<TerminalCommand, { type: 'inspect' }> = { type: 'inspect', id: randomUUID(), directoryName: project.directoryName, binding: repository.binding, scope, includeIgnored: options.includeIgnored };
     const view = { remoteRoot: posix.join(project.remoteDirectory, scope), workspace: project.workspace, workspaceId: existing.id, includeIgnored: options.includeIgnored, columns: stdout.isTTY ? stdout.columns ?? 80 : undefined };
     if (options.action === 'ls') {
-      const remote = await remoteListing(app.workspace({ id: existing.id }), command, combined);
+      const remote = await checkoutContext('Remote', remoteListing(app.workspace({ id: existing.id }), command, combined));
       stdout.write(renderRemoteListing(remote, view));
       return remote.kind === 'ignored' || remote.kind === 'missing' ? 2 : 0;
     }
     const work = [
-      captureInspection(repository.root, scope, options.includeIgnored, combined),
-      remoteSnapshot(app.workspace({ id: existing.id }), command, combined),
+      checkoutContext('Local', captureInspection(repository.root, scope, options.includeIgnored, combined)),
+      checkoutContext('Remote', remoteSnapshot(app.workspace({ id: existing.id }), command, combined)),
     ];
     // Abort the sibling operation on failure and let both release their resources.
     const settled = await Promise.allSettled(work.map(promise => promise.catch(error => { controller.abort(error); throw error; })));

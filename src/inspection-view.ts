@@ -2,7 +2,7 @@ import stringWidth from 'string-width';
 import { InspectionIncomplete, type InspectionListing, type ListingEntry, type InspectionSnapshot, type TreeEntry } from './inspection-protocol.js';
 
 type Status = 'matching' | 'different' | 'local only' | 'remote only' | 'excluded';
-export type InspectionRow = { name: string; local?: TreeEntry | undefined; remote?: TreeEntry | undefined; localIgnored: boolean; remoteIgnored: boolean; status: Status };
+export type InspectionRow = { name: string; local?: TreeEntry | undefined; remote?: TreeEntry | undefined; localIgnored: boolean; remoteIgnored: boolean; localSubmodule: boolean; remoteSubmodule: boolean; status: Status };
 export type InspectionComparison = { local: InspectionSnapshot; remote: InspectionSnapshot; rows: InspectionRow[] };
 export function compareInspection(local: InspectionSnapshot, remote: InspectionSnapshot): InspectionComparison {
   if (local.scope !== remote.scope || local.objectFormat !== remote.objectFormat) throw new InspectionIncomplete('The workspace snapshots have incompatible scopes or Git object formats.');
@@ -15,8 +15,10 @@ export function compareInspection(local: InspectionSnapshot, remote: InspectionS
     const a = left.get(name), b = right.get(name);
     const localIgnored = !a && (oneEntry ? local.kind === 'ignored' : local.ignored.includes(name));
     const remoteIgnored = !b && (oneEntry ? remote.kind === 'ignored' : remote.ignored.includes(name));
-    const status: Status = localIgnored || remoteIgnored ? 'excluded' : !a ? 'remote only' : !b ? 'local only' : a.mode === b.mode && a.oid === b.oid ? 'matching' : 'different';
-    return { name, local: a, remote: b, localIgnored, remoteIgnored, status };
+    const localSubmodule = a?.mode === '160000' || local.submodules?.includes(name) === true;
+    const remoteSubmodule = b?.mode === '160000' || remote.submodules?.includes(name) === true;
+    const status: Status = localIgnored || remoteIgnored || localSubmodule || remoteSubmodule ? 'excluded' : !a ? 'remote only' : !b ? 'local only' : a.mode === b.mode && a.oid === b.oid ? 'matching' : 'different';
+    return { name, local: a, remote: b, localIgnored, remoteIgnored, localSubmodule, remoteSubmodule, status };
   });
   return { local, remote, rows };
 }
@@ -34,7 +36,7 @@ function wrap(value: string, columns: number): string[] {
 }
 const pad = (value: string, width: number) => value + ' '.repeat(Math.max(0, width - stringWidth(value)));
 type ListingOptions = { remoteRoot: string; workspace: string; workspaceId: string; includeIgnored: boolean; columns: number | undefined };
-const entryText = (entry: ListingEntry) => inspectionText(entry.name) + (entry.mode === '040000' ? '/' : entry.mode === '120000' ? ' @' : '');
+const entryText = (entry: ListingEntry) => inspectionText(entry.name) + (entry.mode === '040000' ? '/' : entry.mode === '120000' ? ' @' : entry.mode === '160000' ? '/ [submodule]' : '');
 export function renderRemoteListing(snapshot: InspectionListing, options: ListingOptions): string {
   const lines: string[] = [];
   const line = (text: string) => lines.push(...(options.columns ? wrap(text, Math.max(1, options.columns)) : [text]));
@@ -47,6 +49,7 @@ export function renderRemoteListing(snapshot: InspectionListing, options: Listin
   else {
     const entries = snapshot.kind === 'file' ? [snapshot.entry!] : snapshot.entries;
     for (const entry of [...entries].sort((a, b) => Buffer.compare(Buffer.from(a.name), Buffer.from(b.name)))) line(entryText(entry));
+    if (entries.some(entry => entry.mode === '160000')) line('Submodules and nested Git repositories are listed without inspecting their contents.');
     if (!entries.length) line('No Git-visible entries in this scope.');
     lines.push(''); line(`${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`);
   }
@@ -66,8 +69,8 @@ export function renderInspection(comparison: InspectionComparison, options: List
   line(options.includeIgnored ? 'Git view; ignored files included in the selected path.' : 'Git view; ignored files excluded.');
   line('One level; directory status includes descendants. Sequential live reads.');
   lines.push('');
-  const cell = (entry: TreeEntry | undefined, ignored: boolean) => ignored ? '[ignored]' : entry ? entryText(entry) : '-';
-  const cells = rows.map(row => ({ left: cell(row.local, row.localIgnored), right: cell(row.remote, row.remoteIgnored), status: row.status }));
+  const cell = (entry: TreeEntry | undefined, ignored: boolean, submodule: boolean) => ignored ? '[ignored]' : entry ? entryText(entry) + (submodule && entry.mode !== '160000' ? ' [contains submodule]' : '') : '-';
+  const cells = rows.map(row => ({ left: cell(row.local, row.localIgnored, row.localSubmodule), right: cell(row.remote, row.remoteIgnored, row.remoteSubmodule), status: row.status }));
   const leftWidth = columns ? Math.max(1, Math.floor((columns - 3) / 2)) : Math.max(5, ...cells.map(row => stringWidth(row.left)));
   const rightWidth = columns ? Math.max(1, columns - leftWidth - 3) : undefined;
   if (rows.length && (!columns || columns >= 30)) {
@@ -83,7 +86,8 @@ export function renderInspection(comparison: InspectionComparison, options: List
   const counts = new Map<Status, number>();
   for (const row of comparison.rows) counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
   line((['matching', 'different', 'local only', 'remote only', 'excluded'] as const).map(status => `${counts.get(status) ?? 0} ${status}`).join(' | '));
-  if (counts.has('excluded')) line('Incomplete comparison: use --include-ignored PATH to compare excluded entries.');
+  if (comparison.rows.some(row => row.localIgnored || row.remoteIgnored)) line('Incomplete comparison: use --include-ignored PATH to compare ignored entries.');
+  if (comparison.rows.some(row => row.localSubmodule || row.remoteSubmodule)) line('Incomplete comparison: submodules and nested Git repository contents are excluded. Inspect another path to compare the remaining files.');
   if (rows.some(row => row.local?.mode === '040000' || row.remote?.mode === '040000')) line('Inspect a directory with: juiced claude peek PATH');
   return lines.join('\n') + '\n';
 }

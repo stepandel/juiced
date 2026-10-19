@@ -102,11 +102,15 @@ try {
   const nested = (await run('peek', 'src/')).stdout; assert.match(nested, /new.bin/); assert.match(nested, /entry.ts/);
   await assert.rejects(run('peek', '.env'), error => error.code === 2 && /\[ignored\]/.test(error.stdout));
   assert.match((await run('peek', '--include-ignored', '.env')).stdout, /\.env\s+!\s+\.env/);
+  await git(root, ['clone', '--no-hardlinks', local, join(remote, 'embedded')]);
+  await assert.rejects(run('peek'), error => error.code === 2 && /embedded\/ \[submodule\]/.test(error.stdout) && /README\.md\s+=\s+README\.md/.test(error.stdout));
+  assert.match((await run('ls')).stdout, /^embedded\/ \[submodule\]$/m);
+  await assert.rejects(run('peek', 'embedded/README.md'), error => error.code === 2 && /Remote checkout: Cannot inspect contents of nested Git repository "embedded"/.test(error.stderr));
   const journal = join(workspace, '.juiced', 'project', 'journal.json'); await writeFile(journal, 'pending');
   await assert.rejects(run('peek'), error => error.code === 2 && /pending recovery/.test(error.stderr));
   assert.equal(await readFile(journal, 'utf8'), 'pending'); assert.equal(await readFile(join(local, '.env'), 'utf8'), 'local ignored\n');
   assert.ok(calls.every(path => ['/commands/workspace.inspect', '/commands/view', '/commands/request', '/commands/stream'].includes(path)));
-  assert.equal(stopped.length, 0); assert.equal(sessions.length, 10); assert.equal(new Set(sessions).size, 1);
+  assert.equal(stopped.length, 0); assert.equal(sessions.length, 13); assert.equal(new Set(sessions).size, 1);
   console.log('Passed built CLI and SDK Edge inspection: remote-only ls, complete peek, changes-only filter, drill-down, ignored files, missing paths/workspace, preserved journal, canonical IDs, and Git-only PATH.');
 } finally {
   lifetime.abort(); server.closeAllConnections(); await new Promise(resolve => server.close(() => resolve()));

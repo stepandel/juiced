@@ -6,7 +6,7 @@ import { validProjectName } from './project-name.js';
 export const MAX_INSPECTION_BYTES = 64 * 1024 * 1024;
 export const INSPECTION_CHUNK_BYTES = 32 * 1024;
 export const INSPECTION_TIMEOUT_MS = 240_000;
-export type TreeEntry = { name: string; mode: '040000' | '100644' | '100755' | '120000'; oid: string };
+export type TreeEntry = { name: string; mode: '040000' | '100644' | '100755' | '120000' | '160000'; oid: string };
 export type ListingEntry = Pick<TreeEntry, 'name' | 'mode'>;
 export type InspectionListing = {
   version: 1; scope: string; kind: 'directory' | 'file' | 'missing' | 'ignored';
@@ -15,6 +15,7 @@ export type InspectionListing = {
 export type InspectionSnapshot = {
   version: 1; scope: string; kind: 'directory' | 'file' | 'missing' | 'ignored';
   entry?: TreeEntry; entries: TreeEntry[]; ignored: string[];
+  submodules?: string[];
   head: string; branch: string | null; objectFormat: 'sha1' | 'sha256';
   startedAt: string; finishedAt: string;
 };
@@ -28,6 +29,10 @@ export type InspectionEvent =
   | { type: 'inspection-error'; id: string; message: string };
 
 export class InspectionIncomplete extends Error { readonly code = 'inspection_incomplete'; }
+
+export function submoduleContents(path: string): never {
+  throw new InspectionIncomplete(`Cannot inspect contents of nested Git repository ${JSON.stringify(path)}. Inspect its parent directory to compare the remaining files.`);
+}
 
 export function inspectionScope(path = '.') {
   if (!path || path.startsWith('/') || path.includes('\\') || path.includes('\0') || path.split('/').includes('..')) throw new Error('Inspection path must stay within the current directory.');
@@ -46,10 +51,10 @@ export function validateInspectionCommand(command: InspectionCommand) {
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const name = (value: unknown): value is string => typeof value === 'string' && !!value && !['.', '..', '.git'].includes(value) && !value.includes('/') && !value.includes('\0');
 function entry(value: unknown): value is TreeEntry {
-  return record(value) && name(value.name) && ['040000', '100644', '100755', '120000'].includes(String(value.mode)) && validOid(value.oid);
+  return record(value) && name(value.name) && ['040000', '100644', '100755', '120000', '160000'].includes(String(value.mode)) && validOid(value.oid);
 }
 export function validateInspectionListing(value: unknown, scope: string): InspectionListing {
-  const listed = (item: unknown): item is ListingEntry => record(item) && name(item.name) && ['040000', '100644', '100755', '120000'].includes(String(item.mode));
+  const listed = (item: unknown): item is ListingEntry => record(item) && name(item.name) && ['040000', '100644', '100755', '120000', '160000'].includes(String(item.mode));
   if (!record(value) || value.version !== 1 || value.scope !== scope || !['directory', 'file', 'missing', 'ignored'].includes(String(value.kind)) ||
       !Array.isArray(value.entries) || !value.entries.every(listed) || new Set(value.entries.map(item => item.name)).size !== value.entries.length ||
       (value.kind !== 'directory' && value.entries.length !== 0) ||
@@ -61,6 +66,7 @@ export function validateInspectionSnapshot(value: unknown, scope: string): Inspe
   if (!record(value) || value.version !== 1 || value.scope !== scope || !['directory', 'file', 'missing', 'ignored'].includes(String(value.kind)) ||
       !Array.isArray(value.entries) || !value.entries.every(entry) || new Set(value.entries.map(item => item.name)).size !== value.entries.length ||
       !Array.isArray(value.ignored) || !value.ignored.every(name) || !validOid(value.head) ||
+      (value.submodules !== undefined && (!Array.isArray(value.submodules) || !value.submodules.every(name) || new Set(value.submodules).size !== value.submodules.length)) ||
       !(value.branch === null || typeof value.branch === 'string') || !['sha1', 'sha256'].includes(String(value.objectFormat)) ||
       typeof value.startedAt !== 'string' || !Number.isFinite(Date.parse(value.startedAt)) || typeof value.finishedAt !== 'string' || !Number.isFinite(Date.parse(value.finishedAt)) ||
       (value.entry !== undefined && !entry(value.entry)) || (['file', 'directory'].includes(String(value.kind)) && !entry(value.entry)) ||

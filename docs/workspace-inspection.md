@@ -21,7 +21,8 @@ juiced --workspace my-project claude peek
 ```
 
 `ls` shows remote names in a single column, with `/` after directories and `@`
-after symlinks. Its header identifies the workspace and remote path; it has no
+after symlinks. Submodules and embedded Git repositories have a `[submodule]`
+label; their contents are not traversed. Its header identifies the workspace and remote path; it has no
 local column or comparison counts. Local-only files are absent from this list,
 and local file contents are not inspected.
 
@@ -47,7 +48,7 @@ matching entries hidden by `--changes-only`. That flag is supported only by
 | `!` | Different Git contents, type, or executable bit |
 | `L` | Included only in the local Git snapshot |
 | `R` | Included only in the remote Git snapshot |
-| `?` | Comparison excluded by one side's ignore rules |
+| `?` | Comparison excluded by ignore rules or a nested Git repository |
 
 Comparison headers identify the selected workspace and canonical ID, local and remote
 paths, and both actual branch names and HEADs. Symlinks have an `@` suffix;
@@ -114,9 +115,19 @@ working tree after capture; root identity, HEAD, branch, real index bytes,
 candidate inventory, and ignored inventory are checked for changes. Detected
 changes require a retry instead of combining old and new data silently.
 
+Submodules and embedded Git repositories appear as excluded rows with a
+`[submodule]` label. A directory containing one is marked `[contains submodule]`
+and excluded because its Git tree cannot describe the nested repository's
+working files. The remaining rows are compared normally; `peek` exits 2 to
+indicate a partial comparison. Equal submodule commit IDs do not imply equal
+working contents. `--include-ignored` does not include nested repository contents.
+Selecting a path inside a nested repository produces an error naming that
+repository; selecting its parent lets you inspect the other files. `ls` can
+list a nested repository itself without reading its contents.
+
 An unreadable entry or unsupported special file produces an incomplete
-comparison. Sparse checkouts and scopes containing submodules are currently
-unsupported and receive explicit errors. Empty directories are outside Git's
+comparison. Sparse checkouts receive explicit errors. Checkout failures identify
+whether the local or remote side failed. Empty directories are outside Git's
 view. Renames appear as one-sided paths, without similarity inference.
 
 Inspection never provisions a workspace, repairs a publication journal, acquires
