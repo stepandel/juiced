@@ -1,0 +1,120 @@
+{
+  "purpose": "Workspace inspection design evidence; the proposed CLI commands are not implemented by this probe.",
+  "sourceCommit": "fc566b17018b73b8def78b78a13b7dd62a56c99f",
+  "node": "v26.8.1",
+  "platform": "darwin",
+  "git": "git version 2.55.0",
+  "candidatePaths": 19,
+  "displayedRows": 18,
+  "oracleAgrees": true,
+  "worktreesAndGitMetadataUnchanged": true,
+  "permissionFailureChecked": true,
+  "ignoreAsymmetry": {
+    "localCandidate": true,
+    "remoteCandidate": false,
+    "actualStatus": "matching"
+  },
+  "sameSizeAndMtimeDifferingContentsChecked": true,
+  "concurrentWriteWithRestoredMtime": {
+    "type": "unknown",
+    "reason": "changed during inspection"
+  },
+  "currentStatusSideEffects": {
+    "created": [
+      ".juiced/project/transfers"
+    ],
+    "leaseInsert": true,
+    "leaseDelete": true
+  },
+  "sdkCapabilityChecks": {
+    "absentLookupWithoutSession": true,
+    "requestUsesInspectedCanonicalId": true,
+    "provisionCalls": 0,
+    "transport": "recording connection; no hosted requests"
+  },
+  "remainingImplementationChecks": [
+    "CLI preflight wiring and deletion races",
+    "inspection transport bounds and failures",
+    "filesystem containment and directory type conflicts",
+    "terminal layout rendering",
+    "deployed runtime integration"
+  ],
+  "rows": [
+    {
+      "path": ".gitignore",
+      "status": "matching"
+    },
+    {
+      "path": "binary.bin",
+      "status": "different contents"
+    },
+    {
+      "path": "both-deleted.txt",
+      "status": "omit"
+    },
+    {
+      "path": "changed.txt",
+      "status": "different contents"
+    },
+    {
+      "path": "deleted-local.txt",
+      "status": "remote only"
+    },
+    {
+      "path": "deleted-remote.txt",
+      "status": "local only"
+    },
+    {
+      "path": "group-mode.sh",
+      "status": "matching"
+    },
+    {
+      "path": "ignored-on-remote.txt",
+      "status": "matching"
+    },
+    {
+      "path": "kind",
+      "status": "different type"
+    },
+    {
+      "path": "link",
+      "status": "different target"
+    },
+    {
+      "path": "local-new.txt",
+      "status": "local only"
+    },
+    {
+      "path": "mode.sh",
+      "status": "different executable bit"
+    },
+    {
+      "path": "new\nname\t\u001b[31m.txt",
+      "status": "matching"
+    },
+    {
+      "path": "outside-link",
+      "status": "matching"
+    },
+    {
+      "path": "remote-new.txt",
+      "status": "remote only"
+    },
+    {
+      "path": "same.txt",
+      "status": "matching"
+    },
+    {
+      "path": "staging.txt",
+      "status": "matching"
+    },
+    {
+      "path": "tracked-ignored.txt",
+      "status": "matching"
+    },
+    {
+      "path": "unreadable.txt",
+      "status": "indeterminate"
+    }
+  ]
+}
