@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-19T18:50:35.358Z",
+  "sdk": "1.3.0",
+  "slug": "juiced-delete-live-ee59b3f3dca9404f9e3a7c68a6755575",
+  "checks": [
+    "read-only inspection of a missing workspace succeeds without provisioning",
+    "CLI deletion of an absent workspace is a no-op with an empty PATH",
+    "disposable workspace and managed database fixture created",
+    "noninteractive deletion without --yes preserves the workspace",
+    "CLI deletion closes access to the original workspace without a Cantelop CLI or account login",
+    "reusing the slug creates a different workspace with a fresh database",
+    "retrying deletion of the old canonical ID leaves its replacement intact",
+    "local project files remain unchanged",
+    "disposable replacement workspace archived and purge requested"
+  ],
+  "originalId": "wsp_d8b399f08bcfc1cf3d5c2c6f8abd3fc0",
+  "replacementId": "wsp_2849de34f9eec55e8e92cc65000c7e5c",
+  "outcome": "passed",
+  "release": {
+    "version": 9,
+    "id": "rel_b499d9481549a7f859bee02a37326346"
+  },
+  "runtimeId": "rt_d9120ae908ef216afcecaae33c27b2cc8b0767e5f3a3600b4127778be4d5497f",
+  "localTests": 87
+}

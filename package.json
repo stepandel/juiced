@@ -26,10 +26,11 @@
     "prepack": "npm run build",
     "test:sync:live": "node scripts/test-sync-live.mjs",
     "test:git:live": "node scripts/test-git-live.mjs",
-    "test:delete:local": "npm run build && node scripts/test-delete-local.mjs"
+    "test:delete:local": "npm run build && node scripts/test-delete-local.mjs",
+    "test:delete:live": "npm run build && node scripts/test-delete-live.mjs"
   },
   "dependencies": {
-    "@cantelop/sdk": "git+https://github.com/stepandel/cantelop-sdk.git#cf94273c6c015753fcc96037de762f4a4bfebad0",
+    "@cantelop/sdk": "1.3.0",
     "ink": "^8.0.0",
     "react": "^19.3.1"
   },

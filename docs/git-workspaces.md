@@ -117,14 +117,12 @@ branches, and previously imported Git refs are retained.
 Deletion uses the SDK's `workspace.inspect()` and `workspace.delete()` with
 the same configured app credentials as Juiced's other SDK operations. It does
 not shell out to Cantelop or require account login or Claude sign-in. Juiced
-pins the SDK source revision containing these methods until a registry release
-is available. The SDK API is tracked in
+uses the published SDK 1.3.0 release, which includes
 [SDK PR #57](https://github.com/stepandel/cantelop-sdk/pull/57).
 
-The required platform support is tracked in
-[Cantelop PR #355](https://github.com/stepandel/cantelop/pull/355). Deploy its
-console, gateway, and outbound Worker changes and rebuild the Juiced App Edge
-with the updated SDK before using deletion against production. The two commands
+Platform support was added in
+[Cantelop PR #355](https://github.com/stepandel/cantelop/pull/355). The Juiced
+App Edge must also be built with SDK 1.3.0 or newer. The two commands
 do not start a Session Sandbox or require a matching Session runtime identity.
 Local `cantelop dev` supports inspection but returns
 `workspace_deletion_unavailable_in_local_dev` for deletion.
@@ -139,6 +137,7 @@ again; a later launch creates a fresh workspace from the current local HEAD
 npm run check
 npm test
 npm run test:delete:local
+npm run test:delete:live
 npm run build
 npm run build:runtime
 cantelop deploy
@@ -147,8 +146,22 @@ npm run test:git:live
 
 Build the CLI and deploy the Juiced app runtime from matching sources. Git
 transfers require no Cantelop platform change or SDK upgrade. Workspace deletion
-requires the Cantelop support described above. The live test uses a uniquely
-named disposable Git project in `JUICED_WORKSPACE` (default `default`), which
+requires the Cantelop support described above.
+
+`test:delete:local` uses a loopback fixture. `test:delete:live` uses the configured
+app credentials and creates its own randomly named disposable workspaces. It
+checks missing-workspace behavior, confirmation, deletion, database isolation on
+slug reuse, safe retries against the old ID, and local file preservation. The
+child CLI runs with an empty PATH and no account credentials. This test does not
+accept a workspace override or start Claude, and cleans up its remote fixtures.
+
+Hosted deletion verification passed on October 19, 2026 against Juiced v9 with
+SDK 1.3.0, alongside 87 local tests, the type check, and both builds. Both
+disposable workspace IDs were archived for asynchronous purge. See the
+[deletion verification evidence](../diagnostics/workspace-delete-2026-10-19.json).
+
+The Git live test uses a uniquely named disposable Git project in
+`JUICED_WORKSPACE` (default `default`), which
 must already be signed in to Claude. It approves only exact fixture Bash
 commands, checks two concurrent sessions, imports and fast-forwards an agent
 commit, and removes its remote fixture. It uses the Claude subscription.
