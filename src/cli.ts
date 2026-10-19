@@ -1,5 +1,6 @@
 import { app as claudeApp } from './cantelop.js';
 import { updateEnvironment } from './environment.js';
+import { configureGitHub, GITHUB_CONFIGURE_HELP } from './github-configure.js';
 import { HELP, parseArguments } from './args.js';
 import { ensureLogin } from './login.js';
 import { runRemoteTerminal } from './remote-terminal.js';
@@ -28,10 +29,13 @@ const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map((signal, index) 
 
 try {
   const args = parseArguments(process.argv.slice(2));
-  if (args.command === 'help') process.stdout.write(HELP);
+  if (args.command === 'help') process.stdout.write(args.argv[0] === 'github-configure' ? GITHUB_CONFIGURE_HELP : HELP);
   else if (args.command === 'version') process.stdout.write('juiced 0.1.0\n');
   else if (args.command === 'env') {
     await updateEnvironment(claudeApp.environment(), args.action, args.name, args.secret, process, controller.signal);
+  }
+  else if (args.command === 'claude' && args.action === 'github-configure') {
+    await configureGitHub(claudeApp.environment(), args.stdin, process, controller.signal);
   }
   else if (args.command === 'claude' && (args.action === 'ls' || args.action === 'peek')) {
     process.exitCode = await inspectWorkspace(claudeApp, process.cwd(), args, controller.signal);

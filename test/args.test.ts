@@ -77,7 +77,7 @@ test('Git maintenance is scoped under claude and directions are explicit', () =>
 });
 
 test('reserved subcommand names can still be sent as literal Claude prompts', () => {
-  for (const prompt of ['login', 'sync', 'fast-forward', 'delete']) {
+  for (const prompt of ['login', 'github-configure', 'sync', 'fast-forward', 'delete']) {
     assert.deepEqual(parseArguments(['claude', '--', prompt], {}), {
       command: 'claude', action: 'run', workspace: undefined, argv: [prompt],
     });

@@ -48,7 +48,31 @@ The local UI uses Claude's programmatic mode in the remote workspace you have ch
 
 ## GitHub access
 
-Set the GitHub token directly through Juiced:
+Configure GitHub with one command:
+
+```sh
+juiced claude github-configure
+```
+
+Juiced uses `GH_TOKEN` from your shell or an existing local `gh` credential for
+github.com. If neither is available, it opens GitHub's token creation page and
+asks you to paste the token with input hidden. Choose the repository owner and
+repositories; grant **Contents: Read and write** for pushing and **Pull requests:
+Read and write** for opening PRs. Add **Workflows: Write** if the agent should edit
+workflow files. See [GitHub's token documentation](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
+
+The command verifies the GitHub account before saving `GH_TOKEN` as an app secret,
+waits for propagation, and prints the next step: `juiced claude --new` from your
+project. This starts a fresh session with the new token and copies local Git
+remotes. It does not start Claude during configuration or change existing sessions.
+The local `gh` CLI is optional. To supply or rotate a specific token instead of
+reusing an existing credential, pipe it explicitly (on macOS, after copying it):
+
+```sh
+pbpaste | juiced claude github-configure --stdin
+```
+
+You can also manage the token directly through the generic environment commands:
 
 ```sh
 printf '%s' "$GH_TOKEN" | juiced env set GH_TOKEN --stdin

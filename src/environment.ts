@@ -1,7 +1,7 @@
 import type { AppEnvironment } from '@cantelop/sdk';
 import type { Readable, Writable } from 'node:stream';
 
-/** Tokens enter through stdin, never through arguments, prompts, or diagnostic output. */
+/** Generic environment values enter through stdin, never through arguments or diagnostic output. */
 export async function readEnvironmentValue(input: Readable & { isTTY?: boolean }, signal: AbortSignal): Promise<string> {
   if (input.isTTY) throw new Error('Pipe the value into stdin; environment values are not accepted as command arguments.');
   signal.throwIfAborted();

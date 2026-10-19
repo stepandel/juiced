@@ -6,6 +6,7 @@ export type Arguments =
   | ({ command: 'claude'; workspace: string | undefined; argv: string[]; resume?: boolean; session?: string } & (
     | { action: 'run'; newSession?: boolean }
     | { action: 'login' | 'fast-forward' }
+    | { action: 'github-configure'; stdin: boolean }
     | { action: 'delete'; yes: boolean }
     | { action: 'ls'; path: string; includeIgnored: boolean }
     | { action: 'peek'; path: string; includeIgnored: boolean; changesOnly: boolean }
@@ -33,7 +34,7 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
   const command = args[index];
   const argv = args.slice(index + 1);
   if (session !== undefined && !/^ses_[a-f0-9]{32}$/.test(session)) throw new Error('Invalid Juiced session ID');
-  if (resume && (command !== 'claude' || ['login', 'sync', 'fast-forward', 'delete', 'ls', 'peek'].includes(argv[0] ?? ''))) throw new Error('--resume and --session apply to interactive juiced claude sessions.');
+  if (resume && (command !== 'claude' || ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek'].includes(argv[0] ?? ''))) throw new Error('--resume and --session apply to interactive juiced claude sessions.');
   const connection = { ...(resume ? { resume: true } : {}), ...(session ? { session } : {}) };
   if (command === 'env') {
     const [action, name, ...flags] = argv;
@@ -45,6 +46,12 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
     return { command: 'env', action: action as 'set' | 'unset', name, secret: !flags.includes('--plain'), workspace: undefined, argv: [] };
   }
   if (command === 'claude') {
+    if (argv[0] === 'github-configure') {
+      if (index > 0) throw new Error('GitHub configuration is app-wide; omit --workspace.');
+      if (argv.length === 2 && ['--help', '-h'].includes(argv[1]!)) return { command: 'help', workspace: undefined, argv: ['github-configure'] };
+      if (argv.length !== 1 && !(argv.length === 2 && argv[1] === '--stdin')) throw new Error('Usage: juiced claude github-configure [--stdin]');
+      return { command, action: 'github-configure', workspace: undefined, stdin: argv[1] === '--stdin', argv: [] };
+    }
     if (argv[0] === '--new') {
       if (resume) throw new Error('--new cannot be combined with --resume or --session.');
       return { command, action: 'run', workspace, newSession: true, argv: argv.slice(argv[1] === '--' ? 2 : 1) };
@@ -106,6 +113,7 @@ export const HELP = `Run Claude Code on Cantelop with Juiced's local terminal in
 Usage:
   juiced env set NAME --stdin [--plain]
   juiced env unset NAME [--plain]
+  juiced claude github-configure [--stdin]
   juiced [--workspace SLUG] claude [Claude arguments...]
   juiced [--workspace SLUG] claude login
   juiced [--workspace SLUG] claude sync --to-workspace [--include-uncommitted]
@@ -118,9 +126,11 @@ Usage:
 
 Environment values are stored as Cantelop secrets by default. --plain selects a
 declared ordinary variable. Updates apply to new sessions without redeployment.
+github-configure verifies and saves GitHub credentials for the whole Juiced app.
 
 Examples:
   printf '%s' \"$GH_TOKEN\" | juiced env set GH_TOKEN --stdin
+  juiced claude github-configure
   juiced claude login
   juiced claude
   juiced claude --new
@@ -160,7 +170,7 @@ by side, including matches; --changes-only hides matching entries. Directory
 status includes descendants. Pass a path to drill down one level. Both inspect
 current Git-visible contents without syncing, changing the real index, or starting
 Claude. Ignored files are excluded; --include-ignored requires an explicit PATH.
-Use juiced claude -- <prompt> for literal prompts named login, sync, fast-forward,
+Use juiced claude -- <prompt> for literal prompts named login, github-configure, sync, fast-forward,
 delete, ls, or peek. Workspace operations use app credentials through the SDK.
 Non-Git directories use a persistent remote project folder, initially empty.
 Normal Claude launches never sync local and remote files. For non-Git folders,
