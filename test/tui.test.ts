@@ -64,3 +64,77 @@ test('an interrupted snapshot with a new ID does not repeat the streamed respons
   assert.equal(state.history[0]?.entries.filter(entry => entry.kind === 'text').length, 1);
   assert.equal(state.history[0]?.entries.at(-1)?.text, 'Interrupted');
 });
+
+test('per-block assistant snapshots reconcile text after thinking and tools using the active stream index', () => {
+  let state = userTurn(emptyConversation(), 'Check the README');
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'message_start', message: { id: 'mixed' } } });
+  const start = (index: number, block: Record<string, unknown>) => {
+    state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_start', index, content_block: block } });
+  };
+  const snapshot = (block: Record<string, unknown>) => {
+    state = receiveFrame(state, { type: 'assistant', message: { id: 'mixed', content: [block] } });
+  };
+  const stop = (index: number) => {
+    state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_stop', index } });
+  };
+  const text = (index: number, streamed: string, complete = streamed) => {
+    start(index, { type: 'text', text: '' });
+    state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_delta', index, delta: { type: 'text_delta', text: streamed } } });
+    snapshot({ type: 'text', text: complete });
+    stop(index);
+  };
+
+  start(0, { type: 'thinking', thinking: '' });
+  snapshot({ type: 'thinking', thinking: 'Consider the code' });
+  stop(0);
+  text(1, 'Let me check the code.');
+  const tool = { type: 'tool_use', id: 'read', name: 'Read', input: { file_path: 'README.md' } };
+  start(2, { ...tool, input: {} });
+  snapshot(tool);
+  stop(2);
+  text(3, 'The README needs', 'The README needs an update.');
+  // Repeated wording in a distinct block must remain visible.
+  text(4, 'Let me check the code.');
+  state = receiveFrame(state, { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'read', content: 'README contents' }] } });
+  state = receiveFrame(state, { type: 'result' });
+
+  assert.deepEqual(state.history[0]?.entries, [
+    { id: 'user-0', kind: 'user', text: 'Check the README' },
+    { id: 'mixed:1', kind: 'text', text: 'Let me check the code.' },
+    { id: 'read', kind: 'tool', text: 'Read README.md', status: 'done' },
+    { id: 'mixed:3', kind: 'text', text: 'The README needs an update.' },
+    { id: 'mixed:4', kind: 'text', text: 'Let me check the code.' },
+  ]);
+});
+
+test('an interrupted per-block snapshot can change the message ID after thinking', () => {
+  let state = userTurn(emptyConversation(), 'A long response');
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'message_start', message: { id: 'streamed' } } });
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } } });
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } } });
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: '1\n2\n3\n' } } });
+  state = receiveFrame(state, { type: 'assistant', message: { id: 'interrupted-snapshot', content: [{ type: 'text', text: '1\n2\n3' }] } });
+  state = receiveFrame(state, { type: 'result', is_error: true, juiced_interrupted: true });
+  assert.deepEqual(state.history[0]?.entries.filter(entry => entry.kind === 'text'), [{ id: 'streamed:1', kind: 'text', text: '1\n2\n3' }]);
+});
+
+test('full snapshots still reconcile by position and identical text in later messages stays separate', () => {
+  let state = userTurn(emptyConversation(), 'Check again');
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'message_start', message: { id: 'streamed' } } });
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'Checking.' } } });
+  state = receiveFrame(state, { type: 'assistant', message: { id: 'streamed', content: [{ type: 'text', text: 'Checking.' }] } });
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } });
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_start', index: 1, content_block: { type: 'text', text: 'Partial' } } });
+  state = receiveFrame(state, { type: 'assistant', message: { id: 'streamed', content: [{ type: 'text', text: 'Checking.' }, { type: 'text', text: 'Complete.' }] } });
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_stop', index: 1 } });
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'message_stop' } });
+  state = receiveFrame(state, { type: 'assistant', message: { id: 'separate', content: [{ type: 'text', text: 'Checking.' }] } });
+  assert.deepEqual(state.live.filter(entry => entry.kind === 'text'), [
+    { id: 'streamed:0', kind: 'text', text: 'Checking.' },
+    { id: 'streamed:1', kind: 'text', text: 'Complete.' },
+    { id: 'separate:0', kind: 'text', text: 'Checking.' },
+  ]);
+  state = receiveFrame(state, { type: 'result' });
+  assert.equal(state.streamId, '');
+  assert.equal(state.streamIndex, null);
+});
