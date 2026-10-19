@@ -16,6 +16,21 @@ test('selects a persistent workspace before the command or from the environment'
   assert.throws(() => parseArguments(['--workspace'], {}), /Workspace/);
 });
 
+test('a leading --new starts fresh without forwarding the Juiced option to Claude', () => {
+  assert.deepEqual(parseArguments(['claude', '--new', '--model', 'sonnet'], {}), {
+    command: 'claude', action: 'run', workspace: undefined, newSession: true, argv: ['--model', 'sonnet'],
+  });
+  assert.deepEqual(parseArguments(['--workspace', 'chosen', 'claude', '--new', '--', 'login'], {}), {
+    command: 'claude', action: 'run', workspace: 'chosen', newSession: true, argv: ['login'],
+  });
+  assert.deepEqual(parseArguments(['claude', '--', '--new'], {}), {
+    command: 'claude', action: 'run', workspace: undefined, argv: ['--new'],
+  });
+  for (const flags of [['--resume'], ['--session', `ses_${'1'.repeat(32)}`]]) {
+    assert.throws(() => parseArguments([...flags, 'claude', '--new'], {}), /cannot be combined/);
+  }
+});
+
 test('supports global help and version and rejects unknown harnesses', () => {
   assert.equal(parseArguments([], {}).command, 'help');
   assert.equal(parseArguments(['--help'], {}).command, 'help');

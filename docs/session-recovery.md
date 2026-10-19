@@ -4,11 +4,29 @@ Interactive sessions run independently of the local terminal. Closing a laptop
 does not cancel Claude. `/detach`, terminal EOF, and termination signals leave
 remote work running. `/exit`, `/quit`, and idle Ctrl+C/Ctrl+D explicitly stop it.
 
-Use `juiced --resume claude` from the same project and workspace to reopen the
-last session, or `juiced --session ses_<id> claude` to select one explicitly.
-The local `.cantelop/juiced/` directory stores only the last session identity for
-each workspace. A normal launch starts a fresh session. Resume does not refresh
-or transfer the Git checkout. File transfer remains an explicit command.
+Rerun `juiced claude` in the same terminal tab, project directory, and workspace
+to reconnect to that tab's session. The first launch starts a new session;
+`juiced claude --new [Claude arguments...]` replaces its binding with a fresh
+one. Resumption recovers live work, saved output, and conversation context through
+the existing durable session protocol, including after an explicit `/exit` has
+stopped the remote process.
+Supplying Claude arguments starts a fresh bound session so launch settings and
+initial prompts take effect; reattachment retains its saved launch configuration.
+
+Use `juiced --resume claude` from any tab in the same project and workspace to
+reopen the last session, or `juiced --session ses_<id> claude` to select one
+explicitly. These options bypass the terminal binding, as do explicit Claude
+session-selection flags, disabled native persistence, and native passthrough.
+
+The local `.cantelop/juiced/` directory stores only session identities. Tab
+bindings are keyed by terminal identity and canonical workspace ID inside the
+local project, so a different tab or recreated workspace starts fresh. The
+terminal identity comes from a terminal session ID, tmux/screen pane ID, or the
+parent shell's PID and start time; a reused TTY device alone is never a key.
+Without an available identity Juiced reports that automatic resume is disabled.
+Bindings are saved atomically after first-launch Git preparation succeeds.
+Resume does not refresh or transfer the Git checkout. File transfer remains an
+explicit command.
 
 ## Runtime lifetime
 

@@ -4,7 +4,8 @@ export type Arguments =
   | { command: 'env'; action: 'set' | 'unset'; name: string; secret: boolean; workspace: undefined; argv: [] }
   | { command: 'help' | 'version'; workspace: string | undefined; argv: string[] }
   | ({ command: 'claude'; workspace: string | undefined; argv: string[]; resume?: boolean; session?: string } & (
-    | { action: 'run' | 'login' | 'fast-forward' }
+    | { action: 'run'; newSession?: boolean }
+    | { action: 'login' | 'fast-forward' }
     | { action: 'delete'; yes: boolean }
     | { action: 'ls'; path: string; includeIgnored: boolean }
     | { action: 'peek'; path: string; includeIgnored: boolean; changesOnly: boolean }
@@ -44,6 +45,10 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
     return { command: 'env', action: action as 'set' | 'unset', name, secret: !flags.includes('--plain'), workspace: undefined, argv: [] };
   }
   if (command === 'claude') {
+    if (argv[0] === '--new') {
+      if (resume) throw new Error('--new cannot be combined with --resume or --session.');
+      return { command, action: 'run', workspace, newSession: true, argv: argv.slice(argv[1] === '--' ? 2 : 1) };
+    }
     if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1), ...connection };
     if (argv[0] === 'ls' || argv[0] === 'peek') {
       const action = argv[0];
@@ -118,6 +123,7 @@ Examples:
   printf '%s' \"$GH_TOKEN\" | juiced env set GH_TOKEN --stdin
   juiced claude login
   juiced claude
+  juiced claude --new
   juiced claude --model sonnet
   juiced --workspace my-project claude
   echo "Explain this project" | juiced claude -p
@@ -134,7 +140,11 @@ Interactive sessions use local prompt editing and streamed remote responses.
 Enter sends, Alt+Enter adds a line, Esc interrupts, and /exit quits.
 Claude flags configure the remote process. -p, --help, --version, and pipes
 use native CLI passthrough.
-Each invocation starts a new session unless --resume or --session is supplied.
+Interactive launches in the same terminal tab, project, and workspace reconnect
+to their previous Juiced session. Use juiced claude --new before other Claude
+arguments to start fresh. Explicit session flags and native passthrough bypass
+the terminal binding. --resume and --session can also reopen a session explicitly.
+Supplying Claude arguments starts a fresh bound session so prompts and flags apply.
 /detach leaves remote work running. Sleep and network interruptions reconnect
 automatically. Idle processes resume their saved conversation on the next input.
 Files, Claude login, and confirmed menu

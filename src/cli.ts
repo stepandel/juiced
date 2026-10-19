@@ -12,7 +12,8 @@ import { createGitSession, GitWorkspaceClient } from './git-workspace.js';
 import { deleteWorkspace } from './delete-workspace.js';
 import { inspectWorkspace } from './inspect-workspace.js';
 import { syncFiles } from './file-sync.js';
-import { agentSessionId } from './session-state.js';
+import { prepareAgentSession } from './session-state.js';
+import { terminalIdentity, usesTerminalSession } from './terminal-session.js';
 
 const controller = new AbortController();
 let interrupted = 0;
@@ -67,12 +68,24 @@ try {
       } else {
         const localTui = useLocalTui(args.argv, Boolean(process.stdin.isTTY && process.stdout.isTTY));
         if (args.resume && !localTui) throw new Error('Juiced session recovery requires an interactive terminal.');
-        if (repository && !args.resume) {
+        const automaticResume = args.action === 'run' && localTui && !args.resume && usesTerminalSession(args.argv, args.newSession);
+        const terminal = automaticResume ? await terminalIdentity() : undefined;
+        if (automaticResume && !terminal) process.stderr.write('juiced: Could not identify this terminal session; automatic resume is unavailable.\n');
+        const selected = localTui ? await prepareAgentSession(project, {
+          ...(args.resume ? { resume: true } : {}), ...(args.session ? { explicit: args.session } : {}),
+          // Reattaching keeps the saved launch configuration. New Claude
+          // arguments must start a new session so prompts and flags take effect.
+          ...(args.action === 'run' && (args.newSession || terminal && args.argv.length > 0) ? { fresh: true } : {}),
+          ...(terminal ? { terminal: { identity: terminal, workspaceId: (await workspace.resolve()).id } } : {}),
+        }) : undefined;
+        if (repository && !selected?.resumed) {
           if (process.stderr.isTTY) process.stderr.write(`Preparing Git workspace ${project.remoteDirectory}…\n`);
           const client = new GitWorkspaceClient(workspace, project, repository, controller.signal);
           try { await client.send(false, true); } finally { await client.close().catch(() => {}); }
         }
-        const id = localTui ? await agentSessionId(project, args.resume, args.session) : undefined;
+        await selected?.save();
+        const id = selected?.id;
+        if (terminal && selected?.resumed) process.stderr.write(`Reconnecting to Juiced session ${id}. Use juiced claude --new to start fresh.\n`);
         const session = repository ? createGitSession(workspace, project, id) : workspace.session({ keepAliveSeconds: 120, ...(id ? { id } : {}) });
         const directoryName = introspection ? undefined : project.directoryName;
         const git = repository ? { binding: repository.binding, relativeDirectory: repository.relativeDirectory } : undefined;

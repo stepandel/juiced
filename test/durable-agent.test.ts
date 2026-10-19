@@ -13,7 +13,7 @@ import { createDurableAgent } from '../src/runtime/durable-agent.js';
 import { AgentJournal } from '../src/runtime/agent-journal.js';
 import type { createTerminal } from '../src/runtime/terminal.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
-import { agentSessionId } from '../src/session-state.js';
+import { agentSessionId, prepareAgentSession } from '../src/session-state.js';
 import { parseArguments } from '../src/args.js';
 
 async function until(check: () => boolean, ms = 10_000) {
@@ -21,7 +21,7 @@ async function until(check: () => boolean, ms = 10_000) {
   while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
 }
 
-async function fixture(t: test.TestContext, idleTimeoutMs = 60_000) {
+async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 'test') {
   const root = await mkdtemp('/tmp/juiced-durable-');
   const lifetime = new AbortController(), events = new EventEmitter();
   const stored: SessionEvent<TerminalEvent>[] = [];
@@ -33,12 +33,12 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000) {
   let viewState: unknown;
   let activityTimeout = 0;
   const output = { async send(data: TerminalEvent) {
-    stored.push({ data, sessionId: 'test', messageId: `msg_${'1'.repeat(32)}`, createdAt: new Date(), cursor: { streamId: 'a'.repeat(32), sequence: stored.length + 1 } });
+    stored.push({ data, sessionId, messageId: `msg_${'1'.repeat(32)}`, createdAt: new Date(), cursor: { streamId: 'a'.repeat(32), sequence: stored.length + 1 } });
     events.emit('event');
   } };
   const raw = async (value: Buffer) => currentOutput.send({ type: 'output', channel: 'stdout', data: value.toString('base64') });
   const frame = async (value: ClaudeFrame) => raw(Buffer.from(JSON.stringify(value) + '\n'));
-  const context = { signal: lifetime.signal, session: { id: 'test', keepAliveSeconds: 120 }, env: {}, database: async () => { throw new Error('unused'); } } as SessionHarnessContext;
+  const context = { signal: lifetime.signal, session: { id: sessionId, keepAliveSeconds: 120 }, env: {}, database: async () => { throw new Error('unused'); } } as SessionHarnessContext;
   const factory = () => {
     let decoder = new ClaudeDecoder(), finish!: () => void;
     const done = new Promise<void>(resolve => { finish = resolve; });
@@ -83,7 +83,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000) {
   } } } as unknown as SessionContext<TerminalCommand, TerminalEvent, TerminalReply>;
   const network = () => { if (clientOffline) throw new Error('network unavailable'); };
   const session: AgentSession = {
-    id: 'test',
+    id: sessionId,
     async request(command, options) {
       network(); requests.push(command); requestIds.push({ command, id: options?.id });
       if (command.type === 'start') return service.open(command, intake);
@@ -207,6 +207,26 @@ test('reattachment restores the whole conversation and pending permissions witho
   assert.ok(frames.some(value => value.type === 'juiced_user' && value.text === 'Wait for approval'));
   await next.answer('permission', false);
   await until(() => next.approvals.size === 0);
+});
+
+test('rerunning in the same terminal selects the durable session and restores its output without replaying input', async t => {
+  const local = await mkdtemp('/tmp/juiced-terminal-reattach-'); t.after(() => rm(local, { recursive: true, force: true }));
+  const project = { localDirectory: local, workspace: 'project' };
+  const terminal = { identity: 'terminal-tab', workspaceId: 'workspace-id' };
+  const first = await prepareAgentSession(project, { terminal }); await first.save();
+  const f = await fixture(t, 60_000, first.id);
+  await f.agent.start(); await f.agent.submit('Remember this terminal conversation');
+  await f.frame({ type: 'result', result: 'Saved response' });
+  await until(() => f.agent.status === 'ready'); await f.agent.close(false);
+  const selected = await prepareAgentSession(project, { terminal }); await selected.save();
+  assert.equal(selected.resumed, true); assert.equal(selected.id, f.session.id);
+  const next = new RemoteAgent({ ...f.session, id: selected.id }); t.after(() => next.close(false));
+  const frames: ClaudeFrame[] = []; next.on('frame', frame => frames.push(frame));
+  await next.start();
+  assert.ok(frames.some(frame => frame.type === 'result' && frame.result === 'Saved response'));
+  assert.ok(frames.some(frame => frame.type === 'juiced_user' && frame.text === 'Remember this terminal conversation'));
+  assert.deepEqual(f.prompts, ['Remember this terminal conversation']);
+  assert.equal(f.launches.length, 1); assert.equal(f.stops, 0);
 });
 
 test('idle processes exit and the next prompt resumes the native conversation', async t => {

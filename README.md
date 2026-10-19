@@ -10,7 +10,7 @@ juiced claude
 
 Interactive invocations open the **Juiced TUI on your machine**, connected to a headless Claude Code process on Cantelop. Typing, cursor movement, multiline editing, and pasting happen locally. Submitted prompts, menu data requests, confirmed actions, permission answers, and interrupts cross the network. Claude's agent loop, tools, files, and authentication stay in the persistent remote workspace. Git repositories upload local `HEAD` on first launch; local uncommitted files are included only through an explicit transfer.
 
-The local interface streams Claude's responses, shows tool activity, and asks before actions that Claude requires permission to run. A normal invocation starts a new conversation. Use `juiced --resume claude` to reattach to the last conversation in this project and workspace, or `juiced --session ses_… claude` for the session ID displayed in its header. Piped commands and explicit `-p`, `--help`, and `--version` invocations retain the native CLI passthrough.
+The local interface streams Claude's responses, shows tool activity, and asks before actions that Claude requires permission to run. Rerunning `juiced claude` in the same terminal tab, project, and workspace reconnects to that tab's session. Use `juiced claude --new` to start fresh, `juiced --resume claude` to reopen the last session from any tab, or `juiced --session ses_… claude` for the session ID displayed in its header. Piped commands and explicit `-p`, `--help`, and `--version` invocations retain the native CLI passthrough.
 
 ## Set up
 
@@ -79,15 +79,32 @@ platform and Juiced runtime once; later token rotations are configuration update
 
 ## Use
 
-Arguments after `claude` configure the remote Claude process, except for Juiced's reserved `login`, `sync`, and `fast-forward` subcommands. Use `juiced claude -- login` to send a literal prompt named `login`. Interactive launches add the JSON transport flags needed by the local UI. Explicit print/introspection/output-format invocations use native passthrough:
+Arguments after `claude` configure the remote Claude process, except for Juiced's reserved subcommands and leading `--new` option. Use `juiced claude -- login` to send a literal prompt named `login`. Interactive launches add the JSON transport flags needed by the local UI. Explicit print/introspection/output-format invocations use native passthrough:
 
 ```sh
 juiced claude --model sonnet
+juiced claude --new # Start fresh and replace this terminal tab's session binding
 juiced claude --help
 juiced claude -p "Explain the repository in this workspace"
 cat prompt.txt | juiced claude -p
 juiced claude -p "Summarize the project" > summary.txt
 ```
+
+Terminal bindings use a terminal session ID, a tmux/screen pane ID, or the parent
+shell's PID and start time. Each tab, local project directory, and canonical
+remote workspace gets a separate binding. Deleting and recreating a workspace
+starts fresh. Only session IDs are saved locally in `.cantelop/juiced/`; submitted
+prompts, responses, and conversation state stay in the remote workspace.
+
+Use `juiced claude --new [Claude arguments...]` to replace the current tab's
+binding. Supplying Claude arguments, such as `--model sonnet` or an initial
+prompt, also starts a fresh bound session so those arguments take effect; a plain
+`juiced claude` reconnects. Explicit Juiced `--resume`/`--session` options before `claude`, Claude
+session-selection flags after it (such as `--resume`, `--continue`, or
+`--session-id`), and `--no-session-persistence` bypass the terminal binding.
+Pipes, print mode, help, and version commands also bypass it. If Juiced cannot
+identify the terminal, it reports that automatic resume is unavailable and
+starts normally; explicit Juiced session recovery remains available.
 
 Select another persistent workspace with an option **before** the command:
 
