@@ -1,5 +1,6 @@
 import type { SlashCommand } from '../agent-protocol.js';
 import type { Editor } from './editor.js';
+import { menuCommands } from './command-menus.js';
 
 const local: SlashCommand[] = [
   { name: 'help', description: 'Show Juiced keyboard shortcuts', argumentHint: '' },
@@ -10,7 +11,7 @@ const local: SlashCommand[] = [
 
 export function availableCommands(remote: SlashCommand[]): SlashCommand[] {
   const commands = new Map(remote.map(command => [command.name, command]));
-  for (const command of local) commands.set(command.name, command);
+  for (const command of [...menuCommands, ...local]) commands.set(command.name, command);
   return [...commands.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 

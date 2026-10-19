@@ -8,6 +8,18 @@ import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, 
 export type AgentSession = Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'>;
 export type AgentStatus = 'connecting' | 'ready' | 'working' | 'configuring' | 'interrupting' | 'closed' | 'failed';
 type Control = { resolve(value: ClaudeFrame): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> };
+export type MenuQuery = { subtype: 'get_settings' | 'mcp_status' | 'get_session_cost' | 'list_models' | 'get_hooks_listing' | 'list_permission_rules' }
+  | { subtype: 'get_context_usage'; detail: 'summary' }
+  | { subtype: 'get_usage'; skip_behaviors: true }
+  | { subtype: 'read_file'; path: string; max_bytes: number }
+  | { subtype: 'get_task_output'; task_id: string };
+export type MenuChange = { subtype: 'apply_flag_settings'; settings: ClaudeFrame }
+  | { subtype: 'set_permission_mode'; mode: string }
+  | { subtype: 'mcp_reconnect'; serverName: string }
+  | { subtype: 'mcp_toggle'; serverName: string; enabled: boolean }
+  | { subtype: 'reload_plugins' | 'reload_skills' }
+  | { subtype: 'rename_session'; title: string }
+  | { subtype: 'stop_task'; task_id: string };
 class RemoteProcessError extends Error {}
 
 /** A headless Claude process on Cantelop. Keyboard editing never enters this class. */
@@ -17,6 +29,9 @@ export class RemoteAgent extends EventEmitter {
   commands: SlashCommand[] = [];
   models: ModelOption[] = [];
   model = 'default';
+  /** Only public UI metadata; account credentials are never included. */
+  info: ClaudeFrame = {};
+  readonly tasks = new Map<string, ClaudeFrame>();
   private controller = new AbortController();
   private decoder = new ClaudeDecoder();
   private controls = new Map<string, Control>();
@@ -29,6 +44,7 @@ export class RemoteAgent extends EventEmitter {
   private started = false;
   private cursor: SessionEventCursor | undefined;
   private diagnostic = '';
+  private unsupportedQueries = new Set<string>();
 
   constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string }; beforeSubmit?: () => Promise<void> } = {}) { super(); }
 
@@ -68,6 +84,9 @@ export class RemoteAgent extends EventEmitter {
       const initialized = await this.control({ subtype: 'initialize', hooks: null });
       this.updateCommands(initialized.commands);
       this.models = modelOptions(initialized.models);
+      for (const key of ['agents', 'output_style', 'available_output_styles', 'current_permission_mode', 'fast_mode_state', 'fast_mode_disabled_reason']) {
+        if (initialized[key] !== undefined) this.info[key] = initialized[key];
+      }
       this.emit('models', this.models);
       this.emit('model', this.model);
       this.setStatus('ready');
@@ -134,6 +153,41 @@ export class RemoteAgent extends EventEmitter {
     }
   }
 
+  /** Menu reads never occupy the prompt queue or submit a user/model turn. */
+  async query(request: MenuQuery): Promise<ClaudeFrame> {
+    if (!['ready', 'working', 'interrupting', 'configuring'].includes(this.status)) throw new Error('Claude is not connected yet');
+    if (this.unsupportedQueries.has(request.subtype)) throw new Error(`Unsupported control request subtype: ${request.subtype}`);
+    try { return await this.control(request); }
+    catch (error) {
+      if (/Unsupported control request subtype/u.test((error as Error).message)) this.unsupportedQueries.add(request.subtype);
+      throw error;
+    }
+  }
+
+  async configure(request: MenuChange): Promise<ClaudeFrame> {
+    if (request.subtype === 'stop_task' && ['working', 'interrupting'].includes(this.status)) return this.control(request);
+    if (this.status !== 'ready') throw new Error('Wait for Claude to finish before changing settings');
+    this.setStatus('configuring');
+    try {
+      const response = await this.control(request);
+      if (request.subtype === 'set_permission_mode') this.info.current_permission_mode = request.mode;
+      if (request.subtype === 'apply_flag_settings') {
+        if (typeof request.settings.outputStyle === 'string') this.info.output_style = request.settings.outputStyle;
+        if (typeof request.settings.fastMode === 'boolean') this.info.fast_mode_state = request.settings.fastMode ? 'on' : 'off';
+      }
+      if (request.subtype === 'reload_plugins') {
+        this.updateCommands(response.commands);
+        if (Array.isArray(response.agents)) this.info.agents = response.agents;
+        if (Array.isArray(response.plugins)) this.info.plugins = response.plugins;
+      }
+      if (request.subtype === 'reload_skills') {
+        // The response contains skills only, not the complete command catalog.
+        this.updateCommands([...this.commands, ...slashCommands(response.skills)]);
+      }
+      return response;
+    } finally { if (!this.controller.signal.aborted) this.setStatus('ready'); }
+  }
+
   async submit(text: string): Promise<void> {
     if (this.status !== 'ready') throw new Error('Claude is still working; your draft is kept locally');
     if (!text.trim()) return;
@@ -183,7 +237,21 @@ export class RemoteAgent extends EventEmitter {
   }
 
   private frame(frame: ClaudeFrame) {
-    if (frame.type === 'system' && frame.subtype === 'init') this.updateCommands(frame.slash_commands);
+    if (frame.type === 'system' && frame.subtype === 'init') {
+      this.updateCommands(frame.slash_commands);
+      if (Array.isArray(frame.plugins)) this.info.plugins = frame.plugins;
+      if (typeof frame.permissionMode === 'string') this.info.current_permission_mode = frame.permissionMode;
+    }
+    if (frame.type === 'system' && typeof frame.task_id === 'string') {
+      if (frame.subtype === 'task_started') this.tasks.set(frame.task_id, { ...frame, status: 'running' });
+      else if (frame.subtype === 'task_notification') this.tasks.set(frame.task_id, { ...this.tasks.get(frame.task_id), ...frame });
+      else if (frame.subtype === 'task_progress') this.tasks.set(frame.task_id, { status: 'running', ...this.tasks.get(frame.task_id), ...frame });
+      else if (frame.subtype === 'task_updated') this.tasks.set(frame.task_id, { ...this.tasks.get(frame.task_id), ...object(frame.patch), task_id: frame.task_id });
+    }
+    if (frame.type === 'system' && frame.subtype === 'background_tasks_changed' && Array.isArray(frame.tasks)) {
+      this.tasks.clear();
+      for (const raw of frame.tasks) { const task = object(raw); if (typeof task.task_id === 'string') this.tasks.set(task.task_id, { ...task, status: 'running' }); }
+    }
     if (frame.type === 'control_response') {
       const response = object(frame.response);
       const id = String(response.request_id);

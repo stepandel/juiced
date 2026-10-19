@@ -30,7 +30,7 @@ export class ClaudeDecoder {
 
 export type Approval = { id: string; tool: string; input: ClaudeFrame; description: string };
 export type SlashCommand = { name: string; description: string; argumentHint: string };
-export type ModelOption = { value: string; displayName: string; description: string };
+export type ModelOption = { value: string; displayName: string; description: string; supportedEffortLevels?: string[]; supportsFastMode?: boolean; resolvedModel?: string };
 
 export function modelOptions(value: unknown): ModelOption[] {
   if (!Array.isArray(value)) return [];
@@ -38,7 +38,11 @@ export function modelOptions(value: unknown): ModelOption[] {
   for (const raw of value) {
     const model = object(raw);
     if (typeof model.value !== 'string' || !model.value || /\s|[\x00-\x1f\x7f-\x9f]/u.test(model.value)) continue;
-    models.set(model.value, { value: model.value, displayName: typeof model.displayName === 'string' ? model.displayName : model.value, description: typeof model.description === 'string' ? model.description : '' });
+    models.set(model.value, { value: model.value, displayName: typeof model.displayName === 'string' ? model.displayName : model.value, description: typeof model.description === 'string' ? model.description : '',
+      ...(Array.isArray(model.supportedEffortLevels) ? { supportedEffortLevels: [...new Set(model.supportedEffortLevels.filter((level): level is string => typeof level === 'string' && /^[a-z]+$/u.test(level)))] } : {}),
+      ...(typeof model.supportsFastMode === 'boolean' ? { supportsFastMode: model.supportsFastMode } : {}),
+      ...(typeof model.resolvedModel === 'string' ? { resolvedModel: model.resolvedModel } : {}),
+    });
   }
   return [...models.values()];
 }
@@ -49,7 +53,8 @@ export function slashCommands(value: unknown): SlashCommand[] {
   for (const raw of value) {
     const command = typeof raw === 'string' ? { name: raw } : object(raw);
     if (typeof command.name !== 'string' || !/^[^\s/\\\x00-\x1f\x7f-\x9f]+$/u.test(command.name)) continue;
-    commands.set(command.name, { name: command.name, description: typeof command.description === 'string' ? command.description : '', argumentHint: typeof command.argumentHint === 'string' ? command.argumentHint : '' });
+    const names = [command.name, ...(Array.isArray(command.aliases) ? command.aliases.filter((alias): alias is string => typeof alias === 'string' && /^[^\s/\\\x00-\x1f\x7f-\x9f]+$/u.test(alias)) : [])];
+    for (const name of names) commands.set(name, { name, description: typeof command.description === 'string' ? command.description : '', argumentHint: typeof command.argumentHint === 'string' ? command.argumentHint : '' });
   }
   return [...commands.values()];
 }

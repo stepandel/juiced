@@ -14,7 +14,7 @@ test('slash commands preview, filter, navigate, complete and submit locally', { 
     override async start() {
       this.commands = [
         { name: 'compact', description: 'Summarize conversation', argumentHint: '[instructions]' },
-        { name: 'context', description: 'Show context usage', argumentHint: '' },
+        { name: 'compare', description: 'Compare project changes', argumentHint: '' },
         ...Array.from({ length: 20 }, (_, i) => ({ name: `project:command-${String(i).padStart(2, '0')}`, description: 'A project command', argumentHint: '' })),
       ];
       this.emit('commands', this.commands);
@@ -44,33 +44,33 @@ test('slash commands preview, filter, navigate, complete and submit locally', { 
     await wait(() => agent.status === 'ready');
     stdin.write('/');
     await wait(() => latest.includes('Summarize conversation'));
-    assert.ok(latest.includes('[instructions]') && latest.includes('/help'));
-    stdin.write('co');
+    assert.ok(latest.includes('[instructions]'));
+    stdin.write('comp');
     await wait(() => latest.includes('1/2 ·'));
     assert.equal(latest.includes('Show Juiced keyboard shortcuts'), false);
     stdin.write('\x1b[B'); stdin.write('\t');
-    await wait(() => latest.includes('/context ') && !latest.includes('Tab complete'));
+    await wait(() => latest.includes('/compare ') && !latest.includes('Tab complete'));
     assert.deepEqual(agent.submitted, [], 'Completion must not submit a turn');
     stdin.write('\r');
     await wait(() => agent.submitted.length === 1);
-    assert.deepEqual(agent.submitted, ['/context ']);
+    assert.deepEqual(agent.submitted, ['/compare ']);
 
-    stdin.write('/co');
+    stdin.write('/comp');
     await wait(() => latest.includes('1/2 ·'));
     stdin.write('\x1b');
     await wait(() => !latest.includes('Tab complete'));
-    assert.ok(latest.includes('/co'), 'Escape keeps the draft');
+    assert.ok(latest.includes('/comp'), 'Escape keeps the draft');
     assert.equal(agent.interrupts, 0, 'Closing suggestions must not interrupt Claude');
     stdin.write('\x1b');
     await wait(() => agent.interrupts === 1);
     stdin.write('\x15');
     await wait(() => latest.includes('Ask Claude to work'));
     agent.status = 'ready'; agent.emit('status', agent.status);
-    stdin.write('/co');
+    stdin.write('/comp');
     await wait(() => latest.includes('1/2 ·'));
     stdin.write('\x1b[B'); stdin.write('\r');
     await wait(() => agent.submitted.length === 2);
-    assert.equal(agent.submitted[1], '/context', 'Rapid arrow + Enter runs the selected command');
+    assert.equal(agent.submitted[1], '/compare', 'Rapid arrow + Enter runs the selected command');
 
     stdin.write('/project:');
     await wait(() => latest.includes('1/20 ·'));

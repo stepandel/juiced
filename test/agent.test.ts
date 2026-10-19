@@ -12,7 +12,7 @@ export async function until(check: () => boolean, ms = 2000) {
   while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
 }
 
-function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}, initialization: ClaudeFrame = {}, modelResponse: 'success' | 'error' | 'pending' = 'success') {
+function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}, initialization: ClaudeFrame = {}, modelResponse: 'success' | 'error' | 'pending' = 'success', responses: Record<string, ClaudeFrame | Error> = {}) {
   const emitted = new EventEmitter();
   const events: SessionEvent<TerminalEvent>[] = [];
   const frames: ClaudeFrame[] = [];
@@ -34,11 +34,14 @@ function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}, ini
       if (command.type === 'input') for (const frame of decoder.push(Buffer.from(command.data, 'base64'))) {
         frames.push(frame);
         if (frame.type === 'control_request') {
+          const subtype = String(object(frame.request).subtype);
           if (object(frame.request).subtype === 'set_model' && modelResponse === 'pending') continue;
           if (object(frame.request).subtype === 'set_model' && modelResponse === 'error') {
             output({ type: 'control_response', response: { subtype: 'error', request_id: frame.request_id, error: 'Model unavailable' } }); continue;
           }
-          output({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response: object(frame.request).subtype === 'initialize' ? initialization : {} } });
+          const response = responses[subtype];
+          if (response instanceof Error) output({ type: 'control_response', response: { subtype: 'error', request_id: frame.request_id, error: response.message } });
+          else output({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response: subtype === 'initialize' ? initialization : response ?? {} } });
         }
       }
       return { id: 'msg_' + '2'.repeat(32), state: 'accepted', acceptedAt: new Date(), async status() { return { id: 'msg_' + '2'.repeat(32), state: 'handled', acceptedAt: new Date(), startedAt: new Date(), handledAt: new Date() }; } };
@@ -100,6 +103,7 @@ test('command metadata tolerates missing fields and rejects invalid names', () =
     { name: 'compact', description: '', argumentHint: '' },
     { name: 'plugin:review', description: '', argumentHint: '' },
   ]);
+  assert.deepEqual(slashCommands([{ name: 'code-review', description: 'Review changes', aliases: ['review', '/bad', 'bad name', null, 'review'] }]).map(command => command.name), ['code-review', 'review']);
 });
 
 test('models come from Claude and switching uses a control request in the same conversation', async t => {
@@ -159,6 +163,56 @@ test('model metadata uses provider names without inventing a fallback catalog', 
     { value: 'custom', displayName: 'custom', description: '' },
     { value: 'sonnet', displayName: 'Sonnet', description: 'A model' },
   ]);
+});
+
+test('menu reads and changes use the same control channel without prompt synchronization or user turns', async t => {
+  let syncs = 0;
+  const f = fixture({ beforeSubmit: async () => { syncs++; } }, { output_style: 'Custom', available_output_styles: ['Custom'], account: { secret: 'private' } }, 'success', { get_settings: { effective: { effortLevel: 'low' } } });
+  t.after(() => f.agent.close()); await f.agent.start();
+  assert.equal(f.agent.info.account, undefined, 'Only public menu metadata is retained');
+  assert.deepEqual(f.agent.info.available_output_styles, ['Custom']);
+  assert.deepEqual(await f.agent.query({ subtype: 'get_settings' }), { effective: { effortLevel: 'low' } });
+  assert.equal(f.agent.status, 'ready');
+  await f.agent.configure({ subtype: 'apply_flag_settings', settings: { outputStyle: 'Workspace' } });
+  assert.equal(f.agent.info.output_style, 'Workspace');
+  await f.agent.configure({ subtype: 'set_permission_mode', mode: 'plan' });
+  assert.equal(f.agent.info.current_permission_mode, 'plan');
+  assert.equal(syncs, 0);
+  assert.equal(f.frames.some(frame => frame.type === 'user'), false);
+  await f.agent.submit('A normal prompt');
+  await f.agent.query({ subtype: 'mcp_status' });
+  assert.equal(f.agent.status, 'working', 'A read must not reset an ongoing turn');
+  await assert.rejects(f.agent.configure({ subtype: 'set_permission_mode', mode: 'default' }), /Wait for Claude/);
+  assert.equal(f.commands.filter(command => command.type === 'start').length, 1);
+});
+
+test('rejected menu changes preserve metadata and unsupported read capabilities are cached per process', async t => {
+  const f = fixture({}, { current_permission_mode: 'default' }, 'success', {
+    set_permission_mode: new Error('Policy rejected the change'),
+    get_hooks_listing: new Error('Unsupported control request subtype: get_hooks_listing'),
+  });
+  t.after(() => f.agent.close()); await f.agent.start();
+  await assert.rejects(f.agent.configure({ subtype: 'set_permission_mode', mode: 'acceptEdits' }), /Policy rejected/);
+  assert.equal(f.agent.status, 'ready');
+  assert.equal(f.agent.info.current_permission_mode, 'default');
+  for (let i = 0; i < 2; i++) await assert.rejects(f.agent.query({ subtype: 'get_hooks_listing' }), /Unsupported/);
+  assert.equal(f.frames.filter(frame => object(frame.request).subtype === 'get_hooks_listing').length, 1);
+  await f.agent.submit('Still usable');
+});
+
+test('task menus track remote snapshots and can stop a task without resetting an ongoing turn', async t => {
+  const f = fixture(); t.after(() => f.agent.close()); await f.agent.start();
+  f.output({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'shell-1', description: 'Run checks', task_type: 'local_bash' }] });
+  await until(() => f.agent.tasks.size === 1);
+  assert.equal(f.agent.tasks.get('shell-1')?.status, 'running');
+  await f.agent.submit('Keep working');
+  await f.agent.configure({ subtype: 'stop_task', task_id: 'shell-1' });
+  assert.equal(f.agent.status, 'working');
+  f.output({ type: 'system', subtype: 'task_updated', task_id: 'shell-1', patch: { status: 'killed' } });
+  await until(() => f.agent.tasks.get('shell-1')?.status === 'killed');
+  f.output({ type: 'system', subtype: 'background_tasks_changed', tasks: [] });
+  await until(() => f.agent.tasks.size === 0);
+  assert.equal(f.frames.filter(frame => frame.type === 'user').length, 1);
 });
 
 test('one process handles initialization, multiple prompts, approval answers and interruption through dispatch', async t => {

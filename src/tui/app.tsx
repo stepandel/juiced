@@ -1,12 +1,13 @@
 import React, { useEffect, useReducer, useRef, useState } from 'react';
 import { Box, Text, Static, render, useInput, usePaste } from 'ink';
-import { object, type Approval, type ClaudeFrame, type ModelOption, type SlashCommand } from '../agent-protocol.js';
+import { object, type Approval, type ClaudeFrame, type SlashCommand } from '../agent-protocol.js';
 import { RemoteAgent, type AgentStatus } from '../remote-agent.js';
 import type { TerminalIO } from '../remote-terminal.js';
 import { cursorParts, edit, type Editor } from './editor.js';
 import { emptyConversation, plain, receiveFrame, userTurn, type Entry } from './conversation.js';
 import { availableCommands, matchingCommands } from './commands.js';
-import { ModelPicker } from './model-picker.js';
+import { CommandMenu, type MenuPage } from './menu.js';
+import { commandMenu, menuCommand } from './command-menus.js';
 
 type Draft = { current: Editor };
 function useDraft(): [Draft, (next: Editor) => void] {
@@ -134,9 +135,8 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
   const [status, setStatus] = useState<AgentStatus>(agent.status);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [commands, setCommands] = useState<SlashCommand[]>(agent.commands);
-  const [models, setModels] = useState<ModelOption[]>(agent.models);
-  const [model, setModel] = useState(agent.model);
-  const [pickingModel, setPickingModel] = useState(false);
+  const [menu, setMenu] = useState<{ load(): Promise<MenuPage> }>();
+  const menuOpen = useRef(false);
   const [notice, setNotice] = useState('');
   const [closing, setClosing] = useState(false);
   const action = (work: Promise<unknown>) => { void work.catch(error => setNotice(plain((error as Error).message))); };
@@ -147,14 +147,14 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
     const permission = () => setApprovals([...agent.approvals.values()]);
     const failure = (error: Error) => { setClosing(true); setNotice(plain(error.message)); quit(1); };
     const reconnect = () => setNotice('Reconnecting to the output stream… Your draft is kept locally.');
-    const model = (value: string) => { setModel(value); setConversation(previous => ({ ...previous, model: plain(value) })); };
-    agent.on('frame', frame).on('status', state).on('approvals', permission).on('commands', setCommands).on('models', setModels).on('model', model).on('failure', failure).on('reconnecting', reconnect);
+    const model = (value: string) => setConversation(previous => ({ ...previous, model: plain(value) }));
+    agent.on('frame', frame).on('status', state).on('approvals', permission).on('commands', setCommands).on('model', model).on('failure', failure).on('reconnecting', reconnect);
     void agent.start(argv).catch(() => {});
-    return () => { agent.off('frame', frame).off('status', state).off('approvals', permission).off('commands', setCommands).off('models', setModels).off('model', model).off('failure', failure).off('reconnecting', reconnect); };
+    return () => { agent.off('frame', frame).off('status', state).off('approvals', permission).off('commands', setCommands).off('model', model).off('failure', failure).off('reconnecting', reconnect); };
   }, [agent]);
   const cancel = () => { if (['working', 'interrupting'].includes(agent.status)) action(agent.interrupt()); };
   useInput((input, key) => {
-    if (approvals.length || pickingModel) return;
+    if (approvals.length || menuOpen.current) return;
     if (key.ctrl && input === 'c') {
       if (['working', 'interrupting'].includes(agent.status)) cancel();
       else if (editor.current.text) setEditor({ text: '', cursor: 0 });
@@ -163,20 +163,26 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
     if (key.ctrl && input === 'd' && !editor.current.text) exit();
   });
   const submit = (text: string) => {
+    if (menuOpen.current) return;
     if (!text.trim()) return;
     if (text.trim() === '/exit' || text.trim() === '/quit') { exit(); return; }
-    if (text.trim() === '/help') { setNotice('/ lists commands · /model opens the model picker · ↑/↓ select · Tab completes · Enter runs · Alt+Enter or \\ then Enter adds a line · Esc closes the menu or interrupts · /exit quits.'); setEditor({ text: '', cursor: 0 }); return; }
-    if (agent.status !== 'ready') { setNotice('Your draft is local. Wait for Claude to finish, or press Esc to interrupt.'); return; }
     const modelCommand = /^\/model(?:\s+(.+))?$/u.exec(text.trim());
-    if (modelCommand) {
-      if (modelCommand[1]) {
-        const draft = editor.current;
-        setEditor({ text: '', cursor: 0 }); setNotice('');
-        action(agent.setModel(modelCommand[1]).then(() => setNotice(`Model changed to ${plain(agent.model)}`)).catch(error => { if (!editor.current.text) setEditor(draft); throw error; }));
-      } else if (models.length) { setPickingModel(true); setEditor({ text: '', cursor: 0 }); setNotice(''); }
-      else setNotice('Claude did not provide a model list. Use /model <name> to choose a model.');
+    if (modelCommand?.[1]) {
+      if (agent.status !== 'ready') { setNotice('Wait for Claude to finish before switching models.'); return; }
+      const draft = editor.current;
+      setEditor({ text: '', cursor: 0 }); setNotice('');
+      action(agent.setModel(modelCommand[1]).then(() => setNotice(`Model changed to ${plain(agent.model)}`)).catch(error => { if (!editor.current.text) setEditor(draft); throw error; }));
       return;
     }
+    const command = menuCommand(text);
+    if (command) {
+      if (!['ready', 'working', 'interrupting'].includes(agent.status)) { setNotice('Wait for Claude to connect or finish changing settings.'); return; }
+      if (command.name === 'model' && !agent.models.length) { setNotice('Claude did not provide a model list. Use /model <name> to choose a model.'); return; }
+      menuOpen.current = true;
+      setMenu({ load: () => commandMenu(agent, command.name, command.argument) });
+      setEditor({ text: '', cursor: 0 }); setNotice(''); return;
+    }
+    if (agent.status !== 'ready') { setNotice('Your draft is local. Wait for Claude to finish, or press Esc to interrupt.'); return; }
     if (Buffer.byteLength(text) > 512 * 1024) { setNotice('The prompt exceeds 512 KiB. Shorten it before sending.'); return; }
     const draft = editor.current;
     setConversation(previous => userTurn(previous, text)); setEditor({ text: '', cursor: 0 }); setNotice('');
@@ -201,14 +207,16 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
     <Box flexDirection="column" maxHeight={height} overflow="hidden">
       <Clipped tail><Entries entries={conversation.live.slice(-12)} /></Clipped>
       <Box flexDirection="column" flexShrink={0} maxHeight={height} overflow="hidden">
-        <Box marginBottom={1} flexShrink={0} maxHeight={2} overflow="hidden"><Text color={status === 'ready' ? 'green' : status === 'failed' ? 'red' : 'cyan'}>{closing ? 'Disconnecting…' : status === 'connecting' ? 'Connecting to Claude…' : status === 'working' ? 'Claude is working…' : status === 'configuring' ? 'Switching model…' : status === 'interrupting' ? 'Interrupting…' : status === 'ready' ? 'Ready' : status}</Text><Text dimColor>{conversation.model ? ` · ${conversation.model}` : ''}{conversation.tokens ? ` · ${conversation.tokens.toLocaleString()} tokens last turn` : ''}</Text></Box>
+        <Box marginBottom={1} flexShrink={0} maxHeight={2} overflow="hidden"><Text color={status === 'ready' ? 'green' : status === 'failed' ? 'red' : 'cyan'}>{closing ? 'Disconnecting…' : status === 'connecting' ? 'Connecting to Claude…' : status === 'working' ? 'Claude is working…' : status === 'configuring' ? 'Updating Claude…' : status === 'interrupting' ? 'Interrupting…' : status === 'ready' ? 'Ready' : status}</Text><Text dimColor>{conversation.model ? ` · ${conversation.model}` : ''}{conversation.tokens ? ` · ${conversation.tokens.toLocaleString()} tokens last turn` : ''}</Text></Box>
         {notice && <Box marginBottom={1} flexShrink={0} maxHeight={2} overflow="hidden"><Text color="yellow">{notice}</Text></Box>}
-        {active ? <Permission key={active.id} approval={active} cancel={cancel} answer={(allow, answers) => action(agent.answer(active.id, allow, answers))} />
-          : pickingModel ? <ModelPicker models={models} current={model} rows={rows} cancel={() => setPickingModel(false)} select={async value => {
-            await agent.setModel(value); setPickingModel(false); setNotice(`Model changed to ${plain(models.find(model => model.value === value)?.displayName ?? value)}`);
-          }} />
-          : <Prompt editor={editor} onEdit={setEditor} onSubmit={submit} onEscape={cancel} commands={availableCommands(commands)} menuRows={Math.max(1, Math.min(6, rows - 12))} disabled={closing} />}
-        <Box flexShrink={0}><Text dimColor wrap="truncate-end">{active ? 'Esc decline · Ctrl+C interrupt' : pickingModel ? '↑/↓ select · Enter confirm · Esc cancel' : 'Enter send · Alt+Enter newline · Esc interrupt · Ctrl+C clear / exit · / commands'}</Text></Box>
+        {active && <Permission key={active.id} approval={active} cancel={cancel} answer={(allow, answers) => action(agent.answer(active.id, allow, answers))} />}
+        {menu && <Box flexDirection="column" display={active ? 'none' : 'flex'}><CommandMenu load={menu.load} rows={rows} active={!active} cancel={() => { menuOpen.current = false; setMenu(undefined); }} done={result => {
+            menuOpen.current = false; setMenu(undefined);
+            if ('message' in result) setNotice(plain(result.message));
+            else setEditor({ text: result.draft, cursor: result.draft.length });
+          }} /></Box>}
+        {!active && !menu && <Prompt editor={editor} onEdit={setEditor} onSubmit={submit} onEscape={cancel} commands={availableCommands(commands)} menuRows={Math.max(1, Math.min(6, rows - 12))} disabled={closing} />}
+        <Box flexShrink={0}><Text dimColor wrap="truncate-end">{active ? 'Esc decline · Ctrl+C interrupt' : menu ? '↑/↓ select · Enter confirm · Esc cancel' : 'Enter send · Alt+Enter newline · Esc interrupt · Ctrl+C clear / exit · / commands'}</Text></Box>
       </Box>
     </Box>
   </Box>;
