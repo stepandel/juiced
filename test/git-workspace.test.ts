@@ -9,7 +9,7 @@ import { createClient } from '@libsql/client';
 import { CantelopClient, type AppCommandEnvelope, type SessionEvent } from '@cantelop/sdk';
 import type { WorkspaceDatabase } from '@cantelop/sdk/session';
 import { createUpload, discoverRepository, fileInfo, git, gitText } from '../src/git.js';
-import { GitWorkspaceClient } from '../src/git-workspace.js';
+import { createGitSession, GitWorkspaceClient } from '../src/git-workspace.js';
 import { selectProject } from '../src/project.js';
 import { createGitRuntime } from '../src/runtime/git.js';
 import { acquireCheckout, CheckoutBusy } from '../src/runtime/project-state.js';
@@ -275,4 +275,22 @@ test('detached HEAD workspaces import commits and require a source branch for fa
   assert.equal(imported.head, await gitText(f.target, ['rev-parse', 'HEAD']));
   await assert.rejects(client.fastForward(), /source branch/);
   await client.close();
+});
+
+test('client session stop clears exact checkout registrations after sandbox termination', async t => {
+  const f = await fixture(t);
+  const stopped: string[] = [];
+  const session = createGitSession({
+    session() { return { id: 'owned-session', async stop() {
+      assert.equal((await f.db.execute('SELECT * FROM juiced_checkout_leases')).rows.length, 1);
+      stopped.push('stopped');
+    } } as ReturnType<Parameters<typeof createGitSession>[0]['session']>; },
+    async database() { return f.db as WorkspaceDatabase; },
+  }, f.project);
+  const lease = await acquireCheckout(f.db, f.project.directoryName, session.id, 'session', () => {});
+  await session.stop(); await session.stop();
+  assert.deepEqual(stopped, ['stopped']);
+  assert.equal((await f.db.execute('SELECT * FROM juiced_checkout_leases')).rows.length, 0);
+  assert.throws(() => session.request({ type: 'heartbeat' }), /has stopped/);
+  await lease.release();
 });

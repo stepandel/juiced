@@ -63,6 +63,8 @@ Git branch are shared. Outbound transfers require all those sessions to close.
 Imports can run during active sessions because they export pinned commits.
 Maintenance ownership is coordinated through the workspace database. Expired
 owners are stopped through the SDK before their stale leases are removed.
+After a normal session stop, the local client also removes that stopped owner's
+registrations, so abrupt sandbox shutdown cannot leave the checkout busy.
 
 Transfers use Git bundles and binary patches over authenticated SDK messages and
 streams. Upload retries check offsets and existing bytes; downloads resume from

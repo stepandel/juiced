@@ -3,7 +3,7 @@ import { open, mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { SessionEventCursor, WorkspaceRef } from '@cantelop/sdk';
+import type { SessionEventCursor, SessionRef, WorkspaceRef } from '@cantelop/sdk';
 import { ancestor, cleanRepository, createUpload, fileInfo, git, gitText, type Repository } from './git.js';
 import { MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, type GitCommand, type GitResult, type GitStatus, type ExportManifest } from './git-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
@@ -12,6 +12,30 @@ import type { selectProject } from './project.js';
 export type GitWorkspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'session'>;
 type Project = Awaited<ReturnType<typeof selectProject>>;
 type Action = GitCommand extends infer C ? C extends GitCommand ? Omit<C, 'type' | 'directoryName' | 'binding'> : never : never;
+
+/** Sandbox stop may be abrupt, so the backend also retires its confirmed-dead
+ * Session's checkout registrations. Wrapped Session identities are never reused. */
+export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<TerminalCommand>, 'database'>, project: Pick<Project, 'directoryName'>): Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'> {
+  const session = workspace.session({ keepAliveSeconds: 120 });
+  let stopping: Promise<void> | undefined;
+  const open = () => { if (stopping) throw new Error('This Git session has stopped. Start a new session.'); };
+  return {
+    id: session.id,
+    request(message, options) { open(); return session.request(message, options); },
+    dispatch(message, options) { open(); return session.dispatch(message, options); },
+    stream(options) { return session.stream(options); },
+    stop() {
+      return stopping ??= (async () => {
+        await session.stop();
+        const db = await workspace.database();
+        // Query after successful stop: the old runtime can no longer acquire or
+        // renew a token. Delete only the registrations belonging to that owner.
+        const rows = await db.execute({ sql: 'SELECT token FROM juiced_checkout_leases WHERE project = ? AND session = ?', args: [project.directoryName, session.id] });
+        for (const row of rows.rows) await db.execute({ sql: 'DELETE FROM juiced_checkout_leases WHERE project = ? AND session = ? AND token = ?', args: [project.directoryName, session.id, String(row.token)] });
+      })();
+    },
+  };
+}
 
 function retryable(error: unknown) {
   const remote = error as { status?: number; name?: string; message?: string };

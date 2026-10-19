@@ -7,7 +7,7 @@ import { RemoteAgent } from './remote-agent.js';
 import { runLocalTui } from './tui/app.js';
 import { selectProject, synchronizeProject, syncError } from './project.js';
 import { discoverRepository } from './git.js';
-import { GitWorkspaceClient } from './git-workspace.js';
+import { createGitSession, GitWorkspaceClient } from './git-workspace.js';
 
 const controller = new AbortController();
 let interrupted = 0;
@@ -66,7 +66,7 @@ try {
         }, 1000);
         monitor?.unref();
         try {
-          const session = workspace.session({ keepAliveSeconds: 120 });
+          const session = repository ? createGitSession(workspace, project) : workspace.session({ keepAliveSeconds: 120 });
           const directoryName = introspection ? undefined : project.directoryName;
           const git = repository ? { binding: repository.binding, relativeDirectory: repository.relativeDirectory } : undefined;
           process.exitCode = useLocalTui(args.argv, Boolean(process.stdin.isTTY && process.stdout.isTTY))
