@@ -3,8 +3,8 @@ import { object, type ClaudeFrame } from '../agent-protocol.js';
 
 export type Entry = { id: string; kind: 'user' | 'text' | 'tool' | 'notice'; text: string; detail?: string; status?: 'running' | 'done' | 'failed' };
 export type Turn = { id: number; entries: Entry[] };
-export type Conversation = { history: Turn[]; live: Entry[]; streamId: string; streamIndex: number | null; model: string; turn: number; tokens: number };
-export const emptyConversation = (): Conversation => ({ history: [], live: [], streamId: '', streamIndex: null, model: '', turn: 0, tokens: 0 });
+export type Conversation = { history: Turn[]; live: Entry[]; printed: Entry[]; streamId: string; streamIndex: number | null; model: string; turn: number; tokens: number };
+export const emptyConversation = (): Conversation => ({ history: [], live: [], printed: [], streamId: '', streamIndex: null, model: '', turn: 0, tokens: 0 });
 export const plain = (text: unknown) => stripVTControlCharacters(String(text ?? '')).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 const bounded = (text: string) => text.length > 512 * 1024 ? text.slice(0, 512 * 1024) + '\n[display truncated]' : text;
 export function toolSummary(name: unknown, value: unknown): string {
@@ -13,7 +13,26 @@ export function toolSummary(name: unknown, value: unknown): string {
 }
 
 export function userTurn(state: Conversation, text: string): Conversation {
-  return { ...state, live: [{ id: `user-${state.turn}`, kind: 'user', text: plain(text) }], streamId: '', streamIndex: null };
+  return { ...state, live: [{ id: `user-${state.turn}`, kind: 'user', text: plain(text) }], printed: [], streamId: '', streamIndex: null };
+}
+
+/** Keep replayed output in scrollback while reconciling later native snapshots. */
+export function liveEntries(state: Conversation): Entry[] {
+  const printed = new Map(state.printed.map(entry => [entry.id, entry]));
+  return state.live.flatMap(entry => {
+    const previous = printed.get(entry.id);
+    if (!previous) return [entry];
+    if (entry.text === previous.text && entry.status === previous.status) return [];
+    // A reattachment can land in the middle of a streamed text block.
+    if (entry.kind === 'text' && entry.text.startsWith(previous.text)) return [{ ...entry, text: entry.text.slice(previous.text.length) }];
+    return [entry];
+  });
+}
+
+export function restoreHistory(state: Conversation): Conversation {
+  const entries = liveEntries(state);
+  if (!entries.length) return state;
+  return { ...state, history: [...state.history, { id: state.history.length, entries }], printed: state.live };
 }
 
 /** Partial events and final assistant snapshots describe the same blocks. */
@@ -82,7 +101,8 @@ export function receiveFrame(state: Conversation, frame: ClaudeFrame): Conversat
     else if (frame.is_error) put({ id: 'error', kind: 'notice', text: plain(Array.isArray(frame.errors) ? frame.errors.join('\n') : frame.result ?? 'The Claude turn failed') });
     live = live.map(entry => entry.status === 'running' ? { ...entry, status: frame.is_error ? 'failed' : 'done' } : entry);
     const tokens = Number(object(frame.usage).input_tokens ?? 0) + Number(object(frame.usage).output_tokens ?? 0);
-    return { ...state, history: [...state.history, { id: state.turn, entries: live }], live: [], streamId: '', streamIndex: null, turn: state.turn + 1, tokens };
+    const entries = liveEntries({ ...state, live });
+    return { ...state, history: [...state.history, { id: state.history.length, entries }], live: [], printed: [], streamId: '', streamIndex: null, turn: state.turn + 1, tokens };
   }
   return { ...state, live, streamIndex };
 }

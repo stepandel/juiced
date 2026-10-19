@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { edit, cursorParts } from '../src/tui/editor.js';
-import { emptyConversation, plain, receiveFrame, userTurn } from '../src/tui/conversation.js';
+import { emptyConversation, liveEntries, plain, receiveFrame, restoreHistory, userTurn } from '../src/tui/conversation.js';
 import { availableCommands, matchingCommands } from '../src/tui/commands.js';
 
 test('command suggestions filter the command word and preserve local command behavior', () => {
@@ -63,6 +63,41 @@ test('an interrupted snapshot with a new ID does not repeat the streamed respons
   state = receiveFrame(state, { type: 'result', is_error: true, juiced_interrupted: true, errors: ['internal diagnostic'] });
   assert.equal(state.history[0]?.entries.filter(entry => entry.kind === 'text').length, 1);
   assert.equal(state.history[0]?.entries.at(-1)?.text, 'Interrupted');
+});
+
+test('restored streaming output prints once and later deltas and snapshots retain their full context', () => {
+  let state = receiveFrame(emptyConversation(), { type: 'juiced_user', text: 'Saved prompt' });
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'message_start', message: { id: 'streamed' } } });
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'Saved text' } } });
+  state = restoreHistory(state);
+  assert.deepEqual(state.history[0]?.entries.map(entry => entry.text), ['Saved prompt', 'Saved text']);
+  assert.deepEqual(liveEntries(state), []);
+  assert.equal(restoreHistory(state), state, 'Repeating restoration must not duplicate history');
+
+  state = receiveFrame(state, { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: ' plus new text' } } });
+  assert.equal(state.live.at(-1)?.text, 'Saved text plus new text', 'Native snapshot reconciliation keeps the original block');
+  assert.equal(liveEntries(state)[0]?.text, ' plus new text');
+  state = receiveFrame(state, { type: 'assistant', message: { id: 'streamed', content: [{ type: 'text', text: 'Saved text plus new text' }] } });
+  state = receiveFrame(state, { type: 'result' });
+  assert.deepEqual(state.history[1]?.entries.map(entry => entry.text), [' plus new text']);
+  assert.equal(new Set(state.history.map(turn => turn.id)).size, state.history.length, 'Static output IDs stay unique across restored and completed output');
+  state = receiveFrame(state, { type: 'juiced_user', text: 'Saved prompt' });
+  assert.deepEqual(liveEntries(state).map(entry => entry.text), ['Saved prompt'], 'The next turn can repeat earlier wording');
+});
+
+test('restored tools can finish and corrected snapshots remain visible', () => {
+  let state = userTurn(emptyConversation(), 'Saved prompt');
+  state = receiveFrame(state, { type: 'assistant', message: { id: 'saved', content: [
+    { type: 'text', text: 'Initial snapshot' },
+    { type: 'tool_use', id: 'tool', name: 'Read', input: { file_path: 'README.md' } },
+  ] } });
+  state = restoreHistory(state);
+  state = receiveFrame(state, { type: 'assistant', message: { id: 'saved', content: [{ type: 'text', text: 'Corrected snapshot' }] } });
+  state = receiveFrame(state, { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool', is_error: true }] } });
+  assert.deepEqual(liveEntries(state).map(entry => [entry.text, entry.status]), [['Corrected snapshot', undefined], ['Read README.md', 'failed']]);
+  state = receiveFrame(state, { type: 'result', juiced_interrupted: true });
+  assert.equal(state.history[1]?.entries.at(-1)?.text, 'Interrupted');
+  assert.equal(state.history[1]?.entries.some(entry => entry.kind === 'user'), false);
 });
 
 test('per-block assistant snapshots reconcile text after thinking and tools using the active stream index', () => {

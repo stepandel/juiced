@@ -7,6 +7,58 @@ import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
 import { runLocalTui } from '../src/tui/app.js';
 import type { TerminalInput, TerminalOutput } from '../src/remote-terminal.js';
 
+test('reattaching prints saved turns and the entire unfinished turn into scrollback', { timeout: 5000 }, async () => {
+  class ReattachedAgent extends RemoteAgent {
+    submitted: string[] = [];
+    override async start() {
+      for (let i = 0; i < 2; i++) {
+        this.emit('frame', { type: 'juiced_user', text: `SAVED_PROMPT_${i}` });
+        this.emit('frame', { type: 'result', result: `SAVED_ANSWER_${i}` });
+      }
+      this.emit('frame', { type: 'juiced_user', text: 'UNFINISHED_PROMPT' });
+      for (let i = 0; i < 24; i++) this.emit('frame', { type: 'assistant', message: { id: `saved-${i}`, content: [{ type: 'text', text: `SAVED_PROGRESS_${i}: ${'wrapped text '.repeat(8)}` }] } });
+      this.approvals.set('permission', { id: 'permission', tool: 'Write', input: { file_path: 'README.md' }, description: '' });
+      this.emit('approvals');
+      this.status = 'working'; this.emit('status', this.status);
+    }
+    override async submit(text: string) { this.submitted.push(text); }
+    override async close() { this.status = 'closed'; this.emit('status', this.status); }
+  }
+  const agent = new ReattachedAgent({ id: 'saved-session' } as AgentSession);
+  const stdin = new PassThrough() as PassThrough & TerminalInput & { ref(): void; unref(): void };
+  stdin.isTTY = true; stdin.isRaw = false;
+  stdin.setRawMode = raw => { stdin.isRaw = raw; };
+  stdin.ref = () => {}; stdin.unref = () => {};
+  const writes: string[] = [];
+  const stdout = new Writable({ write(chunk, _, done) { writes.push(stripVTControlCharacters(chunk.toString())); done(); } }) as TerminalOutput;
+  stdout.isTTY = true; stdout.columns = 60; stdout.rows = 16;
+  const lifetime = new AbortController();
+  const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
+  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${writes.join('')}`); await delay(5); } };
+  try {
+    await wait(() => writes.join('').includes('Allow Write'));
+    await delay(60);
+    const restored = writes.join('');
+    for (const marker of ['SAVED_PROMPT_0', 'SAVED_ANSWER_0', 'SAVED_PROMPT_1', 'SAVED_ANSWER_1', 'UNFINISHED_PROMPT', ...Array.from({ length: 24 }, (_, i) => `SAVED_PROGRESS_${i}:`)]) {
+      assert.ok(restored.includes(marker), `Missing saved history: ${marker}`);
+    }
+    assert.deepEqual(agent.submitted, [], 'Displaying history must not send a prompt');
+    assert.equal(agent.approvals.size, 1, 'Displaying history must leave approval pending');
+
+    const offset = writes.length;
+    agent.emit('reconnecting'); agent.emit('reconnected');
+    stdout.columns = 50; stdout.emit('resize');
+    await delay(60);
+    assert.equal(writes.slice(offset).join('').includes('SAVED_PROGRESS_0:'), false, 'Repaints must not print the history again');
+
+    agent.emit('frame', { type: 'assistant', message: { id: 'new-answer', content: [{ type: 'text', text: 'NEW_OUTPUT_AFTER_REATTACH' }] } });
+    agent.approvals.clear(); agent.emit('approvals');
+    agent.emit('frame', { type: 'result' });
+    await wait(() => writes.slice(offset).join('').includes('NEW_OUTPUT_AFTER_REATTACH'));
+    assert.equal(writes.slice(offset).join('').includes('SAVED_PROGRESS_0:'), false, 'Finishing the turn must not repeat restored output');
+  } finally { lifetime.abort(); await running; }
+});
+
 test('slash commands preview, filter, navigate, complete and submit locally', { timeout: 5000 }, async () => {
   class CommandAgent extends RemoteAgent {
     submitted: string[] = [];

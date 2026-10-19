@@ -4,7 +4,7 @@ import { object, type Approval, type ClaudeFrame, type SlashCommand } from '../a
 import { RemoteAgent, type AgentStatus } from '../remote-agent.js';
 import type { TerminalIO } from '../remote-terminal.js';
 import { cursorParts, edit, type Editor } from './editor.js';
-import { emptyConversation, plain, receiveFrame, userTurn, type Entry } from './conversation.js';
+import { emptyConversation, liveEntries, plain, receiveFrame, restoreHistory, userTurn, type Entry } from './conversation.js';
 import { availableCommands, matchingCommands } from './commands.js';
 import { CommandMenu, type MenuPage } from './menu.js';
 import { commandMenu, menuCommand } from './command-menus.js';
@@ -150,7 +150,9 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
     const reconnected = () => setNotice('');
     const model = (value: string) => setConversation(previous => ({ ...previous, model: plain(value) }));
     agent.on('frame', frame).on('status', state).on('approvals', permission).on('commands', setCommands).on('model', model).on('failure', failure).on('reconnecting', reconnect).on('reconnected', reconnected);
-    void agent.start(argv).catch(() => {});
+    // start waits for journal replay. Print its unfinished turn as well as
+    // completed turns, so saved output is available in terminal scrollback.
+    void agent.start(argv).then(() => setConversation(restoreHistory)).catch(() => {});
     return () => { agent.off('frame', frame).off('status', state).off('approvals', permission).off('commands', setCommands).off('model', model).off('failure', failure).off('reconnecting', reconnect).off('reconnected', reconnected); };
   }, [agent]);
   const cancel = () => { if (['working', 'interrupting'].includes(agent.status)) action(agent.interrupt()); };
@@ -207,7 +209,7 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
       ? <Box key="header" flexDirection="column" marginBottom={1}><Text bold color="green">JUICED</Text><Text dimColor>Claude on Cantelop · workspace {workspace} · local keyboard and interface</Text><Text dimColor>Session {agent.session.id} · reattach with juiced --resume claude</Text></Box>
       : <Entries key={item.id} entries={item.entries} />}</Static>
     <Box flexDirection="column" maxHeight={height} overflow="hidden">
-      <Clipped tail><Entries entries={conversation.live.slice(-12)} /></Clipped>
+      <Clipped tail><Entries entries={liveEntries(conversation).slice(-12)} /></Clipped>
       <Box flexDirection="column" flexShrink={0} maxHeight={height} overflow="hidden">
         <Box marginBottom={1} flexShrink={0} maxHeight={2} overflow="hidden"><Text color={status === 'ready' ? 'green' : status === 'failed' ? 'red' : 'cyan'}>{closing ? 'Disconnecting…' : status === 'connecting' ? 'Connecting to Claude…' : status === 'working' ? 'Claude is working…' : status === 'configuring' ? 'Updating Claude…' : status === 'interrupting' ? 'Interrupting…' : status === 'ready' ? 'Ready' : status}</Text><Text dimColor>{conversation.model ? ` · ${conversation.model}` : ''}{conversation.tokens ? ` · ${conversation.tokens.toLocaleString()} tokens last turn` : ''}</Text></Box>
         {notice && <Box marginBottom={1} flexShrink={0} maxHeight={2} overflow="hidden"><Text color="yellow">{notice}</Text></Box>}

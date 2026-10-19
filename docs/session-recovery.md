@@ -10,6 +10,10 @@ to reconnect to that tab's session. The first launch starts a new session;
 one. Resumption recovers live work, saved output, and conversation context through
 the existing durable session protocol, including after an explicit `/exit` has
 stopped the remote process.
+Reattachment prints saved prompts, responses, and tool activity into terminal
+scrollback, including output from a turn that is still running. New output then
+continues below that history; restoring the display does not submit a prompt or
+answer a pending permission request.
 Supplying Claude arguments starts a fresh bound session so launch settings and
 initial prompts take effect; reattachment retains its saved launch configuration.
 
