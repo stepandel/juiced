@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, mkdir, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { selectProject, synchronizeProject, syncError } from '../src/project.js';
+import { selectProject } from '../src/project.js';
 import { validProjectName } from '../src/project-name.js';
 
 test('canonical directories select stable, separate workspaces and retain the local basename', async t => {
@@ -22,43 +22,4 @@ test('canonical directories select stable, separate workspaces and retain the lo
 test('project names cannot overlap account state or select another path', () => {
   for (const name of ['.claude', '.local', '', '../secret', 'a/b', 'a\\b', 'NODE_MODULES', 'x\x1b', 'trailing.']) assert.equal(validProjectName(name), false);
   assert.equal(validProjectName('My Project'), true);
-});
-
-test('sync adapter errors recommend repairing the SDK installation', () => {
-  const error = syncError({ code: 'sync_helper_unavailable' });
-  assert.match(error.message, /Reinstall Juiced and its SDK dependency/);
-  assert.equal((error as Error & { code: string }).code, 'sync_helper_unavailable');
-  assert.doesNotMatch(syncError({ code: 'sync_cli_upgrade_required' }).message, /Upgrade the Cantelop CLI/);
-});
-
-test('startup waits for initial reconciliation and shutdown flushes before releasing the handle', async () => {
-  const events: string[] = []; let unblock!: () => void;
-  const project = { localDirectory: '/local/project', directoryName: 'project', remoteDirectory: '/workspace/project', workspace: 'project-hash' };
-  const started = synchronizeProject({ async sync(options) {
-    assert.equal(options.remoteDirectory, 'project'); assert.deepEqual(options.ignore, ['dist', 'coverage']);
-    return { remoteDirectory: '/workspace/project', async ready() { events.push('ready'); await new Promise<void>(resolve => unblock = resolve); },
-      async flush() { events.push('flush'); }, async stop() { events.push('stop'); }, status() { return { state: 'synced', conflicts: [] }; } };
-  } }, project, new AbortController().signal);
-  await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(events, ['ready']);
-  unblock(); const sync = await started; events.push('agent may start'); await sync.close();
-  assert.deepEqual(events, ['ready', 'agent may start', 'flush', 'stop']);
-});
-
-test('a hosted write gate releases the handle and never completes agent startup', async () => {
-  let stopped = false;
-  await assert.rejects(synchronizeProject({ async sync() { return {
-    remoteDirectory: '/workspace/project', async ready() { throw Object.assign(new Error('gate'), { code: 'sync_writes_not_enabled' }); }, async flush() {},
-    async stop() { stopped = true; }, status() { return { state: 'error', error: 'sync_writes_not_enabled', conflicts: [] }; },
-  }; } }, { localDirectory: '/local/project', directoryName: 'project', remoteDirectory: '/workspace/project', workspace: 'project-hash' }, new AbortController().signal), /Hosted uploads are disabled/);
-  assert.equal(stopped, true);
-});
-
-
-test('an empty directory still requires remote writes before agent startup', async () => {
-  let stopped = false;
-  await assert.rejects(synchronizeProject({ async sync() { return {
-    remoteDirectory: '/workspace/project', async ready() {}, async flush() {}, async stop() { stopped = true; },
-    status() { return { state: 'synced', writable: false, conflicts: [] }; },
-  }; } }, { localDirectory: '/local/project', directoryName: 'project', remoteDirectory: '/workspace/project', workspace: 'project-hash' }, new AbortController().signal), /Hosted uploads are disabled/);
-  assert.equal(stopped, true);
 });

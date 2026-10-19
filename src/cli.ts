@@ -6,7 +6,7 @@ import { runRemoteTerminal } from './remote-terminal.js';
 import { useLocalTui } from './agent-protocol.js';
 import { RemoteAgent } from './remote-agent.js';
 import { runLocalTui } from './tui/app.js';
-import { selectProject, synchronizeProject, syncError } from './project.js';
+import { selectProject } from './project.js';
 import { discoverRepository } from './git.js';
 import { createGitSession, GitWorkspaceClient } from './git-workspace.js';
 import { deleteWorkspace } from './delete-workspace.js';
@@ -64,31 +64,13 @@ try {
           if (process.stderr.isTTY) process.stderr.write(`Preparing Git workspace ${project.remoteDirectory}…\n`);
           const client = new GitWorkspaceClient(workspace, project, repository, controller.signal);
           try { await client.send(false, true); } finally { await client.close().catch(() => {}); }
-        } else if (!introspection && process.stderr.isTTY) process.stderr.write(`Syncing project to ${project.remoteDirectory}…\n`);
-        const sync = introspection || repository ? undefined : await synchronizeProject(workspace, project, controller.signal);
-        let syncFailure: Error | undefined;
-        let offlineAt = 0;
-        const monitor = sync && setInterval(() => {
-          const status = sync.status();
-          if (status.state === 'offline') offlineAt ||= Date.now(); else offlineAt = 0;
-          if (status.state === 'conflict' || status.state === 'error' || offlineAt && Date.now() - offlineAt > 30_000) {
-            syncFailure ??= syncError({ code: status.state === 'conflict' ? 'sync_conflict' : status.error });
-            controller.abort(syncFailure);
-          }
-        }, 1000);
-        monitor?.unref();
-        try {
-          const session = repository ? createGitSession(workspace, project) : workspace.session({ keepAliveSeconds: 120 });
-          const directoryName = introspection ? undefined : project.directoryName;
-          const git = repository ? { binding: repository.binding, relativeDirectory: repository.relativeDirectory } : undefined;
-          process.exitCode = useLocalTui(args.argv, Boolean(process.stdin.isTTY && process.stdout.isTTY))
-            ? await runLocalTui(new RemoteAgent(session, { ...(directoryName ? { directoryName } : {}), ...(git ? { git } : {}), ...(sync ? { beforeSubmit: sync.flush } : {}) }), args.argv, project.workspace, process, controller.signal)
-            : await runRemoteTerminal(session, args.argv, process, { ...(directoryName ? { directoryName } : {}), ...(git ? { git } : {}), signal: controller.signal, term: process.env.TERM ?? 'xterm-256color' });
-          if (syncFailure) throw syncFailure;
-        } finally {
-          if (monitor) clearInterval(monitor);
-          await sync?.close();
         }
+        const session = repository ? createGitSession(workspace, project) : workspace.session({ keepAliveSeconds: 120 });
+        const directoryName = introspection ? undefined : project.directoryName;
+        const git = repository ? { binding: repository.binding, relativeDirectory: repository.relativeDirectory } : undefined;
+        process.exitCode = useLocalTui(args.argv, Boolean(process.stdin.isTTY && process.stdout.isTTY))
+          ? await runLocalTui(new RemoteAgent(session, { ...(directoryName ? { directoryName } : {}), ...(git ? { git } : {}) }), args.argv, project.workspace, process, controller.signal)
+          : await runRemoteTerminal(session, args.argv, process, { ...(directoryName ? { directoryName } : {}), ...(git ? { git } : {}), signal: controller.signal, term: process.env.TERM ?? 'xterm-256color' });
       }
     }
   }

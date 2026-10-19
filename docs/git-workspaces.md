@@ -9,8 +9,10 @@ and starts Claude in the corresponding remote subdirectory. Linked local Git
 worktrees are supported.
 
 Git repositories use explicit transfers. Local edits and remote edits do not
-automatically appear on the other side. Non-Git directories retain the existing
-continuous file-sync behavior.
+automatically appear on the other side after the initial checkout. Automatic
+file sync is disabled for all directories. Non-Git directories use a persistent
+remote project folder, initially empty; existing remote files are retained.
+Explicit transfer commands require a Git repository.
 
 ## Inspect local and remote work
 
@@ -180,7 +182,8 @@ Local `cantelop dev` supports inspection but returns
 
 Remote purge is asynchronous. Wait for deletion to finish before launching
 again; a later launch creates a fresh workspace from the current local HEAD
-(or local file sync for non-Git directories), and requires Claude sign-in again.
+(or an empty remote project folder for non-Git directories), and requires Claude
+sign-in again.
 
 ## Build and verify
 

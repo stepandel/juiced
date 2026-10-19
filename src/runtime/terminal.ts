@@ -97,7 +97,7 @@ export function createTerminal(
         if (!info.isDirectory() || info.isSymbolicLink() || await realpath(candidate) !== join(await realpath(workspace), command.directoryName)) throw new Error('Unsafe project directory');
         workingDirectory = candidate;
       } catch (cause) {
-        const message = 'The synced project directory is unavailable. Restart Juiced to reconcile the project before starting Claude.';
+        const message = 'The remote project directory is unavailable or unsafe.';
         await work.output.send({ type: 'error', message }).catch(() => {});
         throw new Error(message, { cause });
       }
@@ -227,7 +227,10 @@ export function createTerminal(
             if (binding?.binding !== command.git.binding) throw new Error('The Git workspace binding changed. Reconnect with Juiced.');
             const gitInfo = await lstat(join(paths.target, '.git'));
             if (!gitInfo.isDirectory() || gitInfo.isSymbolicLink()) throw new Error('Unsafe Git workspace directory');
-          } else if (await readBinding(paths.metadata)) throw new Error('This Git workspace requires a matching Juiced Git session. Rebuild the local CLI.');
+          } else {
+            if (await readBinding(paths.metadata)) throw new Error('This Git workspace requires a matching Juiced Git session. Rebuild the local CLI.');
+            await mkdir(paths.target).catch(error => { if (error.code !== 'EEXIST') throw error; });
+          }
         }
         return await runTerminal(command, { ...work, signal: AbortSignal.any([work.signal, controller.signal]) });
       } catch (error) { prepareFailed?.(error); throw error; }

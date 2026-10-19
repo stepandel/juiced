@@ -25,7 +25,6 @@
     "measure:latency": "node scripts/measure-terminal-latency.mjs",
     "probe:reconciliation": "node scripts/probe-cantelop-reconciliation.mjs",
     "prepack": "npm run build",
-    "test:sync:live": "node scripts/test-sync-live.mjs",
     "test:git:live": "node scripts/test-git-live.mjs",
     "test:delete:local": "npm run build && node scripts/test-delete-local.mjs",
     "test:delete:live": "npm run build && node scripts/test-delete-live.mjs",

@@ -1,6 +1,6 @@
 # Juiced
 
-Git repositories now use explicit Git transfers. See [Git workspaces](docs/git-workspaces.md) for snapshot transfer, importing commits, optional fast-forwarding, and migration from file sync. The continuous-sync description below applies to non-Git directories.
+Automatic file sync is disabled. Git repositories initialize from local `HEAD` once; later transfers are explicit. Non-Git directories use a persistent remote project folder, initially empty. See [Git workspaces](docs/git-workspaces.md) for snapshot transfer, importing commits, optional fast-forwarding, and migration from file sync.
 
 Run the real Claude Code CLI in a Cantelop session, attached to your local terminal:
 
@@ -8,14 +8,13 @@ Run the real Claude Code CLI in a Cantelop session, attached to your local termi
 juiced claude
 ```
 
-Interactive invocations open the **Juiced TUI on your machine**, connected to a headless Claude Code process on Cantelop. Typing, cursor movement, multiline editing, and pasting happen locally. Submitted prompts, menu data requests, confirmed actions, permission answers, and interrupts cross the network. Claude's agent loop, tools, files, and authentication stay in the persistent remote workspace. Your local project is not uploaded.
+Interactive invocations open the **Juiced TUI on your machine**, connected to a headless Claude Code process on Cantelop. Typing, cursor movement, multiline editing, and pasting happen locally. Submitted prompts, menu data requests, confirmed actions, permission answers, and interrupts cross the network. Claude's agent loop, tools, files, and authentication stay in the persistent remote workspace. Git repositories upload local `HEAD` on first launch; local uncommitted files are included only through an explicit transfer.
 
 The local interface streams Claude's responses, shows tool activity, and asks before actions that Claude requires permission to run. Each invocation starts a fresh remote process and conversation; turns within that invocation share the same Claude process and context. Piped commands and explicit `-p`, `--help`, and `--version` invocations retain the native CLI passthrough.
 
 ## Set up
 
 Running Juiced needs Node.js 22+ and configured Cantelop app credentials. The
-SDK includes its sync adapter for macOS and Linux on arm64 and x64. The
 [Cantelop CLI](https://cantelop.com/docs) and Docker are deployment tools used for
 the initial runtime setup.
 
@@ -104,26 +103,23 @@ its folder name plus a stable hash of its resolved absolute path, so two project
 with the same folder name remain separate. `--workspace` or `JUICED_WORKSPACE`
 overrides that selection. Workspaces share neither files nor Claude login.
 
-Juiced synchronizes the current directory into `/workspace/<folder-name>` and
-starts Claude there after initial two-way reconciliation succeeds. It keeps
-syncing while the command runs, flushes before each interactive prompt or tool
-approval, and flushes once more on normal exit. Claude's HOME and account state
-remain at `/workspace`, including `.claude` and `.local`; sibling folders never
-enter the project's sync tree. Each project workspace needs its own Claude login.
+Claude starts in `/workspace/<folder-name>`. For a Git repository, the first
+launch initializes a checkout from local `HEAD`; later launches reuse the remote
+checkout. Use `juiced claude sync --to-workspace` to send subsequent commits, or
+add `--include-uncommitted` to send local edits. Import remote commits explicitly
+with `juiced claude sync --from-workspace` and optionally apply them with
+`juiced claude fast-forward`.
 
-`.git`, `.cantelop`, `node_modules`, `.env*`, temporary sync files, `dist`, and
-`coverage` are excluded. Divergent edits preserve both copies and stop the agent
-with a conflict error. Resolve both copies before restarting. One local directory
-can have one active sync handle. Sync runs only while Juiced is running.
+Non-Git directories start in a persistent remote project folder that is created
+empty on first use. Existing remote files are retained. Local files and remote
+edits are never automatically uploaded, downloaded, reconciled, or flushed
+before prompts, tool approvals, or exit. Automatic file sync has been removed.
+Explicit transfer commands currently require a Git repository.
 
-Juiced uses `@cantelop/sdk` 1.3.1, which includes the native filesystem adapter.
-Sync does not invoke the Cantelop CLI, download a helper at runtime, or need Go.
-
-Automatic sync needs the matching platform, generated App Edge, and SDK.
-Hosted writes are operator-gated: Juiced refuses to start an
-agent when uploads are disabled, including for empty directories. The current
-deployment enables writes after live JuiceFS/NFS qualification. An existing login is retained in its original
-workspace; pass `--workspace default` to reuse the previous default workspace.
+Claude's HOME and account state remain at `/workspace`, including `.claude` and
+`.local`. Each project workspace needs its own Claude login. An existing login
+is retained in its original workspace; pass `--workspace default` to reuse the
+previous default workspace.
 
 In the local UI:
 
@@ -157,11 +153,6 @@ node bin/juiced.mjs --help
 After deployment, `npm link`, and `juiced claude login`, run `npm run test:live` to verify the installed command against Cantelop. It checks the remote Claude version and sends a small real prompt through stdin, asserting the exact streamed response and a successful exit. This uses your Claude subscription.
 
 `npm run test:agent:live` separately verifies the headless handshake, two turns sharing conversation context, explicit denial followed by approval of a remote Write, and interruption followed by another successful turn. It uses the configured workspace and Claude subscription, then verifies and removes its uniquely named smoke-test file with an explicitly approved Bash command.
-
-`npm run test:sync:live` uses a disposable project folder in a signed-in workspace
-(`JUICED_WORKSPACE`, default `default`). It uploads a README, asks real Claude to
-read it and write one explicitly approved fixture, verifies the edit locally,
-and removes both remote fixture files through sync.
 
 Set `JUICED_DEBUG=1` to log session IDs, command types, request timing, and transport errors to stderr. Terminal input contents are excluded from these diagnostics.
 
@@ -204,8 +195,8 @@ Release v4 (`rel_0760c39bd457205a9bdbf5a8f1a9d56c`) was activated on October 16,
 verified. The runtime runs platform commit `edb6351c0eebc4350b1214000b376ddf6ea125a8`;
 Cloudflare was deployed from `05d01a27b8dc77496f0dc90904491d285b93f4f6`.
 
-Hosted writes are enabled after qualification against the real JuiceFS data mount
-and a disposable loopback NFS export. That check covered both transfer directions,
+Historical file-sync qualification: hosted writes were enabled against the real
+JuiceFS data mount and a disposable loopback NFS export. That check covered both transfer directions,
 stale versions, competing clients, NFS write/rename/delete/type changes during
 upload, interruption cleanup, and sibling confinement. Qualification exposed a
 trash-retained hard link from file publication; new files now use atomic

@@ -134,8 +134,8 @@ current Git-visible contents without syncing, changing the real index, or starti
 Claude. Ignored files are excluded; --include-ignored requires an explicit PATH.
 Use juiced claude -- <prompt> for literal prompts named login, sync, fast-forward,
 delete, ls, or peek. Workspace operations use app credentials through the SDK.
-Non-Git directories keep continuous file sync, excluding .git, .env*,
-node_modules, dist, and coverage.
+Non-Git directories use a persistent remote project folder, initially empty.
+Local and remote files never sync automatically during a session or on exit.
 Claude login is separate for each project workspace.
 
 First run: deploy this project's runtime with cantelop deploy, then run

@@ -10,7 +10,7 @@ running session after Claude acknowledges them, then save to the remote workspac
 `/workspace/.claude/settings.json`. New sessions load these defaults through
 Claude’s native settings resolution; command-line flags override them for one
 invocation. The defaults follow the workspace across clients and stay outside
-project sync and Git transfers. Other settings and permission rules are preserved.
+project files and Git transfers. Other settings and permission rules are preserved.
 A failed save is reported explicitly; the running session retains its applied
 choice. Individual tool approvals remain one-time grants. Settings changes do not
 submit user prompts or spend model turns.

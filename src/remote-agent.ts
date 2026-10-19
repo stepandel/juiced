@@ -47,7 +47,7 @@ export class RemoteAgent extends EventEmitter {
   private diagnostic = '';
   private unsupportedQueries = new Set<string>();
 
-  constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string }; beforeSubmit?: () => Promise<void> } = {}) { super(); }
+  constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string } } = {}) { super(); }
 
   private debug(event: string, detail: object = {}) {
     if (process.env.JUICED_DEBUG) console.error(JSON.stringify({ session: this.session.id, event, ...detail }));
@@ -223,7 +223,6 @@ export class RemoteAgent extends EventEmitter {
     const submission = ++this.submission;
     this.setStatus('working');
     try {
-      await this.options.beforeSubmit?.();
       this.controller.signal.throwIfAborted();
       if (submission !== this.submission) throw new Error('Prompt submission was interrupted before sending');
       await this.sendBytes(bytes);
@@ -236,8 +235,6 @@ export class RemoteAgent extends EventEmitter {
   async answer(id: string, allow: boolean, answers?: Record<string, string>): Promise<void> {
     const approval = this.approvals.get(id);
     if (!approval) throw new Error('This permission request is no longer active');
-    if (allow) await this.options.beforeSubmit?.();
-    if (this.approvals.get(id) !== approval) throw new Error('This permission request is no longer active');
     const bytes = this.encode({ type: 'control_response', response: { subtype: 'success', request_id: id, response: allow
       ? { behavior: 'allow', updatedInput: answers ? { ...approval.input, answers } : approval.input }
       : { behavior: 'deny', message: 'The user declined this request.' } } });

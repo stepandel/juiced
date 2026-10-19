@@ -6,7 +6,7 @@ import { validateSavedSettings, type SavedSettings } from '../settings.js';
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-/** Save in Claude's user settings, outside the project's sync/Git tree. */
+/** Save in Claude's user settings, outside the project directory. */
 export async function saveSettings(workspace: string, patch: SavedSettings, signal: AbortSignal): Promise<void> {
   validateSavedSettings(patch);
   const directory = join(workspace, '.claude');

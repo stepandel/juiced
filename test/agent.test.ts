@@ -111,8 +111,7 @@ test('models come from Claude and switching uses a control request in the same c
     { value: 'default', displayName: 'Default', description: 'Use the default model' },
     { value: 'sonnet', displayName: 'Sonnet', description: 'Efficient for routine tasks' },
   ];
-  let syncs = 0;
-  const f = fixture({ beforeSubmit: async () => { syncs++; } }, { models });
+  const f = fixture({}, { models });
   t.after(() => f.agent.close());
   await f.agent.start(['--model', 'opus']);
   assert.deepEqual(f.agent.models, models);
@@ -122,7 +121,6 @@ test('models come from Claude and switching uses a control request in the same c
   assert.equal(f.agent.status, 'ready');
   assert.deepEqual(object(f.frames.at(-1)?.request), { subtype: 'set_model', model: 'sonnet' });
   assert.equal(f.frames.some(frame => frame.type === 'user'), false, 'A model change must not submit a model prompt');
-  assert.equal(syncs, 0, 'Changing a model does not require a project transfer');
   await f.agent.submit('Continue the conversation');
   assert.equal(object(f.frames.at(-1)?.message).content, 'Continue the conversation');
   assert.equal(f.commands.filter(command => command.type === 'start').length, 1, 'Switching must retain the remote process');
@@ -209,9 +207,8 @@ test('save failures report that the current choice applied and keep the session 
   await f.agent.submit('Still usable');
 });
 
-test('menu reads and changes use the same control channel without prompt synchronization or user turns', async t => {
-  let syncs = 0;
-  const f = fixture({ beforeSubmit: async () => { syncs++; } }, { output_style: 'Custom', available_output_styles: ['Custom'], account: { secret: 'private' } }, 'success', { get_settings: { effective: { effortLevel: 'low' } } });
+test('menu reads and changes use the same control channel without user turns', async t => {
+  const f = fixture({}, { output_style: 'Custom', available_output_styles: ['Custom'], account: { secret: 'private' } }, 'success', { get_settings: { effective: { effortLevel: 'low' } } });
   t.after(() => f.agent.close()); await f.agent.start();
   assert.equal(f.agent.info.account, undefined, 'Only public menu metadata is retained');
   assert.deepEqual(f.agent.info.available_output_styles, ['Custom']);
@@ -221,7 +218,6 @@ test('menu reads and changes use the same control channel without prompt synchro
   assert.equal(f.agent.info.output_style, 'Workspace');
   await f.agent.configure({ subtype: 'set_permission_mode', mode: 'plan' });
   assert.equal(f.agent.info.current_permission_mode, 'plan');
-  assert.equal(syncs, 0);
   assert.equal(f.frames.some(frame => frame.type === 'user'), false);
   await f.agent.submit('A normal prompt');
   await f.agent.query({ subtype: 'mcp_status' });
@@ -317,49 +313,5 @@ test('unknown control requests fail closed; cancellation removes stale approvals
   await until(() => f.agent.approvals.size === 1);
   f.output({ type: 'control_cancel_request', request_id: 'stale' });
   await until(() => f.agent.approvals.size === 0);
-});
-
-
-test('a prompt waits for sync and a sync failure never dispatches its contents', async () => {
-  let release!: () => void;
-  const f=fixture({beforeSubmit:()=>new Promise<void>(resolve=>release=resolve)});
-  try {
-    await f.agent.start();const submitted=f.agent.submit('read the synced README');
-    assert.equal(f.agent.status,'working');assert.equal(f.frames.some(frame=>frame.type==='user'),false);
-    await assert.rejects(f.agent.submit('second'),/still working/);release();await submitted;
-    assert.equal(f.frames.filter(frame=>frame.type==='user').length,1);
-  } finally { await f.agent.close(); }
-  const gated=fixture({beforeSubmit:async()=>{throw new Error('sync unavailable');}});
-  try { await gated.agent.start();await assert.rejects(gated.agent.submit('never send'),/sync unavailable/);
-    assert.equal(gated.agent.status,'ready');assert.equal(gated.frames.some(frame=>frame.type==='user'),false);
-  } finally { await gated.agent.close(); }
-});
-
-
-test('interrupting during reconciliation never submits the waiting prompt', async () => {
-  let release!: () => void;
-  const f = fixture({ beforeSubmit: () => new Promise<void>(resolve => release = resolve) });
-  try {
-    await f.agent.start();
-    const submitted = f.agent.submit('interrupted before upload');
-    const rejection = assert.rejects(submitted, /interrupted before sending/);
-    await f.agent.interrupt(); release(); await rejection;
-    assert.equal(f.frames.some(frame => frame.type === 'user'), false);
-  } finally { await f.agent.close(); }
-});
-
-test('a permission cancelled during reconciliation cannot be granted afterward', async () => {
-  let release!: () => void;
-  const f = fixture({ beforeSubmit: () => new Promise<void>(resolve => release = resolve) });
-  try {
-    await f.agent.start();
-    f.output({ type: 'control_request', request_id: 'pending', request: { subtype: 'can_use_tool', tool_name: 'Write', input: {} } });
-    await until(() => f.agent.approvals.has('pending'));
-    const answer = f.agent.answer('pending', true);
-    const rejection = assert.rejects(answer, /no longer active/);
-    f.output({ type: 'control_cancel_request', request_id: 'pending' });
-    await until(() => !f.agent.approvals.has('pending'));
-    release(); await rejection;
-    assert.equal(f.frames.some(frame => frame.type === 'control_response' && object(frame.response).request_id === 'pending'), false);
-  } finally { await f.agent.close(); }
+  await assert.rejects(f.agent.answer('stale', true), /no longer active/);
 });
