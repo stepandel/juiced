@@ -60,7 +60,10 @@ test('environment credentials are verified before storing a secret and waiting f
   ]);
   assert.match(f.output(), /Authenticated with GitHub as octocat/);
   assert.match(f.output(), /all Juiced workspaces/);
-  assert.match(f.output(), /juiced claude --new/);
+  assert.match(f.output(), /\[1\/3\].*Finding.*\[2\/3\].*Verifying.*\[3\/3\].*Saving/s);
+  assert.match(f.output(), /\/exit.*juiced --resume claude/s);
+  assert.match(f.output(), /preserves your conversation and history/);
+  assert.doesNotMatch(f.output(), /--new|fresh session/);
   assert.doesNotMatch(f.output(), /fixture-environment-token/);
 });
 

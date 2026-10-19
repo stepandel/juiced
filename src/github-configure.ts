@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
-import { Readable, Writable } from 'node:stream';
+import { type Readable, Writable } from 'node:stream';
 import { promisify } from 'node:util';
 import type { AppEnvironment } from '@cantelop/sdk';
-import { readEnvironmentValue, updateEnvironment } from './environment.js';
+import { readEnvironmentValue } from './environment.js';
 
 const execute = promisify(execFile);
 export const GITHUB_TOKEN_URL = 'https://github.com/settings/personal-access-tokens/new?name=Juiced&contents=write&pull_requests=write&expires_in=30';
@@ -20,7 +20,9 @@ Pull requests: Read and write allows PR creation; add Workflows: Write to edit w
 
 Verifies the GitHub account, stores GH_TOKEN as a Cantelop app secret, and waits
 for propagation. No local gh or Cantelop CLI installation or Claude login is required.
-Run juiced claude --new afterward; existing sessions keep their old environment.
+Keep your conversation: if Claude is running, use /exit, then run
+juiced --resume claude from the same project to reload credentials and history.
+If you have not started a conversation yet, run juiced claude normally.
 Local Git remotes and GitHub's HTTPS credential helper are configured on launch.
 `;
 
@@ -108,7 +110,7 @@ export async function verifyGitHubToken(token: string, fetcher: typeof globalThi
 export async function configureGitHub(api: AppEnvironment, stdin: boolean, io: IO, signal: AbortSignal, overrides: Partial<Services> = {}): Promise<void> {
   const services: Services = { env: process.env, fetch: globalThis.fetch, localToken: localGitHubToken, openBrowser, prompt: promptGitHubToken, ...overrides };
   signal.throwIfAborted();
-  io.stderr.write('Configuring GitHub access for all Juiced workspaces.\n');
+  io.stderr.write('Configuring GitHub access for all Juiced workspaces.\nThis setup keeps your Claude conversations unchanged.\n\n[1/3] Finding a GitHub credential…\n');
   let token: string | undefined;
   if (stdin) token = await readEnvironmentValue(io.stdin, signal);
   else if (services.env.GH_TOKEN?.trim()) {
@@ -126,8 +128,11 @@ export async function configureGitHub(api: AppEnvironment, stdin: boolean, io: I
     token = await services.prompt(io, signal);
   }
   token = tokenValue(token);
+  io.stderr.write('[2/3] Verifying the credential with GitHub…\n');
   const login = await verifyGitHubToken(token, services.fetch, signal);
   io.stderr.write(`Authenticated with GitHub as ${login}.\n`);
-  await updateEnvironment(api, 'set', 'GH_TOKEN', true, { stdin: Readable.from([token]), stderr: io.stderr }, signal);
-  io.stderr.write('GitHub configured. Run juiced claude --new from your project to use it.\nLocal Git remotes and GitHub authentication are configured on launch.\n');
+  io.stderr.write('[3/3] Saving GH_TOKEN as an app secret and waiting for Cantelop…\n');
+  const update = await api.set('GH_TOKEN', token, { secret: true, signal });
+  await api.wait(update.revision, { signal });
+  io.stderr.write(`\nGitHub configured for ${login}.\n\nTo continue your existing conversation with the new credential:\n  1. If Claude is still running, use /exit in that conversation.\n  2. From the same project, run: juiced --resume claude\n\nThis reloads credentials and preserves your conversation and history.\nIf you have not started a conversation yet, run juiced claude normally.\n`);
 }

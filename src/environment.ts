@@ -30,5 +30,5 @@ export async function updateEnvironment(api: AppEnvironment, action: 'set' | 'un
   const update = action === 'set' ? await api.set(name, await readEnvironmentValue(io.stdin, signal), options) : await api.unset(name, options);
   io.stderr.write(`Waiting for ${name} configuration to propagate…\n`);
   await api.wait(update.revision, { signal });
-  io.stderr.write(`${action === 'set' ? 'Set' : 'Unset'} ${name} for the Juiced app. New sessions use this configuration; active sessions keep their existing environment.\n`);
+  io.stderr.write(`${action === 'set' ? 'Set' : 'Unset'} ${name} for the Juiced app. Running processes keep their existing environment. To reload it in an existing Claude conversation, use /exit, then juiced --resume claude from the same project.\n`);
 }

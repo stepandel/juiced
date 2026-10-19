@@ -125,7 +125,8 @@ Usage:
   juiced [--workspace SLUG] claude peek [--include-ignored] [--changes-only] [PATH]
 
 Environment values are stored as Cantelop secrets by default. --plain selects a
-declared ordinary variable. Updates apply to new sessions without redeployment.
+declared ordinary variable. Updates apply to new remote processes without redeployment.
+To reload credentials and keep a conversation, use /exit, then juiced --resume claude.
 github-configure verifies and saves GitHub credentials for the whole Juiced app.
 
 Examples:

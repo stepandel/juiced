@@ -61,10 +61,16 @@ repositories; grant **Contents: Read and write** for pushing and **Pull requests
 Read and write** for opening PRs. Add **Workflows: Write** if the agent should edit
 workflow files. See [GitHub's token documentation](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens).
 
-The command verifies the GitHub account before saving `GH_TOKEN` as an app secret,
-waits for propagation, and prints the next step: `juiced claude --new` from your
-project. This starts a fresh session with the new token and copies local Git
-remotes. It does not start Claude during configuration or change existing sessions.
+Setup shows three steps: finding a credential, verifying the GitHub account, and
+saving `GH_TOKEN` as an app secret while waiting for propagation. It runs locally
+and keeps your Claude conversations unchanged.
+
+To pick up the new token in an **existing conversation**, use `/exit` if Claude
+is still running, then run `juiced --resume claude` from the same project. This
+restarts the remote process with the updated environment and preserves the same
+conversation and history. `/detach` leaves the existing process running with its
+previous credentials. If you have not started a conversation yet, run
+`juiced claude` normally.
 The local `gh` CLI is optional. To supply or rotate a specific token instead of
 reusing an existing credential, pipe it explicitly (on macOS, after copying it):
 
@@ -86,9 +92,10 @@ The command uses the SDK and the existing app integration credential. It needs
 neither the Cantelop CLI nor Claude sign-in, and waits until Edge and compute
 configuration have applied the update. Token changes require no deployment.
 
-Configuration is app-wide, across all of its workspaces. New sessions receive
-the updated token; already-running sessions keep their environment until they
-exit. The runtime supplies `GH_TOKEN` to Claude and uses `gh` as Git's HTTPS
+Configuration is app-wide, across all of its workspaces. New remote processes
+receive the updated token; already-running processes keep their environment until
+they exit. Resuming a conversation after `/exit` reloads it with the updated
+configuration. The runtime supplies `GH_TOKEN` to Claude and uses `gh` as Git's HTTPS
 credential helper. Scope the token to the intended repositories and permissions.
 Normal GitHub branch protection and token permissions still apply.
 

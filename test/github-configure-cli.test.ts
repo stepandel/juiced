@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,14 +50,21 @@ test('built github-configure CLI uses the app API without a workspace, Claude lo
   const env = { PATH: '', HOME: root, CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-app-token',
     CANTELOP_EDGE_URL: 'https://fixture.invalid', JUICED_WORKSPACE: 'ignored-project', TEST_EXPECTED_TOKEN: 'fixture-token' };
   const configuredCalls = ['github-verify', 'app.environment.set', 'app.environment.status'];
+  const savedDirectory = join(root, '.cantelop', 'juiced');
+  await mkdir(savedDirectory, { recursive: true });
+  const savedSession = JSON.stringify({ workspace: 'existing-project', id: `ses_${'7'.repeat(32)}` });
+  await writeFile(join(savedDirectory, 'existing-session.json'), savedSession);
 
   const existing = await execute(process.execPath, [bootstrap, 'claude', 'github-configure'], {
     cwd: root, env: { ...env, GH_TOKEN: 'fixture-token' }, timeout: 5000,
   });
   assert.deepEqual(JSON.parse(existing.stdout), configuredCalls);
   assert.match(existing.stderr, /Authenticated with GitHub as octocat/);
-  assert.match(existing.stderr, /juiced claude --new/);
-  assert.doesNotMatch(existing.stderr, /fixture-token|Claude sign-in required/);
+  assert.match(existing.stderr, /\[1\/3\].*Finding.*\[2\/3\].*Verifying.*\[3\/3\].*Saving/s);
+  assert.match(existing.stderr, /juiced --resume claude/);
+  assert.doesNotMatch(existing.stderr, /fixture-token|Claude sign-in required|Preparing Git workspace|Connecting to Cantelop workspace|--new/);
+  assert.deepEqual(await readdir(savedDirectory), ['existing-session.json']);
+  assert.equal(await readFile(join(savedDirectory, 'existing-session.json'), 'utf8'), savedSession, 'Setup must preserve the saved conversation binding');
 
   const piped = spawn(process.execPath, [bootstrap, 'claude', 'github-configure', '--stdin'], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
