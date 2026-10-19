@@ -19,6 +19,7 @@ const root = await realpath(await mkdtemp(join(tmpdir(), 'juiced-inspection-loca
 const local = join(root, 'project'), workspace = join(root, 'workspace'), remote = join(workspace, 'project');
 const id = `wsp_${'a'.repeat(32)}`, appId = `app_${'b'.repeat(32)}`;
 const histories = new Map(), emitted = new EventEmitter(), stopped = [], calls = [];
+const boundaries = new Map(), sessions = [];
 let exists = false, origin;
 const lifetime = new AbortController();
 const worker = createProtocolWorker({ runtimeId: manifest.session_runtime_id, fetch: async request => {
@@ -29,17 +30,21 @@ const worker = createProtocolWorker({ runtimeId: manifest.session_runtime_id, fe
   if (url.pathname === '/__cantelop/integration/v2/requests') {
     const body = await request.json(); assert.equal(body.session.workspace_id, id);
     const command = body.message.payload.message; assert.equal(command.type, 'inspect');
-    const session = body.session.id, history = []; histories.set(session, history);
+    const session = body.session.id, history = histories.get(session) ?? []; histories.set(session, history); sessions.push(session);
     void inspectRemote(command, { async send(data) {
       history.push({ data, stream_id: 'c'.repeat(32), sequence: history.length + 1, session_id: session, message_id: body.message.id, created_at: new Date().toISOString() }); emitted.emit(session);
-    } }, lifetime.signal, workspace).catch(error => emitted.emit('error', error));
+    } }, lifetime.signal, workspace).then(() => boundaries.set(session, history.length)).catch(error => emitted.emit('error', error));
     return Response.json({ id: body.message.id, reply: { ok: true } });
   }
-  const match = /^\/__cantelop\/integration\/v2\/sessions\/([^/]+)(\/events)?$/.exec(url.pathname);
+  const match = /^\/__cantelop\/integration\/v2\/sessions\/([^/]+)(\/events|\/view)?$/.exec(url.pathname);
   assert.ok(match, `Unexpected platform route: ${url.pathname}`); assert.equal(url.searchParams.get('workspace_id'), id);
   const session = match[1];
+  if (match[2] === '/view') {
+    const sequence = boundaries.get(session);
+    return sequence === undefined ? Response.json({ error: { code: 'session_view_not_found' } }, { status: 404 }) : Response.json({ workspaceId: id, sessionId: session, revision: '1', updatedAt: new Date().toISOString(), state: { inspection: 1 }, cursor: { streamId: 'c'.repeat(32), sequence } });
+  }
   if (request.method === 'DELETE') { stopped.push(session); return new Response(null, { status: 204 }); }
-  assert.equal(match[2], '/events'); let index = 0;
+  assert.equal(match[2], '/events'); let index = Number(url.searchParams.get('after') ?? 0);
   return new Response(new ReadableStream({ async pull(controller) {
     try {
       while (!histories.get(session)?.[index]) await once(emitted, session, { signal: request.signal });
@@ -100,8 +105,8 @@ try {
   const journal = join(workspace, '.juiced', 'project', 'journal.json'); await writeFile(journal, 'pending');
   await assert.rejects(run('peek'), error => error.code === 2 && /pending recovery/.test(error.stderr));
   assert.equal(await readFile(journal, 'utf8'), 'pending'); assert.equal(await readFile(join(local, '.env'), 'utf8'), 'local ignored\n');
-  assert.ok(calls.every(path => ['/commands/workspace.inspect', '/commands/request', '/commands/stream', '/commands/stop'].includes(path)));
-  assert.equal(stopped.length, 10);
+  assert.ok(calls.every(path => ['/commands/workspace.inspect', '/commands/view', '/commands/request', '/commands/stream'].includes(path)));
+  assert.equal(stopped.length, 0); assert.equal(sessions.length, 10); assert.equal(new Set(sessions).size, 1);
   console.log('Passed built CLI and SDK Edge inspection: remote-only ls, complete peek, changes-only filter, drill-down, ignored files, missing paths/workspace, preserved journal, canonical IDs, and Git-only PATH.');
 } finally {
   lifetime.abort(); server.closeAllConnections(); await new Promise(resolve => server.close(() => resolve()));

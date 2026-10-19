@@ -6,51 +6,79 @@ import { discoverRepository, sha256 } from './git.js';
 import { selectProject } from './project.js';
 import { captureInspection } from './inspection-snapshot.js';
 import { compareInspection, renderInspection, renderRemoteListing } from './inspection-view.js';
-import { INSPECTION_CHUNK_BYTES, INSPECTION_TIMEOUT_MS, MAX_INSPECTION_BYTES, InspectionIncomplete, inspectionScope, validateInspectionSnapshot, type InspectionSnapshot } from './inspection-protocol.js';
+import { INSPECTION_CHUNK_BYTES, INSPECTION_TIMEOUT_MS, MAX_INSPECTION_BYTES, InspectionIncomplete, inspectionScope, validateInspectionListing, validateInspectionSnapshot, type InspectionListing, type InspectionSnapshot } from './inspection-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
 
-type Workspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'inspect' | 'session'>;
+type Workspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'inspect' | 'session' | 'selector'>;
 type InspectionApp = { workspace(selector: WorkspaceSelector): Workspace };
 export type InspectionOptions = { workspace?: string | undefined; path: string; includeIgnored: boolean } & (
   | { action: 'ls' }
   | { action: 'peek'; changesOnly: boolean }
 );
 
-export async function remoteSnapshot(workspace: Pick<Workspace, 'session'>, command: Extract<TerminalCommand, { type: 'inspect' }>, signal: AbortSignal): Promise<InspectionSnapshot> {
-  const session = workspace.session({ keepAliveSeconds: 120 });
+type InspectionWorkspace = Pick<Workspace, 'session' | 'selector'>;
+type Inspect = Extract<TerminalCommand, { type: 'inspect' }>;
+export function remoteSnapshot(workspace: InspectionWorkspace, command: Inspect, signal: AbortSignal): Promise<InspectionSnapshot> {
+  return remoteInventory(workspace, command, signal, validateInspectionSnapshot);
+}
+export function remoteListing(workspace: InspectionWorkspace, command: Inspect, signal: AbortSignal): Promise<InspectionListing> {
+  return remoteInventory(workspace, { ...command, mode: 'listing' }, signal, validateInspectionListing);
+}
+
+async function remoteInventory<T>(workspace: InspectionWorkspace, command: Inspect, signal: AbortSignal, validate: (value: unknown, scope: string) => T, fresh = false): Promise<T> {
+  if (!workspace.selector.id) throw new InspectionIncomplete('Inspection requires a canonical workspace ID.');
+  // Logical session IDs are App-scoped. Include the Workspace and protocol version.
+  const id = `ses_inspect_${fresh ? randomUUID().replaceAll('-', '') : sha256(JSON.stringify([1, workspace.selector.id, command.directoryName, command.binding])).slice(0, 32)}`;
+  const session = workspace.session({ id, keepAliveSeconds: fresh ? 0 : 120 });
   const controller = new AbortController();
   const combined = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]);
-  const requested = session.request(command, { signal: combined, timeoutMs: INSPECTION_TIMEOUT_MS }).then(reply => {
-    if (!reply?.ok) throw new InspectionIncomplete(reply?.error ?? 'The workspace rejected inspection.');
-  }).catch(error => { controller.abort(error); throw error; });
-  void requested.catch(() => {});
-  const chunks: Buffer[] = []; let size = 0;
   try {
-    for await (const event of session.stream({ signal: combined })) {
-      const data = event.data;
-      if (!data || !('id' in data) || data.id !== command.id) continue;
-      if (data.type === 'inspection-error') throw new InspectionIncomplete(data.message);
-      if (data.type === 'inspection-chunk') {
-        if (typeof data.data !== 'string' || data.data.length > Math.ceil(INSPECTION_CHUNK_BYTES / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data.data)) throw new InspectionIncomplete('Invalid inspection chunk.');
-        const bytes = Buffer.from(data.data, 'base64');
-        if (!bytes.length || data.offset !== size || size + bytes.length > MAX_INSPECTION_BYTES) throw new InspectionIncomplete('The inspection stream is out of order or too large.');
-        chunks.push(bytes); size += bytes.length;
+    combined.throwIfAborted();
+    // A durable end boundary avoids replaying old inventories across CLI processes.
+    const after = fresh ? undefined : await session.view({ signal: combined }).then(view => view.cursor).catch(error => {
+      if (['session_view_not_found', 'session_not_found', 'resource_not_found'].includes(String((error as { code?: string }).code))) return undefined;
+      throw error;
+    });
+    const requested = session.request(command, { signal: combined, timeoutMs: INSPECTION_TIMEOUT_MS }).then(reply => {
+      if (!reply?.ok) throw new InspectionIncomplete(reply?.error ?? 'The workspace rejected inspection.');
+    }).catch(error => { controller.abort(error); throw error; });
+    void requested.catch(() => {});
+    const chunks: Buffer[] = []; let size = 0;
+    try {
+      for await (const event of session.stream({ signal: combined, ...(after ? { after } : {}) })) {
+        const data = event.data;
+        if (!data || !('id' in data) || data.id !== command.id) continue;
+        if (data.type === 'inspection-error') throw new InspectionIncomplete(data.message);
+        if (data.type === 'inspection-chunk') {
+          if (typeof data.data !== 'string' || data.data.length > Math.ceil(INSPECTION_CHUNK_BYTES / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data.data)) throw new InspectionIncomplete('Invalid inspection chunk.');
+          const bytes = Buffer.from(data.data, 'base64');
+          if (!bytes.length || data.offset !== size || size + bytes.length > MAX_INSPECTION_BYTES) throw new InspectionIncomplete('The inspection stream is out of order or too large.');
+          chunks.push(bytes); size += bytes.length;
+        }
+        if (data.type === 'inspection-end') {
+          const bytes = Buffer.concat(chunks);
+          if (data.size !== size || data.sha256 !== sha256(bytes)) throw new InspectionIncomplete('The inspection stream is incomplete or corrupt.');
+          await requested;
+          let value: unknown;
+          try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
+          catch { throw new InspectionIncomplete('The workspace returned an invalid inventory.'); }
+          return validate(value, command.scope);
+        }
       }
-      if (data.type === 'inspection-end') {
-        const bytes = Buffer.concat(chunks);
-        if (data.size !== size || data.sha256 !== sha256(bytes)) throw new InspectionIncomplete('The inspection stream is incomplete or corrupt.');
-        await requested;
-        let value: unknown;
-        try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)); }
-        catch { throw new InspectionIncomplete('The workspace returned an invalid inventory.'); }
-        return validateInspectionSnapshot(value, command.scope);
-      }
+      throw new InspectionIncomplete('The inspection stream ended without a completed inventory.');
+    } catch (error) {
+      if (combined.aborted) throw combined.reason;
+      throw error;
     }
-    throw new InspectionIncomplete('The inspection stream ended without a completed inventory.');
   } catch (error) {
-    if (combined.aborted) throw combined.reason;
+    // A large/abandoned inventory or concurrent readers can outrun retained replay.
+    // Retry once in an isolated session that expires as soon as its work settles.
+    if (!fresh && !combined.aborted && ['event_cursor_expired', 'event_stream_reset'].includes(String((error as { code?: string }).code))) {
+      controller.abort();
+      return remoteInventory(workspace, { ...command, id: randomUUID() }, signal, validate, true);
+    }
     throw error;
-  } finally { controller.abort(); await session.stop().catch(() => {}); }
+  } finally { controller.abort(); }
 }
 
 export async function inspectWorkspace(app: InspectionApp, directory: string, options: InspectionOptions, signal: AbortSignal, stdout: Writable & { isTTY?: boolean; columns?: number } = process.stdout): Promise<number> {
@@ -69,7 +97,7 @@ export async function inspectWorkspace(app: InspectionApp, directory: string, op
     const command: Extract<TerminalCommand, { type: 'inspect' }> = { type: 'inspect', id: randomUUID(), directoryName: project.directoryName, binding: repository.binding, scope, includeIgnored: options.includeIgnored };
     const view = { remoteRoot: posix.join(project.remoteDirectory, scope), workspace: project.workspace, workspaceId: existing.id, includeIgnored: options.includeIgnored, columns: stdout.isTTY ? stdout.columns ?? 80 : undefined };
     if (options.action === 'ls') {
-      const remote = await remoteSnapshot(app.workspace({ id: existing.id }), command, combined);
+      const remote = await remoteListing(app.workspace({ id: existing.id }), command, combined);
       stdout.write(renderRemoteListing(remote, view));
       return remote.kind === 'ignored' || remote.kind === 'missing' ? 2 : 0;
     }

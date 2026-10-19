@@ -2,6 +2,7 @@ import { lstat, readFile, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionOutput } from '@cantelop/sdk/session';
 import { captureInspection } from '../inspection-snapshot.js';
+import { captureListing } from '../inspection-listing.js';
 import { sha256 } from '../git.js';
 import { INSPECTION_CHUNK_BYTES, MAX_INSPECTION_BYTES, InspectionIncomplete, validateInspectionCommand, type InspectionCommand, type InspectionEvent } from '../inspection-protocol.js';
 import { readBinding } from './git.js';
@@ -28,7 +29,7 @@ export async function inspectRemote(command: InspectionCommand, output: SessionO
       if (current.dev !== original.dev || current.ino !== original.ino) throw new InspectionIncomplete('The remote checkout changed during inspection. Retry.');
     };
     await check();
-    const snapshot = await captureInspection(target, command.scope, command.includeIgnored, signal);
+    const snapshot = await (command.mode === 'listing' ? captureListing : captureInspection)(target, command.scope, command.includeIgnored, signal);
     await check();
     const bytes = Buffer.from(JSON.stringify(snapshot));
     if (bytes.length > MAX_INSPECTION_BYTES) throw new InspectionIncomplete('The inventory exceeds 64 MiB. Inspect a narrower path.');

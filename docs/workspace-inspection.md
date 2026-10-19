@@ -78,15 +78,18 @@ existing index entries, stages current contents into a temporary object
 directory, and writes a temporary tree. This captures tracked edits, deletions,
 staged additions, and non-ignored untracked files. The real index, Git object
 store, refs, and working files are unchanged. No temporary commit is created.
-`ls` obtains only the remote snapshot, using local repository metadata to resolve
-the existing workspace pairing and relative path.
+`ls` uses local repository metadata to resolve the existing workspace pairing and
+relative path. On the remote side, Git enumerates tracked and eligible untracked
+paths, and filesystem metadata supplies their types. Listing does not read file
+contents, run clean filters, create temporary objects, or hash directory trees.
 
 A directory's tree ID represents its descendants, allowing the client to compare
 directory summaries without downloading files or importing bundles. Only the
 immediate entries and their Git IDs cross the network. Different HEADs can have
 matching current trees; uncommitted edits can make equal HEADs differ.
 
-Normal Git ignore, clean-filter, and line-ending rules apply. This is a Git view
+Normal Git ignore rules apply to both commands; clean-filter and line-ending
+rules apply to comparisons. This is a Git view
 of current contents, not a byte-for-byte inventory of every filesystem entry.
 Tracked files remain included even when they match ignore rules. Ignored
 untracked files are excluded unless requested.
@@ -130,15 +133,25 @@ canonical ID for subsequent requests, preventing a replacement slug from
 redirecting the operation.
 
 The Juiced runtime handles a dedicated `inspect` message through a session
-activity. It resolves existing metadata without calling the maintenance path,
-creates the Git snapshot, then streams 32 KiB chunks followed by an explicit
+activity queue. A stable inspection session is selected by the canonical workspace
+ID, project folder, Git binding, and inspection protocol version. It remains warm
+for 120 seconds after work becomes idle, so repeated commands can reuse its
+sandbox. Concurrent inspections queue independently of Claude's sessions.
+
+The activity resolves existing metadata without calling the maintenance path,
+creates a Git snapshot or metadata-only listing, then streams 32 KiB chunks followed by an explicit
 size and SHA-256 digest. The client rejects malformed, reordered, truncated, or
 corrupt streams and validates the snapshot schema. Inventory data is bounded to
-64 MiB and the operation to 240 seconds. Completion or failure stops only the
-inspection's own session and removes its temporary files.
+64 MiB and each client operation to 240 seconds. Completed activities commit a
+durable event boundary; subsequent CLI invocations resume there instead of replaying
+old inventories. An expired or reset stream triggers one retry in a fresh session
+with no idle keep-alive. Temporary snapshot files are removed after capture.
+Disconnecting or interrupting a client closes its subscription without stopping
+the shared session; remote inspection work retains its activity timeout.
 
-The distinction between `ls`, `peek`, and `peek --changes-only` is handled in the
-client, using the same remote snapshot protocol.
+`ls` requests listing mode. `peek` requests content hashes, and `--changes-only`
+filters matching rows on the client. Both inventory modes share the bounded
+transport and workspace validation.
 
 No SDK or platform changes are required. The runtime image already includes
 Git. Juiced uses the SDK request/stream transport directly; these commands do not

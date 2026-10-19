@@ -143,17 +143,32 @@ test('native runtime streams a Git inspection without database access or startin
   };
   const message = `msg_${randomUUID().replaceAll('-', '')}`, inspection = randomUUID();
   await request('/__cantelop/v2/messages', { session: { id: 'inspection-test', workspace_id: `wsp_${'6'.repeat(32)}`, keep_alive_seconds: 120 }, message: { id: message, payload: { type: 'inspect', id: inspection, directoryName: 'project', binding: repository.binding, scope: '', includeIgnored: false } }, reply: true });
-  const events: TerminalEvent[] = []; let cursor = 0;
-  for (let i = 0; i < 200 && !events.some(event => event.type === 'inspection-end'); i++) {
+  const listingMessage = `msg_${randomUUID().replaceAll('-', '')}`, listing = randomUUID();
+  const errorMessage = `msg_${randomUUID().replaceAll('-', '')}`, failed = randomUUID();
+  for (const [id, payload] of [[listingMessage, { type: 'inspect', id: listing, directoryName: 'project', binding: repository.binding, scope: '', includeIgnored: false, mode: 'listing' }], [errorMessage, { type: 'inspect', id: failed, directoryName: 'project', binding: '0'.repeat(64), scope: '', includeIgnored: false }]] as const) {
+    await request('/__cantelop/v2/messages', { session: { id: 'inspection-test', workspace_id: `wsp_${'6'.repeat(32)}`, keep_alive_seconds: 120 }, message: { id, payload }, reply: true });
+  }
+  const events: TerminalEvent[] = []; let cursor = 0, projections = 0;
+  for (let i = 0; i < 300 && projections < 3; i++) {
     const batch = await request(`/__cantelop/v2/runtime/events?after=${cursor}&wait=0`);
-    for (const item of batch.events) { events.push(item.event); cursor = item.cursor; }
+    for (const item of batch.events) {
+      if (item.view) { assert.deepEqual(item.view, { inspection: 1 }); projections++; }
+      else events.push(item.event);
+      cursor = item.cursor;
+    }
     if (batch.events.length) await request('/__cantelop/v2/runtime/events/ack', { through: cursor });
     await delay(5);
   }
   assert.deepEqual(await request(`/__cantelop/v2/messages/${message}/reply`), { reply: { ok: true } });
-  assert.ok(events.every(event => event.type === 'inspection-chunk' || event.type === 'inspection-end'));
-  const bytes = Buffer.concat(events.filter(event => event.type === 'inspection-chunk').map(event => Buffer.from(event.data, 'base64')));
-  assert.deepEqual(events.at(-1), { type: 'inspection-end', id: inspection, size: bytes.length, sha256: sha256(bytes) });
+  for (const id of [message, listingMessage, errorMessage]) assert.deepEqual(await request(`/__cantelop/v2/messages/${id}/reply`), { reply: { ok: true } });
+  assert.equal(projections, 3);
+  assert.equal((await request('/__cantelop/v2/runtime')).activity, null);
+  const chunks = events.filter(event => event.type === 'inspection-chunk');
+  const bytes = Buffer.concat(chunks.filter(event => event.id === inspection).map(event => Buffer.from(event.data, 'base64')));
+  assert.deepEqual(events.find(event => event.type === 'inspection-end' && event.id === inspection), { type: 'inspection-end', id: inspection, size: bytes.length, sha256: sha256(bytes) });
   assert.equal(JSON.parse(bytes.toString()).entries[0].name, 'file.txt');
+  const listed = Buffer.concat(chunks.filter(event => event.id === listing).map(event => Buffer.from(event.data, 'base64')));
+  assert.deepEqual(JSON.parse(listed.toString()).entries, [{ name: 'file.txt', mode: '100644' }]);
+  assert.ok(events.some(event => event.type === 'inspection-error' && event.id === failed));
   assert.deepEqual(await readFile(join(target, '.git', 'index')), index);
 });

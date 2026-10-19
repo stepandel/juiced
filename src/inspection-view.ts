@@ -1,5 +1,5 @@
 import stringWidth from 'string-width';
-import { InspectionIncomplete, type InspectionSnapshot, type TreeEntry } from './inspection-protocol.js';
+import { InspectionIncomplete, type InspectionListing, type ListingEntry, type InspectionSnapshot, type TreeEntry } from './inspection-protocol.js';
 
 type Status = 'matching' | 'different' | 'local only' | 'remote only' | 'excluded';
 export type InspectionRow = { name: string; local?: TreeEntry | undefined; remote?: TreeEntry | undefined; localIgnored: boolean; remoteIgnored: boolean; status: Status };
@@ -34,8 +34,8 @@ function wrap(value: string, columns: number): string[] {
 }
 const pad = (value: string, width: number) => value + ' '.repeat(Math.max(0, width - stringWidth(value)));
 type ListingOptions = { remoteRoot: string; workspace: string; workspaceId: string; includeIgnored: boolean; columns: number | undefined };
-const entryText = (entry: TreeEntry) => inspectionText(entry.name) + (entry.mode === '040000' ? '/' : entry.mode === '120000' ? ' @' : '');
-export function renderRemoteListing(snapshot: InspectionSnapshot, options: ListingOptions): string {
+const entryText = (entry: ListingEntry) => inspectionText(entry.name) + (entry.mode === '040000' ? '/' : entry.mode === '120000' ? ' @' : '');
+export function renderRemoteListing(snapshot: InspectionListing, options: ListingOptions): string {
   const lines: string[] = [];
   const line = (text: string) => lines.push(...(options.columns ? wrap(text, Math.max(1, options.columns)) : [text]));
   line(`Workspace: ${inspectionText(options.workspace)} (${options.workspaceId})`);

@@ -245,8 +245,9 @@ export async function receiveTerminal(context: SessionContext<TerminalCommand, T
   const command = context.message.payload;
   if (command.type === 'inspect') {
     validateInspectionCommand(command);
-    context.activity.start(async activity => {
+    context.activity.queue(async activity => {
       await inspectRemote(command, activity.output, activity.signal);
+      await activity.view.commit({ inspection: 1 });
     }, { timeoutMs: INSPECTION_TIMEOUT_MS });
     context.reply({ ok: true });
     return;

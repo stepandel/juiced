@@ -11,8 +11,9 @@ import { CantelopClient, type AppCommandEnvelope, type SessionEvent } from '@can
 import { parseArguments } from '../src/args.js';
 import { discoverRepository, git, gitText, sha256 } from '../src/git.js';
 import { captureInspection } from '../src/inspection-snapshot.js';
+import { captureListing } from '../src/inspection-listing.js';
 import { compareInspection, renderInspection, renderRemoteListing } from '../src/inspection-view.js';
-import { InspectionIncomplete, validateInspectionSnapshot, type InspectionCommand, type InspectionEvent } from '../src/inspection-protocol.js';
+import { InspectionIncomplete, validateInspectionListing, validateInspectionSnapshot, type InspectionCommand, type InspectionEvent } from '../src/inspection-protocol.js';
 import { inspectWorkspace, remoteSnapshot } from '../src/inspect-workspace.js';
 import { inspectRemote } from '../src/runtime/inspection.js';
 import { selectProject } from '../src/project.js';
@@ -111,6 +112,94 @@ test('Git rather than raw-byte rules determine equality, modes, staged additions
   assert.equal(rows.find(row => row.name === 'run.sh')?.status, 'different');
   assert.equal(rows.find(row => row.name === 'broken')?.status, 'matching');
   assert.equal(rows.find(row => row.name === '.env')?.status, 'local only');
+});
+
+test('listing preserves Git-visible names and types without reading file contents or running clean filters', async t => {
+  const f = await fixture(t);
+  await rm(join(f.remote, 'docs', 'guide.md'));
+  await writeFile(join(f.remote, '.env'), 'ignored\n');
+  await symlink('missing-target', join(f.remote, 'broken'));
+  await writeFile(join(f.remote, '-literal\nname'), 'untracked\n');
+  await writeFile(join(f.remote, 'src', 'staged.ts'), 'staged\n');
+  await git(f.remote, ['add', 'src/staged.ts']);
+  const before = await state(f.workspace);
+  for (const [scope, includeIgnored] of [['', false], ['src', false], ['README.md', false], ['missing', false], ['missing/child', false], ['docs', false], ['broken', false], ['.env', false], ['.env', true], ['', true]] as const) {
+    const listing = await captureListing(f.remote, scope, includeIgnored, f.controller.signal);
+    validateInspectionListing(listing, scope);
+    const snapshot = await f.snapshot(f.remote, scope, includeIgnored);
+    assert.equal(listing.kind, snapshot.kind, scope);
+    const simple = (entries: typeof listing.entries) => entries.map(({ name, mode }) => ({ name, mode })).sort((a, b) => a.name.localeCompare(b.name));
+    assert.deepEqual(simple(listing.entries), simple(snapshot.entries), scope);
+    assert.deepEqual(listing.entry, snapshot.entry && { name: snapshot.entry.name, mode: snapshot.entry.mode }, scope);
+  }
+  assert.deepEqual(await state(f.workspace), before);
+  await writeFile(join(f.remote, '.gitattributes'), 'README.md filter=fail\n');
+  await git(f.remote, ['config', 'filter.fail.clean', 'exit 77']);
+  await git(f.remote, ['config', 'filter.fail.required', 'true']);
+  await assert.rejects(f.snapshot(f.remote), /filter|Unable to inspect/);
+  if (process.getuid?.() !== 0) await chmod(join(f.remote, 'README.md'), 0o000);
+  try {
+    assert.ok((await captureListing(f.remote, '', false, f.controller.signal)).entries.some(entry => entry.name === 'README.md'));
+    assert.equal((await captureListing(f.remote, 'README.md', false, f.controller.signal)).kind, 'file');
+  } finally { await chmod(join(f.remote, 'README.md'), 0o644); }
+  await symlink('../project', join(f.remote, 'outside'));
+  await assert.rejects(captureListing(f.remote, 'outside/src', false, f.controller.signal), /symlink ancestor/);
+  await git(f.remote, ['update-index', '--add', '--cacheinfo', `160000,${f.repository.head},submodule`]);
+  await assert.rejects(captureListing(f.remote, '', false, f.controller.signal), /Submodule/);
+});
+
+test('inspection sessions are stable across scopes, isolated by workspace and binding, and preserved on abort', async () => {
+  const ids: string[] = [];
+  const command: InspectionCommand = { type: 'inspect', id: randomUUID(), directoryName: 'project', binding: 'a'.repeat(64), scope: '', includeIgnored: false };
+  let aborted = false;
+  const workspace = (id: string) => ({ selector: { id }, session: (config: { id: string; keepAliveSeconds: number }) => {
+    ids.push(config.id); assert.equal(config.keepAliveSeconds, 120);
+    return {
+      async view() { throw Object.assign(new Error('No view'), { code: 'session_not_found' }); },
+      async request() { return { ok: true }; },
+      async *stream({ signal }: { signal: AbortSignal }) {
+        signal.addEventListener('abort', () => { aborted = true; }, { once: true });
+        yield { data: { type: 'inspection-error', id: command.id, message: 'expected failure' } };
+      },
+      async stop() { assert.fail('A client must never stop the shared session'); },
+    };
+  } }) as unknown as Parameters<typeof remoteSnapshot>[0];
+  const signal = new AbortController().signal;
+  for (const [id, changes] of [['wsp_a', {}], ['wsp_a', { scope: 'src', includeIgnored: true }], ['wsp_b', {}], ['wsp_a', { binding: 'b'.repeat(64) }], ['wsp_a', { directoryName: 'other' }]] as const) {
+    await assert.rejects(remoteSnapshot(workspace(id), { ...command, ...changes }, signal), /expected failure/);
+  }
+  assert.equal(ids[0], ids[1]); assert.equal(new Set(ids).size, 4);
+  assert.equal(aborted, true);
+  const controller = new AbortController(); controller.abort(new Error('cancelled'));
+  await assert.rejects(remoteSnapshot(workspace('wsp_a'), command, controller.signal), /cancelled/);
+});
+
+test('expired or reset inspection replay retries once without stopping the shared session', async t => {
+  const f = await fixture(t), snapshot = await f.snapshot(f.local), bytes = Buffer.from(JSON.stringify(snapshot));
+  for (const code of ['event_cursor_expired', 'event_stream_reset']) {
+    const configs: { id: string; keepAliveSeconds: number }[] = [];
+    let sharedSignal: AbortSignal | undefined;
+    const workspace = {
+      selector: { id: `wsp_${'a'.repeat(32)}` },
+      session(config: { id: string; keepAliveSeconds: number }) {
+        configs.push(config); let command: InspectionCommand;
+        return {
+          async view() { return { cursor: { streamId: 'a'.repeat(32), sequence: 300 } }; },
+          async request(value: InspectionCommand) { command = value; return { ok: true }; },
+          async *stream({ signal }: { signal: AbortSignal }) {
+            if (config.keepAliveSeconds) { sharedSignal = signal; throw Object.assign(new Error(code), { code }); }
+            yield { data: { type: 'inspection-chunk', id: command.id, offset: 0, data: bytes.toString('base64') } };
+            yield { data: { type: 'inspection-end', id: command.id, size: bytes.length, sha256: sha256(bytes) } };
+          },
+          async stop() { assert.fail('Recovery must not stop any shared work'); },
+        };
+      },
+    } as unknown as Parameters<typeof remoteSnapshot>[0];
+    const command: InspectionCommand = { type: 'inspect', id: randomUUID(), directoryName: 'project', binding: f.repository.binding, scope: '', includeIgnored: false };
+    assert.deepEqual(await remoteSnapshot(workspace, command, f.controller.signal), snapshot);
+    assert.equal(configs.length, 2); assert.equal(configs[0]!.keepAliveSeconds, 120); assert.equal(configs[1]!.keepAliveSeconds, 0);
+    assert.notEqual(configs[0]!.id, configs[1]!.id); assert.equal(sharedSignal?.aborted, true);
+  }
 });
 
 test('ignored counterparts are excluded rather than missing and explicit inclusion is scoped', async t => {
@@ -221,6 +310,7 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
   const workspaceId = `wsp_${'a'.repeat(32)}`;
   const calls: AppCommandEnvelope<TerminalCommand>[] = [];
   const histories = new Map<string, SessionEvent<TerminalEvent>[]>(), emitted = new EventEmitter();
+  const boundaries = new Map<string, number>();
   let exists = false;
   const app = new CantelopClient().app<TerminalCommand, TerminalEvent, TerminalReply>({ name: 'inspection-test', runtime: { receive() {} }, connection: {
     async fetch(request) {
@@ -231,17 +321,21 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
       } : null });
       assert.deepEqual(body.workspace, { id: workspaceId });
       const id = body.session!.id;
+      if (operation.type === 'view') {
+        const sequence = boundaries.get(id);
+        return sequence === undefined ? Response.json({ error: { code: 'session_view_not_found' } }, { status: 404 }) : Response.json({ protocolVersion: 2, workspaceId, sessionId: id, revision: '1', updatedAt: new Date().toISOString(), state: { inspection: 1 }, cursor: { streamId: 'a'.repeat(32), sequence } });
+      }
       if (operation.type === 'request') {
         assert.equal(operation.message.type, 'inspect');
         const command = operation.message as InspectionCommand;
-        const history: SessionEvent<TerminalEvent>[] = []; histories.set(id, history);
+        const history = histories.get(id) ?? []; histories.set(id, history);
         void inspectRemote(command, { async send(data) {
           history.push({ data, sessionId: id, messageId: body.id, cursor: { streamId: 'a'.repeat(32), sequence: history.length + 1 }, createdAt: new Date() }); emitted.emit(id);
-        } }, f.controller.signal, f.workspace).catch(error => emitted.emit('error', error));
+        } }, f.controller.signal, f.workspace).then(() => boundaries.set(id, history.length)).catch(error => emitted.emit('error', error));
         return Response.json({ protocolVersion: 2, id: body.id, reply: { ok: true } });
       }
       if (operation.type === 'stream') {
-        let index = 0;
+        let index = operation.after?.sequence ?? 0;
         return new Response(new ReadableStream({ async pull(controller) {
           while (!histories.get(id)?.[index]) await once(emitted, id, { signal: request.signal });
           const event = histories.get(id)![index++]!;
@@ -260,8 +354,10 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
   const before = await state(f.workspace);
   assert.equal(await inspectWorkspace(app, f.local, options, f.controller.signal, stdout), 0);
   assert.match(text, /src\/\s+!\s+src\//);
-  assert.ok(calls.every(call => ['workspace.inspect', 'request', 'stream', 'stop'].includes(call.command.type)));
-  assert.equal(calls.filter(call => call.command.type === 'stop').length, 1);
+  assert.ok(calls.every(call => ['workspace.inspect', 'view', 'request', 'stream'].includes(call.command.type)));
+  const inspectionSession = calls.find(call => call.command.type === 'request')!.session!.id;
+  assert.match(inspectionSession, /^ses_inspect_[a-f0-9]{32}$/);
+  assert.equal(calls.filter(call => call.command.type === 'stop').length, 0);
   assert.deepEqual(await state(f.workspace), before);
   await writeFile(join(f.local, 'local-only.txt'), 'local\n');
   await writeFile(join(f.remote, 'remote-only.txt'), 'remote\n');
@@ -273,7 +369,10 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
     assert.match(text, /^remote-only\.txt$/m);
     assert.match(text, /^README\.md$/m);
     assert.doesNotMatch(text, /local-only|Local:|Local HEAD:|matching|different/);
-    assert.equal(calls.filter(call => call.command.type === 'stop').length, 1);
+    assert.equal(calls.find(call => call.command.type === 'request')!.session!.id, inspectionSession);
+    assert.ok(calls.some(call => call.command.type === 'request' && call.command.message.type === 'inspect' && call.command.message.mode === 'listing'));
+    assert.ok(calls.some(call => call.command.type === 'stream' && call.command.after?.sequence));
+    assert.equal(calls.filter(call => call.command.type === 'stop').length, 0);
     assert.deepEqual(await state(f.workspace), remoteBefore);
   } finally { await chmod(join(f.local, 'README.md'), 0o644); }
 });
@@ -287,10 +386,11 @@ test('invalid, truncated and reordered streams cannot produce a successful compa
     let stopped = false;
     const session = {
       request: async () => ({ ok: true as const }), stop: async () => { stopped = true; },
+      view: async () => { throw Object.assign(new Error('No view'), { code: 'session_view_not_found' }); },
       async *stream() { for (const data of events) yield { data }; },
     };
-    await assert.rejects(remoteSnapshot({ session: () => session } as unknown as Parameters<typeof remoteSnapshot>[0], command, f.controller.signal), InspectionIncomplete);
-    assert.equal(stopped, true);
+    await assert.rejects(remoteSnapshot({ selector: { id: `wsp_${'a'.repeat(32)}` }, session: () => session } as unknown as Parameters<typeof remoteSnapshot>[0], command, f.controller.signal), InspectionIncomplete);
+    assert.equal(stopped, false);
   }
   assert.throws(() => validateInspectionSnapshot({ ...snapshot, entries: [{ name: 'bad/path', mode: '100644', oid: 'a'.repeat(40) }] }, ''), /invalid/);
 });

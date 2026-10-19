@@ -7,6 +7,11 @@ export const MAX_INSPECTION_BYTES = 64 * 1024 * 1024;
 export const INSPECTION_CHUNK_BYTES = 32 * 1024;
 export const INSPECTION_TIMEOUT_MS = 240_000;
 export type TreeEntry = { name: string; mode: '040000' | '100644' | '100755' | '120000'; oid: string };
+export type ListingEntry = Pick<TreeEntry, 'name' | 'mode'>;
+export type InspectionListing = {
+  version: 1; scope: string; kind: 'directory' | 'file' | 'missing' | 'ignored';
+  entry?: ListingEntry; entries: ListingEntry[];
+};
 export type InspectionSnapshot = {
   version: 1; scope: string; kind: 'directory' | 'file' | 'missing' | 'ignored';
   entry?: TreeEntry; entries: TreeEntry[]; ignored: string[];
@@ -15,6 +20,7 @@ export type InspectionSnapshot = {
 };
 export type InspectionCommand = {
   type: 'inspect'; id: string; directoryName: string; binding: string; scope: string; includeIgnored: boolean;
+  mode?: 'listing';
 };
 export type InspectionEvent =
   | { type: 'inspection-chunk'; id: string; offset: number; data: string }
@@ -33,13 +39,23 @@ export function inspectionScope(path = '.') {
 
 export function validateInspectionCommand(command: InspectionCommand) {
   if (!command || command.type !== 'inspect' || !validTransferId(command.id) || !validProjectName(command.directoryName) ||
-      !/^[a-f0-9]{64}$/.test(command.binding) || !relativeProjectPath(command.scope) || typeof command.includeIgnored !== 'boolean') throw new Error('Invalid workspace inspection command');
+      !/^[a-f0-9]{64}$/.test(command.binding) || !relativeProjectPath(command.scope) || typeof command.includeIgnored !== 'boolean' ||
+      (command.mode !== undefined && command.mode !== 'listing')) throw new Error('Invalid workspace inspection command');
 }
 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const name = (value: unknown): value is string => typeof value === 'string' && !!value && !['.', '..', '.git'].includes(value) && !value.includes('/') && !value.includes('\0');
 function entry(value: unknown): value is TreeEntry {
   return record(value) && name(value.name) && ['040000', '100644', '100755', '120000'].includes(String(value.mode)) && validOid(value.oid);
+}
+export function validateInspectionListing(value: unknown, scope: string): InspectionListing {
+  const listed = (item: unknown): item is ListingEntry => record(item) && name(item.name) && ['040000', '100644', '100755', '120000'].includes(String(item.mode));
+  if (!record(value) || value.version !== 1 || value.scope !== scope || !['directory', 'file', 'missing', 'ignored'].includes(String(value.kind)) ||
+      !Array.isArray(value.entries) || !value.entries.every(listed) || new Set(value.entries.map(item => item.name)).size !== value.entries.length ||
+      (value.kind !== 'directory' && value.entries.length !== 0) ||
+      (value.kind === 'directory' ? !listed(value.entry) || value.entry.mode !== '040000' :
+        value.kind === 'file' ? !listed(value.entry) || value.entry.mode === '040000' : value.entry !== undefined)) throw new InspectionIncomplete('The runtime returned an invalid workspace listing.');
+  return value as InspectionListing;
 }
 export function validateInspectionSnapshot(value: unknown, scope: string): InspectionSnapshot {
   if (!record(value) || value.version !== 1 || value.scope !== scope || !['directory', 'file', 'missing', 'ignored'].includes(String(value.kind)) ||
