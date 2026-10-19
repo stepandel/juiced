@@ -115,6 +115,7 @@ test('SDK round trip preserves exact unpublished commits and imports branches be
 
 test('uncommitted snapshots preserve staging, binaries, deletions, modes and local index bytes', { timeout: 30_000 }, async t => {
   const f = await fixture(t);
+  const client = await f.client(); await client.send(false);
   await writeFile(join(f.local, 'README.md'), 'staged\n'); await git(f.local, ['add', 'README.md']);
   await writeFile(join(f.local, 'README.md'), 'unstaged\n');
   await rm(join(f.local, 'remove.txt'));
@@ -125,7 +126,7 @@ test('uncommitted snapshots preserve staging, binaries, deletions, modes and loc
   const originalIndex = await readFile(join(f.local, '.git', 'index'));
   const staged = await git(f.local, ['diff', '--cached', '--binary']);
   const unstaged = await git(f.local, ['diff', '--binary']);
-  const client = await f.client(); f.failNextChunk();
+  f.failNextChunk();
   await client.send(true);
   assert.deepEqual(await readFile(join(f.local, '.git', 'index')), originalIndex);
   assert.deepEqual(await git(f.local, ['diff', '--cached', '--binary']), staged);

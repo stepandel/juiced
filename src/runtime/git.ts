@@ -179,10 +179,18 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
           await candidateGit(['merge', '--ff-only', '--no-overwrite-ignore', 'refs/juiced/incoming']);
         } else if (manifest.branch) await candidateGit(['checkout', '-b', manifest.branch, manifest.head]);
         else await candidateGit(['checkout', '--detach', manifest.head]);
-        for (const [name, args] of [['staged', ['--index']], ['unstaged', []]] as const) {
+        for (const name of ['staged', 'unstaged'] as const) {
           if (manifest.files.some(file => file.name === name)) {
-            await candidateGit(['apply', '--check', ...args, join(transfer!, name)]);
-            await candidateGit(['apply', '--whitespace=nowarn', ...args, join(transfer!, name)]);
+            const patch = join(transfer!, name);
+            // The candidate has a copied index whose stat cache describes the
+            // original files. --index can reject identical contents on copies
+            // or NFS. Validate/apply each side independently before publication.
+            await candidateGit(['apply', '--check', patch]);
+            if (name === 'staged') {
+              await candidateGit(['apply', '--cached', '--check', patch]);
+              await candidateGit(['apply', '--cached', '--whitespace=nowarn', patch]);
+            }
+            await candidateGit(['apply', '--whitespace=nowarn', patch]);
           }
         }
         await candidateGit(['config', 'user.name', manifest.author.name]);
