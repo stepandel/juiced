@@ -1,10 +1,11 @@
 import React, { useEffect, useReducer, useRef, useState } from 'react';
 import { Box, Text, Static, render, useInput, usePaste } from 'ink';
-import { object, type Approval, type ClaudeFrame } from '../agent-protocol.js';
+import { object, type Approval, type ClaudeFrame, type SlashCommand } from '../agent-protocol.js';
 import { RemoteAgent, type AgentStatus } from '../remote-agent.js';
 import type { TerminalIO } from '../remote-terminal.js';
 import { cursorParts, edit, type Editor } from './editor.js';
 import { emptyConversation, plain, receiveFrame, userTurn, type Entry } from './conversation.js';
+import { availableCommands, matchingCommands } from './commands.js';
 
 type Draft = { current: Editor };
 function useDraft(): [Draft, (next: Editor) => void] {
@@ -28,20 +29,55 @@ function Clipped({ children, tail = false }: { children: React.ReactNode; tail?:
   </Box>;
 }
 
-function Prompt({ editor, onEdit, onSubmit, disabled = false, placeholder = 'Ask Claude to work in your remote workspace…' }: { editor: Draft; onEdit(value: Editor): void; onSubmit(value: string): void; disabled?: boolean; placeholder?: string }) {
+function Prompt({ editor, onEdit, onSubmit, onEscape, commands, menuRows = 6, disabled = false, placeholder = 'Ask Claude to work in your remote workspace…' }: { editor: Draft; onEdit(value: Editor): void; onSubmit(value: string): void; onEscape?(): void; commands?: SlashCommand[]; menuRows?: number; disabled?: boolean; placeholder?: string }) {
+  const menu = useRef({ query: '', index: 0, dismissed: false });
+  const [, refreshMenu] = useReducer((value: number) => value + 1, 0);
+  // Read the current draft for every key, including rapid arrow + Enter input.
+  const suggestions = () => {
+    const matches = disabled || !commands ? [] : matchingCommands(editor.current, commands);
+    const query = matches.length ? editor.current.text : '';
+    if (menu.current.query !== query) menu.current = { query, index: 0, dismissed: false };
+    menu.current.index = Math.min(menu.current.index, Math.max(0, matches.length - 1));
+    return menu.current.dismissed ? [] : matches;
+  };
   usePaste(text => onEdit(edit(editor.current, text, {})), { isActive: !disabled });
   useInput((input, key) => {
-    if (key.ctrl && ['c', 'd'].includes(input) || key.escape) return;
+    if (key.ctrl && ['c', 'd'].includes(input)) return;
+    const matches = suggestions();
+    if (key.escape) {
+      if (matches.length) { menu.current.dismissed = true; refreshMenu(); }
+      else onEscape?.();
+      return;
+    }
+    if (matches.length && (key.upArrow || key.downArrow)) {
+      menu.current.index = (menu.current.index + (key.upArrow ? -1 : 1) + matches.length) % matches.length;
+      refreshMenu(); return;
+    }
+    const selected = matches[menu.current.index];
+    if (selected && key.tab) {
+      const text = `/${selected.name} `;
+      onEdit({ text, cursor: text.length }); return;
+    }
     if (key.return && !key.meta && !key.shift) {
       if (editor.current.text.endsWith('\\')) { onEdit({ text: editor.current.text.slice(0, -1) + '\n', cursor: editor.current.text.length }); return; }
-      onSubmit(editor.current.text); return;
+      onSubmit(selected ? `/${selected.name}` : editor.current.text); return;
     }
     onEdit(edit(editor.current, input, key));
   }, { isActive: !disabled });
   const [before, cursor, after] = cursorParts(editor.current);
-  return <Box borderStyle="round" borderColor={disabled ? 'gray' : 'green'} paddingX={1}>
-    <Text color="green">› </Text>
-    <Box flexGrow={1}><Clipped tail><Text>{editor.current.text ? <>{before}<Text inverse={!disabled}>{cursor}</Text>{after}</> : <><Text inverse={!disabled}> </Text><Text dimColor>{placeholder}</Text></>}</Text></Clipped></Box>
+  const matches = suggestions();
+  const start = Math.max(0, menu.current.index - menuRows + 1);
+  return <Box flexDirection="column">
+    <Box borderStyle="round" borderColor={disabled ? 'gray' : 'green'} paddingX={1}>
+      <Text color="green">› </Text>
+      <Box flexGrow={1}><Clipped tail><Text>{editor.current.text ? <>{before}<Text inverse={!disabled}>{cursor}</Text>{after}</> : <><Text inverse={!disabled}> </Text><Text dimColor>{placeholder}</Text></>}</Text></Clipped></Box>
+    </Box>
+    {matches.length > 0 && <Box flexDirection="column" flexShrink={0}>
+      {matches.slice(start, start + menuRows).map((command, i) => <Box key={command.name} height={1} paddingX={1}>
+        <Text wrap="truncate-end" inverse={start + i === menu.current.index}>{start + i === menu.current.index ? '›' : ' '} /{command.name}{command.argumentHint ? ` ${plain(command.argumentHint).replace(/\s+/g, ' ')}` : ''}{command.description ? `  ${plain(command.description).replace(/\s+/g, ' ')}` : ''}</Text>
+      </Box>)}
+      <Box height={1} paddingX={1}><Text dimColor wrap="truncate-end">{menu.current.index + 1}/{matches.length} · ↑/↓ select · Tab complete · Enter run · Esc close</Text></Box>
+    </Box>}
   </Box>;
 }
 
@@ -96,6 +132,7 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
   const [editor, setEditor] = useDraft();
   const [status, setStatus] = useState<AgentStatus>(agent.status);
   const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [commands, setCommands] = useState<SlashCommand[]>(agent.commands);
   const [notice, setNotice] = useState('');
   const [closing, setClosing] = useState(false);
   const action = (work: Promise<unknown>) => { void work.catch(error => setNotice(plain((error as Error).message))); };
@@ -106,14 +143,13 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
     const permission = () => setApprovals([...agent.approvals.values()]);
     const failure = (error: Error) => { setClosing(true); setNotice(plain(error.message)); quit(1); };
     const reconnect = () => setNotice('Reconnecting to the output stream… Your draft is kept locally.');
-    agent.on('frame', frame).on('status', state).on('approvals', permission).on('failure', failure).on('reconnecting', reconnect);
+    agent.on('frame', frame).on('status', state).on('approvals', permission).on('commands', setCommands).on('failure', failure).on('reconnecting', reconnect);
     void agent.start(argv).catch(() => {});
-    return () => { agent.off('frame', frame).off('status', state).off('approvals', permission).off('failure', failure).off('reconnecting', reconnect); };
+    return () => { agent.off('frame', frame).off('status', state).off('approvals', permission).off('commands', setCommands).off('failure', failure).off('reconnecting', reconnect); };
   }, [agent]);
   const cancel = () => { if (['working', 'interrupting'].includes(agent.status)) action(agent.interrupt()); };
   useInput((input, key) => {
     if (approvals.length) return;
-    if (key.escape) cancel();
     if (key.ctrl && input === 'c') {
       if (['working', 'interrupting'].includes(agent.status)) cancel();
       else if (editor.current.text) setEditor({ text: '', cursor: 0 });
@@ -124,7 +160,7 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
   const submit = (text: string) => {
     if (!text.trim()) return;
     if (text.trim() === '/exit' || text.trim() === '/quit') { exit(); return; }
-    if (text.trim() === '/help') { setNotice('Enter sends · Alt+Enter or \\ then Enter adds a line · Esc interrupts · /exit quits. Claude flags such as --model apply at launch.'); setEditor({ text: '', cursor: 0 }); return; }
+    if (text.trim() === '/help') { setNotice('/ lists commands · ↑/↓ select · Tab completes · Enter runs · Alt+Enter or \\ then Enter adds a line · Esc closes the menu or interrupts · /exit quits. Claude flags such as --model apply at launch.'); setEditor({ text: '', cursor: 0 }); return; }
     if (agent.status !== 'ready') { setNotice('Your draft is local. Wait for Claude to finish, or press Esc to interrupt.'); return; }
     if (Buffer.byteLength(text) > 512 * 1024) { setNotice('The prompt exceeds 512 KiB. Shorten it before sending.'); return; }
     const draft = editor.current;
@@ -153,8 +189,8 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
         <Box marginBottom={1} flexShrink={0} maxHeight={2} overflow="hidden"><Text color={status === 'ready' ? 'green' : status === 'failed' ? 'red' : 'cyan'}>{closing ? 'Disconnecting…' : status === 'connecting' ? 'Connecting to Claude…' : status === 'working' ? 'Claude is working…' : status === 'interrupting' ? 'Interrupting…' : status === 'ready' ? 'Ready' : status}</Text><Text dimColor>{conversation.model ? ` · ${conversation.model}` : ''}{conversation.tokens ? ` · ${conversation.tokens.toLocaleString()} tokens last turn` : ''}</Text></Box>
         {notice && <Box marginBottom={1} flexShrink={0} maxHeight={2} overflow="hidden"><Text color="yellow">{notice}</Text></Box>}
         {active ? <Permission key={active.id} approval={active} cancel={cancel} answer={(allow, answers) => action(agent.answer(active.id, allow, answers))} />
-          : <Prompt editor={editor} onEdit={setEditor} onSubmit={submit} disabled={closing} />}
-        <Box flexShrink={0}><Text dimColor wrap="truncate-end">{active ? 'Esc decline · Ctrl+C interrupt' : 'Enter send · Alt+Enter newline · Esc interrupt · Ctrl+C clear / exit · /help'}</Text></Box>
+          : <Prompt editor={editor} onEdit={setEditor} onSubmit={submit} onEscape={cancel} commands={availableCommands(commands)} menuRows={Math.max(1, Math.min(6, rows - 12))} disabled={closing} />}
+        <Box flexShrink={0}><Text dimColor wrap="truncate-end">{active ? 'Esc decline · Ctrl+C interrupt' : 'Enter send · Alt+Enter newline · Esc interrupt · Ctrl+C clear / exit · / commands'}</Text></Box>
       </Box>
     </Box>
   </Box>;

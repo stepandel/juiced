@@ -3,7 +3,7 @@ import { EventEmitter, once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import type { SessionEvent } from '@cantelop/sdk';
-import { ClaudeDecoder, headlessArguments, object, useLocalTui, type ClaudeFrame } from '../src/agent-protocol.js';
+import { ClaudeDecoder, headlessArguments, object, slashCommands, useLocalTui, type ClaudeFrame } from '../src/agent-protocol.js';
 import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
 import type { TerminalCommand, TerminalEvent } from '../src/protocol.js';
 
@@ -12,7 +12,7 @@ export async function until(check: () => boolean, ms = 2000) {
   while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
 }
 
-function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}) {
+function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}, initialization: ClaudeFrame = {}) {
   const emitted = new EventEmitter();
   const events: SessionEvent<TerminalEvent>[] = [];
   const frames: ClaudeFrame[] = [];
@@ -34,7 +34,7 @@ function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}) {
       if (command.type === 'input') for (const frame of decoder.push(Buffer.from(command.data, 'base64'))) {
         frames.push(frame);
         if (frame.type === 'control_request') {
-          output({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response: {} } });
+          output({ type: 'control_response', response: { subtype: 'success', request_id: frame.request_id, response: object(frame.request).subtype === 'initialize' ? initialization : {} } });
         }
       }
       return { id: 'msg_' + '2'.repeat(32), state: 'accepted', acceptedAt: new Date(), async status() { return { id: 'msg_' + '2'.repeat(32), state: 'handled', acceptedAt: new Date(), startedAt: new Date(), handledAt: new Date() }; } };
@@ -72,6 +72,30 @@ test('JSONL decoding survives arbitrary byte splits and rejects truncated or ove
   const incomplete = new ClaudeDecoder(); incomplete.push(Buffer.from('{"type":'));
   assert.throws(() => incomplete.finish(), /incomplete/);
   assert.throws(() => new ClaudeDecoder().push(Buffer.alloc(4 * 1024 * 1024 + 1, 65)), /limit/);
+});
+
+test('commands are available before the first prompt and init updates retain their descriptions', async t => {
+  const command = { name: 'compact', description: 'Summarize conversation history', argumentHint: '[instructions]' };
+  const f = fixture({}, { commands: [command, { name: 'project:review', description: 'Review this project' }] });
+  t.after(() => f.agent.close());
+  let readyCommands: unknown;
+  f.agent.on('status', status => { if (status === 'ready') readyCommands = f.agent.commands; });
+  await f.agent.start();
+  assert.deepEqual(readyCommands, [command, { name: 'project:review', description: 'Review this project', argumentHint: '' }]);
+  assert.equal(f.frames.some(frame => frame.type === 'user'), false, 'Command discovery must not spend a model turn');
+  f.output({ type: 'system', subtype: 'init', slash_commands: ['compact', 'new-command'] });
+  await until(() => f.agent.commands.some(command => command.name === 'new-command'));
+  assert.deepEqual(f.agent.commands, [command, { name: 'new-command', description: '', argumentHint: '' }]);
+  await f.agent.submit('/compact keep the decisions');
+  assert.equal(object(f.frames.at(-1)?.message).content, '/compact keep the decisions');
+});
+
+test('command metadata tolerates missing fields and rejects invalid names', () => {
+  assert.deepEqual(slashCommands(undefined), []);
+  assert.deepEqual(slashCommands([null, {}, { name: 4 }, { name: '/help' }, { name: 'bad\nname' }, { name: '\x1b[31mevil' }, 'compact', 'compact', { name: 'plugin:review', description: false, argumentHint: 3 }]), [
+    { name: 'compact', description: '', argumentHint: '' },
+    { name: 'plugin:review', description: '', argumentHint: '' },
+  ]);
 });
 
 test('one process handles initialization, multiple prompts, approval answers and interruption through dispatch', async t => {

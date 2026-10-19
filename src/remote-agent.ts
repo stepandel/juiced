@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionEventCursor, SessionRef } from '@cantelop/sdk';
 import { MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
-import { ClaudeDecoder, headlessArguments, object, type Approval, type ClaudeFrame } from './agent-protocol.js';
+import { ClaudeDecoder, headlessArguments, object, slashCommands, type Approval, type ClaudeFrame, type SlashCommand } from './agent-protocol.js';
 
 export type AgentSession = Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'>;
 export type AgentStatus = 'connecting' | 'ready' | 'working' | 'interrupting' | 'closed' | 'failed';
@@ -14,6 +14,7 @@ class RemoteProcessError extends Error {}
 export class RemoteAgent extends EventEmitter {
   status: AgentStatus = 'connecting';
   readonly approvals = new Map<string, Approval>();
+  commands: SlashCommand[] = [];
   private controller = new AbortController();
   private decoder = new ClaudeDecoder();
   private controls = new Map<string, Control>();
@@ -58,7 +59,8 @@ export class RemoteAgent extends EventEmitter {
         void this.enqueue({ type: 'heartbeat' }, 0).catch(error => this.fail(error));
       }, this.options.heartbeatMs ?? 30_000);
       this.heartbeat.unref();
-      await this.control({ subtype: 'initialize', hooks: null });
+      const initialized = await this.control({ subtype: 'initialize', hooks: null });
+      this.updateCommands(initialized.commands);
       this.setStatus('ready');
     } catch (error) { this.fail(error); throw error; }
   }
@@ -148,7 +150,18 @@ export class RemoteAgent extends EventEmitter {
     await this.control({ subtype: 'interrupt' });
   }
 
+  private updateCommands(value: unknown) {
+    if (!Array.isArray(value)) return;
+    const previous = new Map(this.commands.map(command => [command.name, command]));
+    this.commands = slashCommands(value).map(command => ({ ...command,
+      description: command.description || previous.get(command.name)?.description || '',
+      argumentHint: command.argumentHint || previous.get(command.name)?.argumentHint || '',
+    }));
+    this.emit('commands', this.commands);
+  }
+
   private frame(frame: ClaudeFrame) {
+    if (frame.type === 'system' && frame.subtype === 'init') this.updateCommands(frame.slash_commands);
     if (frame.type === 'control_response') {
       const response = object(frame.response);
       const id = String(response.request_id);

@@ -2,6 +2,22 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { edit, cursorParts } from '../src/tui/editor.js';
 import { emptyConversation, plain, receiveFrame, userTurn } from '../src/tui/conversation.js';
+import { availableCommands, matchingCommands } from '../src/tui/commands.js';
+
+test('command suggestions filter the command word and preserve local command behavior', () => {
+  const commands = availableCommands([
+    { name: 'compact', description: 'Summarize history', argumentHint: '[instructions]' },
+    { name: 'project:review', description: 'Review project', argumentHint: '' },
+    { name: 'help', description: 'Remote help', argumentHint: 'ignored' },
+  ]);
+  const matches = (text: string, cursor = text.length) => matchingCommands({ text, cursor }, commands);
+  assert.deepEqual(matches('/'), commands);
+  assert.equal(commands.find(command => command.name === 'help')?.description, 'Show Juiced keyboard shortcuts');
+  assert.deepEqual(matches('/COM').map(command => command.name), ['compact']);
+  assert.deepEqual(matches('/project:').map(command => command.name), ['project:review']);
+  for (const text of ['hello /co', '/compact instructions', '/co\n', '/unknown', '']) assert.deepEqual(matches(text), []);
+  assert.deepEqual(matches('/compact', 3), []);
+});
 
 test('the local prompt editor supports grapheme navigation, forward deletion, multiline paste and line editing', () => {
   let state = { text: '', cursor: 0 };

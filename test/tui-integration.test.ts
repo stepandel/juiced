@@ -7,6 +7,90 @@ import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
 import { runLocalTui } from '../src/tui/app.js';
 import type { TerminalInput, TerminalOutput } from '../src/remote-terminal.js';
 
+test('slash commands preview, filter, navigate, complete and submit locally', { timeout: 5000 }, async () => {
+  class CommandAgent extends RemoteAgent {
+    submitted: string[] = [];
+    interrupts = 0;
+    override async start() {
+      this.commands = [
+        { name: 'compact', description: 'Summarize conversation', argumentHint: '[instructions]' },
+        { name: 'context', description: 'Show context usage', argumentHint: '' },
+        ...Array.from({ length: 20 }, (_, i) => ({ name: `project:command-${String(i).padStart(2, '0')}`, description: 'A project command', argumentHint: '' })),
+      ];
+      this.emit('commands', this.commands);
+      this.status = 'ready'; this.emit('status', this.status);
+    }
+    override async submit(text: string) { this.submitted.push(text); this.status = 'working'; this.emit('status', this.status); }
+    override async interrupt() { this.interrupts++; }
+    override async close() { this.status = 'closed'; this.emit('status', this.status); }
+  }
+  const agent = new CommandAgent({} as AgentSession);
+  const stdin = new PassThrough() as PassThrough & TerminalInput & { ref(): void; unref(): void };
+  stdin.isTTY = true; stdin.isRaw = false;
+  stdin.setRawMode = raw => { stdin.isRaw = raw; };
+  stdin.ref = () => {}; stdin.unref = () => {};
+  let latest = '';
+  const frames: { text: string; rows: number }[] = [];
+  const stdout = new Writable({ write(chunk, _, done) {
+    const text = stripVTControlCharacters(chunk.toString());
+    if (text.includes('Enter send')) { latest = text; frames.push({ text, rows: stdout.rows! }); }
+    done();
+  } }) as TerminalOutput;
+  stdout.isTTY = true; stdout.columns = 100; stdout.rows = 24;
+  const lifetime = new AbortController();
+  const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
+  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${latest}`); await delay(5); } };
+  try {
+    await wait(() => agent.status === 'ready');
+    stdin.write('/');
+    await wait(() => latest.includes('Summarize conversation'));
+    assert.ok(latest.includes('[instructions]') && latest.includes('/help'));
+    stdin.write('co');
+    await wait(() => latest.includes('1/2 ·'));
+    assert.equal(latest.includes('Show Juiced keyboard shortcuts'), false);
+    stdin.write('\x1b[B'); stdin.write('\t');
+    await wait(() => latest.includes('/context ') && !latest.includes('Tab complete'));
+    assert.deepEqual(agent.submitted, [], 'Completion must not submit a turn');
+    stdin.write('\r');
+    await wait(() => agent.submitted.length === 1);
+    assert.deepEqual(agent.submitted, ['/context ']);
+
+    stdin.write('/co');
+    await wait(() => latest.includes('1/2 ·'));
+    stdin.write('\x1b');
+    await wait(() => !latest.includes('Tab complete'));
+    assert.ok(latest.includes('/co'), 'Escape keeps the draft');
+    assert.equal(agent.interrupts, 0, 'Closing suggestions must not interrupt Claude');
+    stdin.write('\x1b');
+    await wait(() => agent.interrupts === 1);
+    stdin.write('\x15');
+    await wait(() => latest.includes('Ask Claude to work'));
+    agent.status = 'ready'; agent.emit('status', agent.status);
+    stdin.write('/co');
+    await wait(() => latest.includes('1/2 ·'));
+    stdin.write('\x1b[B'); stdin.write('\r');
+    await wait(() => agent.submitted.length === 2);
+    assert.equal(agent.submitted[1], '/context', 'Rapid arrow + Enter runs the selected command');
+
+    stdin.write('/project:');
+    await wait(() => latest.includes('1/20 ·'));
+    for (let i = 0; i < 12; i++) stdin.write('\x1b[B');
+    await wait(() => latest.includes('13/20 ·') && latest.includes('/project:command-12'));
+    stdout.columns = 50; stdout.rows = 16; stdout.emit('resize');
+    await delay(80);
+    assert.ok(latest.includes('/project:command-12'), 'The selected row remains visible on resize');
+    for (const frame of frames) assert.ok(frame.text.trimEnd().split('\n').length < frame.rows, `Command menu overflowed: ${frame.text}`);
+
+    stdin.write('\x15');
+    await wait(() => latest.includes('Ask Claude to work'));
+    stdin.write('\x1b[200~/compact keep decisions\nsecond line\x1b[201~');
+    await wait(() => latest.includes('second line'));
+    assert.equal(latest.includes('Tab complete'), false);
+    assert.equal(agent.submitted.length, 2, 'Pasted newlines must stay in the draft');
+  } finally { lifetime.abort(); await running; }
+  assert.equal(stdin.isRaw, false);
+});
+
 test('the real TUI edits and displays input while the network is stalled, without sending keystrokes', { timeout: 5000 }, async () => {
   let requests = 0, dispatches = 0, stops = 0;
   const session: AgentSession = {

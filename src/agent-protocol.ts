@@ -29,6 +29,18 @@ export class ClaudeDecoder {
 }
 
 export type Approval = { id: string; tool: string; input: ClaudeFrame; description: string };
+export type SlashCommand = { name: string; description: string; argumentHint: string };
+
+export function slashCommands(value: unknown): SlashCommand[] {
+  if (!Array.isArray(value)) return [];
+  const commands = new Map<string, SlashCommand>();
+  for (const raw of value) {
+    const command = typeof raw === 'string' ? { name: raw } : object(raw);
+    if (typeof command.name !== 'string' || !/^[^\s/\\\x00-\x1f\x7f-\x9f]+$/u.test(command.name)) continue;
+    commands.set(command.name, { name: command.name, description: typeof command.description === 'string' ? command.description : '', argumentHint: typeof command.argumentHint === 'string' ? command.argumentHint : '' });
+  }
+  return [...commands.values()];
+}
 
 export function headlessArguments(argv: string[]): string[] {
   return [...argv, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json',

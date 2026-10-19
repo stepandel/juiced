@@ -92,7 +92,8 @@ In the local UI:
 - Arrow keys, Home/End, backspace/delete, Ctrl+A/E, Ctrl+U/K/W edit the local draft, including Unicode characters.
 - **Esc** or **Ctrl+C** during a turn interrupts Claude. You can draft your next prompt while it works; Enter keeps that draft until the current turn finishes.
 - **Ctrl+C** while idle clears the draft, then exits if it is empty. **Ctrl+D** with an empty draft, **`/exit`**, and **`/quit`** disconnect and stop the remote process.
-- **`/help`** shows the local shortcuts. Claude's native terminal menus are not part of this interface.
+- **`/`** previews available commands with descriptions and argument hints. Keep typing to filter, use **↑/↓** to select, **Tab** to complete before adding arguments, and **Enter** to run the selection. **Esc** closes the menu without changing your draft.
+- **`/help`** shows the local shortcuts. Suggestions include Juiced's local commands and commands reported by the remote Claude session, including its project skills and custom commands. Commands requiring Claude's native terminal menus are unavailable in this interface.
 
 Submitted prompts and controls use ordered `session.dispatch()` calls. The stream carries responses and permission requests independently; the client does not wait for a runtime reply before submitting the next JSON fragment. Network latency still affects submission and response arrival, but cannot delay local typing. Prompts are limited to 512 KiB, pending input to 1 MiB, and transport fragments to 16 KiB.
 
