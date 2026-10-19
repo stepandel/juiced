@@ -14,7 +14,10 @@ The local interface streams Claude's responses, shows tool activity, and asks be
 
 ## Set up
 
-You need Node.js 22+, the [Cantelop CLI](https://cantelop.com/docs), and Docker for the initial runtime deployment.
+Running Juiced needs Node.js 22+ and configured Cantelop app credentials. The
+SDK includes its sync adapter for macOS and Linux on arm64 and x64. The
+[Cantelop CLI](https://cantelop.com/docs) and Docker are deployment tools used for
+the initial runtime setup.
 
 From this project directory:
 
@@ -82,10 +85,11 @@ enter the project's sync tree. Each project workspace needs its own Claude login
 with a conflict error. Resolve both copies before restarting. One local directory
 can have one active sync handle. Sync runs only while Juiced is running.
 
-Juiced uses the published `@cantelop/sdk` 1.2.0 release.
+Juiced uses `@cantelop/sdk` 1.3.1, which includes the native filesystem adapter.
+Sync does not invoke the Cantelop CLI, download a helper at runtime, or need Go.
 
-Automatic sync needs the matching platform, generated App Edge, SDK, and native
-Cantelop helper. Hosted writes are operator-gated: Juiced refuses to start an
+Automatic sync needs the matching platform, generated App Edge, and SDK.
+Hosted writes are operator-gated: Juiced refuses to start an
 agent when uploads are disabled, including for empty directories. The current
 deployment enables writes after live JuiceFS/NFS qualification. An existing login is retained in its original
 workspace; pass `--workspace default` to reuse the previous default workspace.

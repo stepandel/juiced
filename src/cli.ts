@@ -97,7 +97,7 @@ try {
   }
   if (!interrupted) {
     if (code === 'app_configuration_missing' || code === 'app_configuration_invalid' || code === 'app_not_configured') {
-      process.stderr.write('juiced: Cantelop credentials are missing or invalid. Run cantelop login and cantelop deploy in the Juiced project, then rebuild with npm run build.\n');
+      process.stderr.write('juiced: Cantelop app credentials are missing or invalid. Configure the SDK integration profile or set CANTELOP_APP_SLUG, CANTELOP_INTEGRATION_TOKEN, and optionally CANTELOP_EDGE_URL. See README.md for deployment setup.\n');
     } else if (code === 'session_runtime_mismatch') {
       process.stderr.write('juiced: the CLI and deployed runtime differ. Run npm run build and cantelop deploy from the same source.\n');
     } else process.stderr.write(`juiced: ${error instanceof Error ? error.message : 'Unable to start Claude'}\n`);

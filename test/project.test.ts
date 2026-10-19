@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, mkdir, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { selectProject, synchronizeProject } from '../src/project.js';
+import { selectProject, synchronizeProject, syncError } from '../src/project.js';
 import { validProjectName } from '../src/project-name.js';
 
 test('canonical directories select stable, separate workspaces and retain the local basename', async t => {
@@ -22,6 +22,13 @@ test('canonical directories select stable, separate workspaces and retain the lo
 test('project names cannot overlap account state or select another path', () => {
   for (const name of ['.claude', '.local', '', '../secret', 'a/b', 'a\\b', 'NODE_MODULES', 'x\x1b', 'trailing.']) assert.equal(validProjectName(name), false);
   assert.equal(validProjectName('My Project'), true);
+});
+
+test('sync adapter errors recommend repairing the SDK installation', () => {
+  const error = syncError({ code: 'sync_helper_unavailable' });
+  assert.match(error.message, /Reinstall Juiced and its SDK dependency/);
+  assert.equal((error as Error & { code: string }).code, 'sync_helper_unavailable');
+  assert.doesNotMatch(syncError({ code: 'sync_cli_upgrade_required' }).message, /Upgrade the Cantelop CLI/);
 });
 
 test('startup waits for initial reconciliation and shutdown flushes before releasing the handle', async () => {

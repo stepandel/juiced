@@ -23,7 +23,8 @@ export function syncError(error: unknown): Error {
     sync_invalid_state: 'This local directory was paired with another workspace or remote folder. Use its previous pairing or a fresh local directory.',
     sync_conflict: 'Local and remote files conflict. Both copies were preserved; resolve the conflicting paths before restarting.',
     sync_locked: 'Another sync process owns this local directory. Close that Juiced session before starting another.',
-    sync_cli_upgrade_required: 'Upgrade the Cantelop CLI to a release with the native sync helper.',
+    sync_helper_unavailable: 'The Cantelop SDK sync adapter is missing or could not start. Reinstall Juiced and its SDK dependency.',
+    sync_cli_upgrade_required: 'This Cantelop SDK requires an external sync helper. Upgrade Juiced to use the SDK with its bundled adapter.',
     invalid_sync_root: 'The deployed Cantelop platform does not support workspace-relative sync. Deploy the matching platform release first.',
     runtime_method_not_allowed: 'Deploy the matching Cantelop platform and rebuild the App Edge before using project sync.',
   };
