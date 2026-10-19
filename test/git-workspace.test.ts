@@ -266,3 +266,13 @@ test('a snapshot that cannot apply leaves the original checkout intact', async t
     assert.equal(await readFile(join(f.target, 'README.md'), 'utf8'), 'base\n');
   } finally { await upload.close(); await client.close(); }
 });
+
+test('detached HEAD workspaces import commits and require a source branch for fast-forward', async t => {
+  const f = await fixture(t); await git(f.local, ['checkout', '--detach']);
+  const client = await f.client(); await client.send(false);
+  await writeFile(join(f.target, 'detached'), 'agent'); await git(f.target, ['add', '.']); await git(f.target, ['commit', '-m', 'detached result']);
+  const imported = await client.receive();
+  assert.equal(imported.head, await gitText(f.target, ['rev-parse', 'HEAD']));
+  await assert.rejects(client.fastForward(), /source branch/);
+  await client.close();
+});

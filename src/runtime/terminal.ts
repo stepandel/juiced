@@ -40,8 +40,14 @@ export function createTerminal(
   let tty = false;
   let started = false;
   let stop: (() => void) | undefined;
+  let preparing: Promise<void> | undefined;
+  let prepared: (() => void) | undefined;
+  let prepareFailed: ((error: unknown) => void) | undefined;
 
   async function input(command: TerminalCommand): Promise<TerminalReply> {
+    // Startup can wait for shared checkout ownership and database credentials.
+    // Intake may already have accepted the client's initialization frame.
+    if (!child && preparing) await preparing;
     if (!child || !child.stdin || child.exitCode !== null || child.signalCode !== null) {
       throw new Error('The remote terminal is not running');
     }
@@ -119,6 +125,7 @@ export function createTerminal(
           { cwd: workingDirectory, env, detached: true, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
       : spawn(binary, command.argv, { cwd: workingDirectory, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child = running;
+    prepared?.();
     control = running.stdio[3] as Writable | undefined;
     running.stdin?.on('error', () => {});
     control?.on('error', () => {});
@@ -186,6 +193,9 @@ export function createTerminal(
   return {
     async run(command: Start, work: Work): Promise<TerminalReply> {
       validateStart(command);
+      if (preparing) throw new Error('Each session can start exactly one terminal');
+      preparing = new Promise<void>((resolve, reject) => { prepared = resolve; prepareFailed = reject; });
+      void preparing.catch(() => {});
       const workspace = options.workspace ?? process.cwd();
       const controller = new AbortController();
       let lease: Awaited<ReturnType<typeof acquireCheckout>> | undefined;
@@ -203,7 +213,8 @@ export function createTerminal(
           } else if (await readBinding(paths.metadata)) throw new Error('This Git workspace requires a matching Juiced Git session. Rebuild the local CLI.');
         }
         return await runTerminal(command, { ...work, signal: AbortSignal.any([work.signal, controller.signal]) });
-      } finally { await lease?.release(); }
+      } catch (error) { prepareFailed?.(error); throw error; }
+      finally { await lease?.release(); }
     },
     input,
     cancel() {

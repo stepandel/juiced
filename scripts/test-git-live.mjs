@@ -27,6 +27,7 @@ try {
   await writeFile(join(local, 'README.md'), token + '\n'); await git(local, ['add', 'README.md']);
   const indexBefore = await readFile(join(local, '.git', 'index'));
   const project = await selectProject(local, process.env.JUICED_WORKSPACE ?? 'default');
+  console.log(`Disposable Git project: ${project.remoteDirectory} (workspace ${project.workspace})`);
   cleanupCommand = `cd /workspace && rm -rf -- '${project.directoryName}' '.juiced/${project.directoryName}'`;
   const repository = await discoverRepository(local);
   const workspace = app.workspace({ slug: project.workspace });
@@ -40,9 +41,10 @@ try {
   first = new RemoteAgent(workspace.session({ keepAliveSeconds: 120 }), options);
   second = new RemoteAgent(workspace.session({ keepAliveSeconds: 120 }), options);
   const approved = new Map();
-  for (const agent of [first, second]) agent.on('approvals', () => {
+  const approvals = agent => agent.on('approvals', () => {
     for (const approval of agent.approvals.values()) void agent.answer(approval.id, approval.tool === 'Bash' && approval.input.command === approved.get(agent)).catch(error => { console.error(error.message); });
   });
+  approvals(first); approvals(second);
   runTurn = async (agent, command) => {
     approved.set(agent, command);
     let finish;
@@ -77,6 +79,13 @@ try {
   assert.equal((await readFile(join(local, 'agent.txt'), 'utf8')).trim(), token);
   passed('optional fast-forward refused dirty local work, then advanced the clean source branch');
   await second.close(); second = undefined;
+  await first.close(); first = undefined;
+  await client.close();
+  client = new GitWorkspaceClient(workspace, project, await discoverRepository(local), AbortSignal.timeout(5 * 60_000));
+  await client.send(false);
+  passed('closing both sessions released checkout ownership for a subsequent outbound sync');
+  first = new RemoteAgent(workspace.session({ keepAliveSeconds: 120 }), options); approvals(first);
+  await first.start(['--tools', 'Bash']);
   await runTurn(first, cleanupCommand); cleaned = true;
   passed('disposable remote checkout and transfer artifacts removed');
   report.commit = imported.head;

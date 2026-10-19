@@ -105,3 +105,11 @@ test('rejects malformed and oversized input and duplicate starts', { timeout: 10
   await f.terminal.run(start(['-e', 'process.exit(0)']), { signal: f.signal, output: f.output });
   await assert.rejects(f.terminal.run(start([]), { signal: f.signal, output: f.output }), /exactly one/);
 });
+
+test('input accepted during asynchronous process startup waits for the child', { timeout: 10_000 }, async t => {
+  const f = await fixture(t);
+  const running = f.terminal.run(start(['-e', 'process.stdin.pipe(process.stdout)']), { signal: f.signal, output: f.output });
+  await f.terminal.input({ type: 'input', data: Buffer.from('initialization during startup\n').toString('base64') });
+  await f.terminal.input({ type: 'eof' }); await running;
+  assert.equal(f.text(), 'initialization during startup\n');
+});
