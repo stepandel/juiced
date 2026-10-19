@@ -11,6 +11,7 @@ import { createGitRuntime, projectPaths, readBinding } from './git.js';
 import { acquireCheckout, acquireSessionCheckout, CheckoutBusy } from './project-state.js';
 import { inspectRemote } from './inspection.js';
 import { INSPECTION_TIMEOUT_MS, validateInspectionCommand } from '../inspection-protocol.js';
+import { saveSettings } from './settings.js';
 
 type Work = { signal: AbortSignal; output: SessionOutput<TerminalEvent> };
 type Start = Extract<TerminalCommand, { type: 'start' }>;
@@ -70,6 +71,10 @@ export function createTerminal(
         else if (child.pid) process.kill(-child.pid, command.signal);
         break;
       case 'heartbeat':
+        break;
+      case 'save-settings':
+        try { await saveSettings(options.workspace ?? process.cwd(), command.settings, context.signal); }
+        catch (error) { return { ok: false, error: error instanceof Error ? error.message : 'Unable to save Claude settings' }; }
         break;
       default:
         throw new Error('The terminal has already been started');
@@ -268,8 +273,10 @@ export async function receiveTerminal(context: SessionContext<TerminalCommand, T
     }, { timeoutMs: 90_000, onCancel: () => { terminal.cancel(); } });
   } else {
     try {
-      await terminal.input(command);
+      const reply = await terminal.input(command);
       context.activity.extend(90_000);
+      context.reply(reply);
+      return;
     } catch (error) {
       // Dispatch confirms queue acceptance. Report later delivery failures on
       // the output stream so a local UI never mistakes acceptance for success.

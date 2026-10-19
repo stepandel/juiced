@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionEventCursor, SessionRef } from '@cantelop/sdk';
 import { MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, type Approval, type ClaudeFrame, type ModelOption, type SlashCommand } from './agent-protocol.js';
+import type { SavedSettings } from './settings.js';
 
 export type AgentSession = Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'>;
 export type AgentStatus = 'connecting' | 'ready' | 'working' | 'configuring' | 'interrupting' | 'closed' | 'failed';
@@ -68,9 +69,10 @@ export class RemoteAgent extends EventEmitter {
   async start(argv: string[] = []): Promise<void> {
     if (this.started) throw new Error('The agent has already started');
     this.started = true;
+    let requestedModel: string | undefined;
     for (let i = 0; i < argv.length; i++) {
-      if (argv[i] === '--model' && argv[i + 1]) this.model = argv[++i]!;
-      else if (argv[i]!.startsWith('--model=')) this.model = argv[i]!.slice('--model='.length);
+      if (argv[i] === '--model' && argv[i + 1]) requestedModel = argv[++i]!;
+      else if (argv[i]!.startsWith('--model=')) requestedModel = argv[i]!.slice('--model='.length);
     }
     try {
       const reply = await this.session.request({ type: 'start', argv: headlessArguments(argv), tty: false, columns: 120, rows: 36, term: 'dumb', ...(this.options.directoryName ? { directoryName: this.options.directoryName } : {}), ...(this.options.git ? { git: this.options.git } : {}) }, { timeoutMs: 120_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(125_000)]) });
@@ -87,6 +89,11 @@ export class RemoteAgent extends EventEmitter {
       for (const key of ['agents', 'output_style', 'available_output_styles', 'current_permission_mode', 'fast_mode_state', 'fast_mode_disabled_reason']) {
         if (initialized[key] !== undefined) this.info[key] = initialized[key];
       }
+      // initialize does not report the model loaded from settings.json.
+      const settings = await this.control({ subtype: 'get_settings' });
+      // Keep the chosen alias when available; applied.model is a resolved ID.
+      const model = requestedModel ?? object(settings.effective).model ?? object(settings.applied).model;
+      if (typeof model === 'string' && model) this.model = model;
       this.emit('models', this.models);
       this.emit('model', this.model);
       this.setStatus('ready');
@@ -148,8 +155,20 @@ export class RemoteAgent extends EventEmitter {
       await this.control({ subtype: 'set_model', model });
       this.model = model;
       this.emit('model', model);
+      await this.persist({ model });
     } finally {
       if (!this.controller.signal.aborted) this.setStatus('ready');
+    }
+  }
+
+  private async persist(settings: SavedSettings): Promise<void> {
+    try {
+      const reply = await this.session.request({ type: 'save-settings', settings }, {
+        timeoutMs: 15_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(20_000)]),
+      });
+      if (!reply?.ok) throw new Error(reply && 'error' in reply ? reply.error : 'The runtime did not confirm the save');
+    } catch (error) {
+      throw new Error(`Changed for this session, but could not save for future sessions: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   }
 
@@ -170,10 +189,18 @@ export class RemoteAgent extends EventEmitter {
     this.setStatus('configuring');
     try {
       const response = await this.control(request);
-      if (request.subtype === 'set_permission_mode') this.info.current_permission_mode = request.mode;
+      if (request.subtype === 'set_permission_mode') {
+        this.info.current_permission_mode = request.mode;
+        await this.persist({ permissionMode: request.mode });
+      }
       if (request.subtype === 'apply_flag_settings') {
         if (typeof request.settings.outputStyle === 'string') this.info.output_style = request.settings.outputStyle;
         if (typeof request.settings.fastMode === 'boolean') this.info.fast_mode_state = request.settings.fastMode ? 'on' : 'off';
+        const saved: SavedSettings = {};
+        if (typeof request.settings.effortLevel === 'string') saved.effortLevel = request.settings.effortLevel;
+        if (typeof request.settings.outputStyle === 'string') saved.outputStyle = request.settings.outputStyle;
+        if (typeof request.settings.fastMode === 'boolean') saved.fastMode = request.settings.fastMode;
+        if (Object.keys(saved).length) await this.persist(saved);
       }
       if (request.subtype === 'reload_plugins') {
         this.updateCommands(response.commands);

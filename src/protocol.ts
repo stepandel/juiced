@@ -1,5 +1,6 @@
 import type { GitCommand, GitEvent, GitResult, StaleLease } from './git-protocol.js';
 import type { InspectionCommand, InspectionEvent } from './inspection-protocol.js';
+import type { SavedSettings } from './settings.js';
 
 export type TerminalCommand =
   | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string; directoryName?: string; git?: { binding: string; relativeDirectory: string } }
@@ -8,6 +9,7 @@ export type TerminalCommand =
   | { type: 'signal'; signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP' }
   | { type: 'eof' }
   | { type: 'heartbeat' }
+  | { type: 'save-settings'; settings: SavedSettings }
   | GitCommand
   | InspectionCommand;
 

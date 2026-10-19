@@ -38,13 +38,13 @@ test('native runtime keeps terminal work alive after start intake and handles in
     process.chdir(previousDirectory);
     await rm(workspace, { recursive: true, force: true });
   });
-  const submit = async (payload: TerminalCommand) => {
+  const submit = async (payload: TerminalCommand, expected: TerminalReply = { ok: true }) => {
     const id = `msg_${randomUUID().replaceAll('-', '')}`;
     await request('/__cantelop/v2/messages', { session: { id: 'test', workspace_id: `wsp_${'2'.repeat(32)}`, keep_alive_seconds: 120 }, message: { id, payload }, reply: true });
     for (let i = 0; i < 100; i++) {
       const status = await request(`/__cantelop/v2/messages/${id}`);
       if (status.state === 'succeeded') {
-        assert.deepEqual(await request(`/__cantelop/v2/messages/${id}/reply`), { reply: { ok: true } });
+        assert.deepEqual(await request(`/__cantelop/v2/messages/${id}/reply`), { reply: expected });
         return;
       }
       assert.notEqual(status.state, 'failed', JSON.stringify(status));
@@ -66,6 +66,9 @@ test('native runtime keeps terminal work alive after start intake and handles in
   };
   await submit({ type: 'start', tty: false, columns: 80, rows: 24, term: 'xterm-256color', argv: ['-e', `console.log('READY'); process.stdin.pipe(process.stdout); process.stdin.on('end',()=>process.exitCode=4);`] });
   await drainUntil(() => events.some(event => event.type === 'output'));
+  await submit({ type: 'save-settings', settings: { model: 'sonnet', permissionMode: 'plan' } });
+  assert.deepEqual(JSON.parse(await readFile(join(workspace, '.claude', 'settings.json'), 'utf8')), { model: 'sonnet', permissions: { defaultMode: 'plan' } });
+  await submit({ type: 'save-settings', settings: { model: 'invalid model' } }, { ok: false, error: 'Invalid saved settings' });
   const first = await request('/__cantelop/v2/runtime');
   assert.ok(first.activity);
   await delay(10);

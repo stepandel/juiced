@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import { ClaudeDecoder } from '../src/agent-protocol.ts';
 import { RemoteAgent } from '../src/remote-agent.ts';
 import { commandMenu } from '../src/tui/command-menus.ts';
+import { saveSettings } from '../src/runtime/settings.ts';
 
 const binary = process.argv[2];
 if (!binary) throw new Error('Pass the path to an installed Claude binary. No model prompts will be sent.');
@@ -26,11 +27,16 @@ const publish = data => {
 const session = {
   id: 'local-menu-verification',
   async request(command) {
+    if (command.type === 'save-settings') {
+      await saveSettings(directory, command.settings, new AbortController().signal);
+      return { ok: true };
+    }
     assert.equal(command.type, 'start'); assert.equal(command.tty, false);
+    events.length = 0;
     child = spawn(resolve(binary), command.argv, {
       cwd: directory,
       // Fresh settings, no inherited API keys, no project hooks or account changes.
-      env: { PATH: process.env.PATH, ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}), CLAUDE_CONFIG_DIR: directory, DISABLE_AUTOUPDATER: '1' },
+      env: { PATH: process.env.PATH, ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}), HOME: directory, CLAUDE_CONFIG_DIR: join(directory, '.claude'), DISABLE_AUTOUPDATER: '1' },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     child.stdout.on('data', bytes => publish({ type: 'output', channel: 'stdout', data: bytes.toString('base64') }));
@@ -61,7 +67,7 @@ const session = {
     try { await exited; } finally { clearTimeout(timeout); }
   },
 };
-const agent = new RemoteAgent(session, { controlTimeoutMs: 10_000 });
+let agent = new RemoteAgent(session, { controlTimeoutMs: 10_000 });
 const deadline = setTimeout(() => { child?.kill('SIGKILL'); }, 45_000);
 try {
   await agent.start();
@@ -70,7 +76,7 @@ try {
     assert.ok(page.title);
     console.log(`PASS /${name}: ${page.items.length} entries`);
   }
-  const model = agent.models[0];
+  const model = agent.models.find(model => model.value !== 'default');
   assert.ok(model, 'Claude must advertise at least one model');
   await agent.setModel(model.value);
   if (model.supportedEffortLevels?.length) {
@@ -84,14 +90,40 @@ try {
     assert.equal((await agent.query({ subtype: 'get_settings' })).effective.outputStyle, style);
   }
   await agent.configure({ subtype: 'set_permission_mode', mode: 'plan' });
-  await agent.configure({ subtype: 'set_permission_mode', mode: 'default' });
   const memory = await agent.query({ subtype: 'read_file', path: join(directory, 'CLAUDE.md'), max_bytes: 32768 });
   assert.ok(memory.contents.includes('model-free menu compatibility test'));
   await agent.configure({ subtype: 'rename_session', title: 'Menu compatibility test' });
   await agent.configure({ subtype: 'reload_skills' });
   await agent.configure({ subtype: 'reload_plugins' });
+  await agent.close();
+  agent = new RemoteAgent(session, { controlTimeoutMs: 10_000 });
+  await agent.start();
+  assert.equal(agent.model, model.value);
+  assert.equal(agent.info.current_permission_mode, 'plan');
+  if (model.supportedEffortLevels?.length) assert.equal((await agent.query({ subtype: 'get_settings' })).applied.effort, model.supportedEffortLevels[0]);
+  if (style) assert.equal(agent.info.output_style, style);
+  await agent.close();
+  agent = new RemoteAgent(session, { controlTimeoutMs: 10_000 });
+  await agent.start(['--model', 'sonnet', '--permission-mode', 'default']);
+  assert.equal(agent.model, 'sonnet');
+  assert.equal(agent.info.current_permission_mode, 'default');
+  // Launch overrides must not replace saved defaults; choosing Default must.
+  await agent.close();
+  agent = new RemoteAgent(session, { controlTimeoutMs: 10_000 });
+  await agent.start();
+  assert.equal(agent.model, model.value);
+  assert.equal(agent.info.current_permission_mode, 'plan');
+  await agent.setModel('default');
+  await agent.configure({ subtype: 'set_permission_mode', mode: 'default' });
+  await agent.configure({ subtype: 'apply_flag_settings', settings: { fastMode: false } });
+  await agent.close();
+  agent = new RemoteAgent(session, { controlTimeoutMs: 10_000 });
+  await agent.start();
+  assert.equal(agent.model, 'default');
+  assert.equal(agent.info.current_permission_mode, 'default');
+  assert.equal(agent.info.fast_mode_state, 'off');
   assert.equal(userFrames, 0);
-  console.log('PASS confirmed changes in the same process; zero model prompts');
+  console.log('PASS settings survive fresh processes; explicit flags override saved defaults; zero model prompts');
 } catch (error) {
   if (diagnostics) console.error(diagnostics);
   throw error;

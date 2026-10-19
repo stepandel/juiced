@@ -103,9 +103,10 @@ Interactive sessions use local prompt editing and streamed remote responses.
 Enter sends, Alt+Enter adds a line, Esc interrupts, and /exit quits.
 Claude flags configure the remote process. -p, --help, --version, and pipes
 use native CLI passthrough.
-Each invocation starts a new session. Files and Claude login persist in the
-remote workspace. Git repositories initialize from local HEAD once, then retain
-remote commits and edits. Use sync to explicitly transfer commits; fast-forward
+Each invocation starts a new session. Files, Claude login, and confirmed menu
+settings persist in the remote workspace. Git repositories initialize from local
+HEAD once, then retain remote commits and edits. Use sync to explicitly transfer
+commits; fast-forward
 optionally applies imported commits to a clean local source branch. To include
 uncommitted work, run sync --to-workspace --include-uncommitted before launching.
 Delete removes the entire remote workspace, including its files and Claude login.

@@ -165,6 +165,50 @@ test('model metadata uses provider names without inventing a fallback catalog', 
   ]);
 });
 
+test('startup displays Claude’s effective saved model and explicit launch overrides without saving them', async t => {
+  for (const model of ['provider.saved-model', 'sonnet']) {
+    const f = fixture({}, {}, 'success', { get_settings: { effective: { model: 'provider.saved-model' }, applied: { model } } });
+    t.after(() => f.agent.close());
+    await f.agent.start(model === 'sonnet' ? ['--model', 'sonnet'] : []);
+    assert.equal(f.agent.model, model);
+    assert.equal(f.commands.some(command => command.type === 'save-settings'), false);
+  }
+});
+
+test('only acknowledged menu choices are saved, including false and default values', async t => {
+  const f = fixture(); t.after(() => f.agent.close()); await f.agent.start();
+  await f.agent.setModel('sonnet');
+  await f.agent.configure({ subtype: 'set_permission_mode', mode: 'acceptEdits' });
+  await f.agent.configure({ subtype: 'apply_flag_settings', settings: { effortLevel: 'high', outputStyle: 'Learning', fastMode: false } });
+  await f.agent.configure({ subtype: 'set_permission_mode', mode: 'default' });
+  await f.agent.configure({ subtype: 'rename_session', title: 'Only this conversation' });
+  assert.deepEqual(f.commands.filter(command => command.type === 'save-settings').map(command => command.settings), [
+    { model: 'sonnet' }, { permissionMode: 'acceptEdits' }, { effortLevel: 'high', outputStyle: 'Learning', fastMode: false }, { permissionMode: 'default' },
+  ]);
+  assert.equal(f.frames.some(frame => frame.type === 'user'), false);
+
+  const rejected = fixture({}, {}, 'error', { set_permission_mode: new Error('Rejected'), apply_flag_settings: new Error('Rejected') });
+  t.after(() => rejected.agent.close()); await rejected.agent.start();
+  await assert.rejects(rejected.agent.setModel('sonnet'));
+  await assert.rejects(rejected.agent.configure({ subtype: 'set_permission_mode', mode: 'acceptEdits' }));
+  await assert.rejects(rejected.agent.configure({ subtype: 'apply_flag_settings', settings: { fastMode: true } }));
+  assert.equal(rejected.commands.some(command => command.type === 'save-settings'), false);
+});
+
+test('save failures report that the current choice applied and keep the session usable', async t => {
+  const f = fixture(); t.after(() => f.agent.close()); await f.agent.start();
+  const request = f.session.request;
+  f.session.request = async (command, options) => command.type === 'save-settings' ? { ok: false, error: 'Disk full' } : request(command, options);
+  await assert.rejects(f.agent.setModel('sonnet'), /Changed for this session, but could not save for future sessions: Disk full/);
+  assert.equal(f.agent.model, 'sonnet');
+  await assert.rejects(f.agent.configure({ subtype: 'set_permission_mode', mode: 'plan' }), /could not save/);
+  assert.equal(f.agent.info.current_permission_mode, 'plan');
+  await assert.rejects(f.agent.configure({ subtype: 'apply_flag_settings', settings: { outputStyle: 'Learning' } }), /could not save/);
+  assert.equal(f.agent.info.output_style, 'Learning');
+  assert.equal(f.agent.status, 'ready');
+  await f.agent.submit('Still usable');
+});
+
 test('menu reads and changes use the same control channel without prompt synchronization or user turns', async t => {
   let syncs = 0;
   const f = fixture({ beforeSubmit: async () => { syncs++; } }, { output_style: 'Custom', available_output_styles: ['Custom'], account: { secret: 'private' } }, 'success', { get_settings: { effective: { effortLevel: 'low' } } });
@@ -255,12 +299,13 @@ test('large prompts retain frame boundaries and output replay resumes a split UT
   assert.ok(f.commands.filter(command => command.type === 'input').every(command => Buffer.from(command.data, 'base64').length <= 16 * 1024));
   const raw = Buffer.from('{"type":"result","result":"🍈"}\n');
   const split = raw.indexOf(Buffer.from('🍈')) + 1;
+  const beforeSplit = f.events.length;
   f.breakNextStream(); f.bytes(raw.subarray(0, split));
   await delay(20); f.bytes(raw.subarray(split));
   await until(() => received.some(frame => frame.type === 'result'));
   assert.equal(received.filter(frame => frame.type === 'result').length, 1);
   assert.equal(f.after.length, 2);
-  assert.equal((f.after[1] as { sequence: number }).sequence, 2);
+  assert.equal((f.after[1] as { sequence: number }).sequence, beforeSplit + 1);
 });
 
 test('unknown control requests fail closed; cancellation removes stale approvals', async t => {

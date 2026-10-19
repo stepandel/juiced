@@ -3,9 +3,9 @@ import type { RemoteAgent } from '../remote-agent.js';
 import type { MenuItem, MenuPage, MenuResult } from './menu.js';
 
 export const menuCommands: SlashCommand[] = [
-  ['config', 'Browse session settings', '[key=value]'], ['settings', 'Browse session settings', '[key=value]'],
-  ['effort', 'Choose model effort for this session', '[level]'], ['fast', 'Manage fast mode for this session', '[on|off]'],
-  ['output-style', 'Choose an output style for this session', '[name]'],
+  ['config', 'Browse workspace settings', '[key=value]'], ['settings', 'Browse workspace settings', '[key=value]'],
+  ['effort', 'Choose default model effort', '[level]'], ['fast', 'Manage default fast mode', '[on|off]'],
+  ['output-style', 'Choose a default output style', '[name]'],
   ['permissions', 'Choose permission mode and inspect configured rules', ''], ['mcp', 'Manage connected MCP servers', ''],
   ['hooks', 'Inspect configured hooks', ''], ['tasks', 'Inspect and stop background tasks', ''],
   ['agents', 'Browse available agents', ''], ['skills', 'Browse available skills and commands', ''],
@@ -96,7 +96,7 @@ export async function commandMenu(agent: RemoteAgent, name: string, argument = '
       return commandMenu(agent, command, value);
     }
     const settings = await agent.query({ subtype: 'get_settings' });
-    return { title: 'Session settings', description: 'Changes here apply to this running session.', items: [
+    return { title: 'Workspace settings', description: 'Confirmed changes are saved for future sessions in this remote workspace.', items: [
       ...[['model', `Model: ${agent.model}`], ['effort', `Effort: ${str(object(settings.applied).effort, 'default')}`], ['output-style', `Output style: ${str(agent.info.output_style, 'default')}`], ['fast', `Fast mode: ${str(agent.info.fast_mode_state, 'unavailable')}`], ['permissions', `Permissions: ${str(agent.info.current_permission_mode, 'default')}`]].map(([command, label]) => ({ id: command!, label: label!, run: () => open(command!) })),
       { id: 'effective', label: 'Inspect effective settings', run: () => inspect('Effective settings', settings.effective, () => open('config')) },
       ...records(settings.sources).map((source, index) => ({ id: `source-${index}`, label: `Source: ${str(source.source, String(index))}`, run: () => inspect('Settings source', source, () => open('config')) })),
@@ -110,23 +110,23 @@ export async function commandMenu(agent: RemoteAgent, name: string, argument = '
     if (!levels.length) return { title: 'Choose effort', description: 'Claude did not advertise effort levels for this model. Choose a supported model with /model first.', items: [] };
     if (argument && !levels.includes(argument)) throw new Error(`Claude offers these effort levels for this model: ${levels.join(', ')}`);
     const choices = argument ? [argument] : levels;
-    return { title: 'Choose effort', description: 'For this session; available levels come from Claude’s model catalog.', items: choices.map(level => ({ id: level, label: level, current: level === current, run: async () => {
-      await agent.configure({ subtype: 'apply_flag_settings', settings: { effortLevel: level } }); return message(`Effort changed to ${level} for this session`);
+    return { title: 'Choose effort', description: 'Saved for this workspace; available levels come from Claude’s model catalog.', items: choices.map(level => ({ id: level, label: level, current: level === current, run: async () => {
+      await agent.configure({ subtype: 'apply_flag_settings', settings: { effortLevel: level } }); return message(`Effort changed to ${level}`);
     } })) };
   }
   if (name === 'output-style') {
     const styles = strings(agent.info.available_output_styles);
     if (argument && !styles.includes(argument)) throw new Error('Choose an output style from the remote Claude catalog.');
-    return { title: 'Choose output style', description: 'For this session; styles come from the remote workspace.', items: (argument ? [argument] : styles).map(style => ({ id: style, label: style, current: style === agent.info.output_style, run: async () => {
-      await agent.configure({ subtype: 'apply_flag_settings', settings: { outputStyle: style } }); return message(`Output style changed to ${style} for this session`);
+    return { title: 'Choose output style', description: 'Saved for this workspace; styles come from the remote workspace.', items: (argument ? [argument] : styles).map(style => ({ id: style, label: style, current: style === agent.info.output_style, run: async () => {
+      await agent.configure({ subtype: 'apply_flag_settings', settings: { outputStyle: style } }); return message(`Output style changed to ${style}`);
     } })) };
   }
   if (name === 'fast') {
     if (argument && !['on', 'off'].includes(argument)) throw new Error('Use /fast on or /fast off.');
     const reason = str(agent.info.fast_mode_disabled_reason);
     const supported = agent.models.find(model => model.value === agent.model || model.resolvedModel === agent.model)?.supportsFastMode;
-    return { title: 'Fast mode', description: reason ? `Claude reports fast mode unavailable: ${reason}` : supported ? 'Fast mode changes token pricing. This setting applies to this session.' : 'Claude did not advertise fast mode for this model.', items: (argument ? [argument] : ['off', 'on']).map(value => ({
-      id: value, label: value, current: agent.info.fast_mode_state === value, disabled: value === 'on' && (!!reason || !supported), run: () => confirm('Change fast mode?', `Set fast mode ${value} for this session. Fast mode can increase token pricing.`, () => open('fast'), async () => {
+    return { title: 'Fast mode', description: reason ? `Claude reports fast mode unavailable: ${reason}` : supported ? 'Fast mode changes token pricing. This setting is saved for future sessions in this workspace.' : 'Claude did not advertise fast mode for this model.', items: (argument ? [argument] : ['off', 'on']).map(value => ({
+      id: value, label: value, current: agent.info.fast_mode_state === value, disabled: value === 'on' && (!!reason || !supported), run: () => confirm('Change fast mode?', `Save fast mode ${value} for this workspace. Fast mode can increase token pricing.`, () => open('fast'), async () => {
         await agent.configure({ subtype: 'apply_flag_settings', settings: { fastMode: value === 'on' } }); return message(`Fast mode ${value}`);
       }),
     })) };
@@ -134,11 +134,11 @@ export async function commandMenu(agent: RemoteAgent, name: string, argument = '
   if (name === 'permissions') {
     const settings = await agent.query({ subtype: 'get_settings' });
     const rules = object(object(settings.effective).permissions);
-    return { title: 'Permissions', description: 'Mode changes affect this session. Configured rules are shown read-only; the pinned Claude API cannot edit them.', items: [
+    return { title: 'Permissions', description: 'Mode changes are saved for future sessions in this workspace. Configured rules are read-only; the pinned Claude API cannot edit them.', items: [
       ...[
         ['default', 'Default', 'Ask for approval when required.'], ['acceptEdits', 'Accept edits', 'Allow file edits automatically; other actions still follow Claude’s permission rules.'],
         ['plan', 'Plan', 'Plan work without making edits.'], ['dontAsk', 'Don’t ask', 'Deny actions that are not already approved.'],
-      ].map(([mode, label, description]) => ({ id: mode!, label: label!, description: description!, current: agent.info.current_permission_mode === mode, run: () => confirm('Change permission mode?', description!, () => open('permissions'), async () => {
+      ].map(([mode, label, description]) => ({ id: mode!, label: label!, description: description!, current: agent.info.current_permission_mode === mode, run: () => confirm('Change permission mode?', `${description!} Saved for future sessions in this workspace.`, () => open('permissions'), async () => {
         await agent.configure({ subtype: 'set_permission_mode', mode: mode! }); return message(`Permission mode changed to ${label}`);
       }) })),
       ...['allow', 'ask', 'deny'].map(kind => ({ id: kind, label: `${kind}: ${strings(rules[kind]).length} configured rules`, run: () => inspect(`${kind} rules`, rules[kind] ?? [], () => open('permissions')) })),

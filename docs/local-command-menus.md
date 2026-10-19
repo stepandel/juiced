@@ -5,8 +5,15 @@ on Cantelop. The renderer handles selection, filtering, nested pages, text input
 resize, cancel, errors, and pending confirmations. Typing and back navigation do
 not send network requests. Opening a remote data view fetches a snapshot;
 confirming a change sends a control request to the existing Claude process.
-Settings changes apply to this session and are shown as successful only after
-Claude acknowledges them. They do not submit user prompts or spend model turns.
+Model, effort, output style, fast mode, and permission mode changes apply to the
+running session after Claude acknowledges them, then save to the remote workspace’s
+`/workspace/.claude/settings.json`. New sessions load these defaults through
+Claude’s native settings resolution; command-line flags override them for one
+invocation. The defaults follow the workspace across clients and stay outside
+project sync and Git transfers. Other settings and permission rules are preserved.
+A failed save is reported explicitly; the running session retains its applied
+choice. Individual tool approvals remain one-time grants. Settings changes do not
+submit user prompts or spend model turns.
 
 Catalogs come from Claude: models and their effort levels, output styles,
 commands and aliases, agents, MCP servers, loaded memory files, and context
@@ -18,8 +25,8 @@ permission mode choices; it does not maintain a separate model catalog.
 | Command | Local behavior | Limitations |
 | --- | --- | --- |
 | `/model [name]` | Provider catalog, current selection, switch after acknowledgment | Direct names accept full model IDs |
-| `/effort [level]` | Levels advertised for the current model | Session setting; no fabricated fallback levels |
-| `/output-style [name]` | Styles advertised by the remote workspace | Session setting; restart to discover new styles |
+| `/effort [level]` | Levels advertised for the current model | Saved workspace default; no fabricated fallback levels |
+| `/output-style [name]` | Styles advertised by the remote workspace | Saved workspace default; restart to discover new styles |
 | `/config`, `/settings` | Model, effort, style, fast mode, permissions, effective settings and sources | Credentials redacted; supported `key=value` entries open the relevant picker; other settings are read-only |
 | `/fast [on\|off]` | Current state, availability reason, confirmed change | Disabled when Claude reports an account, model, or SDK restriction |
 | `/permissions` | Mode selector, explicit confirmation, allow/ask/deny rule browser | Rule editing, auto-mode setup, and bypass mode are not exposed |
@@ -59,8 +66,8 @@ node --import tsx scripts/test-menus-local.mjs /path/to/claude
 ```
 
 The script uses a fresh temporary configuration and directory, reads menu data,
-checks session-only settings, rejects any attempted user frame, and removes its
-temporary files. It does not verify hosted latency, subscription entitlements,
+checks settings across fresh processes, rejects any attempted user frame, and
+removes its temporary files. It does not verify hosted latency, subscription entitlements,
 MCP OAuth, or native-only screens.
 
 Add new commands in `src/tui/command-menus.ts` using `MenuPage`/`MenuItem`; add

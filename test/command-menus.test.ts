@@ -158,13 +158,13 @@ test('settings and nested menus navigate locally, reject paste confirmation, and
   const f = ui(a);
   try {
     await f.wait(() => f.latest.includes('Enter send'));
-    await f.command('/config'); await f.wait(() => f.latest.includes('Session settings'));
+    await f.command('/config'); await f.wait(() => f.latest.includes('Workspace settings'));
     assert.equal(a.queries.length, 1);
     f.stdin.write('output'); await f.wait(() => f.latest.includes('Filter: output'));
     assert.equal(a.queries.length, 1, 'Filtering must not send remote requests');
     f.stdin.write('\r'); await f.wait(() => f.latest.includes('Choose output style'));
     assert.equal(a.queries.length, 1, 'Known catalogs need no round trip when opening a picker');
-    f.stdin.write('\x1b'); await f.wait(() => f.latest.includes('Session settings'));
+    f.stdin.write('\x1b'); await f.wait(() => f.latest.includes('Workspace settings'));
     assert.equal(a.queries.length, 1, 'Back uses the local page snapshot');
     f.stdin.write('\x1b'); await f.wait(() => !f.latest.includes('Filter: output'));
     f.stdin.write('\x1b'); await f.wait(() => f.latest.includes('Enter send'));
