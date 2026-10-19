@@ -111,3 +111,8 @@ named disposable Git project in `JUICED_WORKSPACE` (default `default`), which
 must already be signed in to Claude. It approves only exact fixture Bash
 commands, checks two concurrent sessions, imports and fast-forwards an agent
 commit, and removes its remote fixture. It uses the Claude subscription.
+
+Hosted verification passed on October 19, 2026 against Juiced v8, alongside 59
+local tests and both builds. It covered the snapshot, two concurrent sessions,
+commit import, optional fast-forward, and outbound sync after session shutdown.
+See [verification evidence](../diagnostics/git-release-2026-10-19.json).

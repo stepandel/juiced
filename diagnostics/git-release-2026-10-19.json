@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-19T17:42:32.660Z",
+  "checks": [
+    "unpublished HEAD and staged snapshot transferred without changing the local index",
+    "two separate Claude sessions attached to the same Git checkout",
+    "outbound checkout replacement refused while sessions were active",
+    "remote commit imported with its original identity while local HEAD and snapshot stayed unchanged",
+    "optional fast-forward refused dirty local work, then advanced the clean source branch",
+    "closing both sessions released checkout ownership for a subsequent outbound sync",
+    "disposable remote checkout and transfer artifacts removed"
+  ],
+  "initialTransferMs": 7913,
+  "remoteCommit": "1d778a7ff85cc941fefb0853f107200ae2f1daa5",
+  "sourceCommit": "e6da3a4f9b5a3d3c490d8cc7c86cb0e0855aeafe",
+  "release": {
+    "version": 8,
+    "id": "rel_a8791118a314bb0d4dbc310041d12810",
+    "status": "active"
+  },
+  "sdkVersion": "1.2.0",
+  "platformChanges": false,
+  "sdkChanges": false,
+  "localVerification": {
+    "testsPassed": 59,
+    "typeCheck": "passed",
+    "cliBuild": "passed",
+    "runtimeBuild": "passed"
+  },
+  "failedRunFixturesRemoved": 3
+}
