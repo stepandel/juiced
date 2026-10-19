@@ -295,3 +295,40 @@ test('client session stop clears exact checkout registrations after sandbox term
   assert.throws(() => session.request({ type: 'heartbeat' }), /has stopped/);
   await lease.release();
 });
+
+test('remote metadata initializes and refreshes existing workspaces without changing files, index or HEAD', { timeout: 30_000 }, async t => {
+  const f = await fixture(t);
+  await git(f.local, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
+  await git(f.local, ['config', 'branch.main.remote', 'origin']);
+  await git(f.local, ['config', 'branch.main.merge', 'refs/heads/main']);
+  let client = await f.client();
+  await client.send(false, true);
+  assert.equal(await gitText(f.target, ['remote', 'get-url', 'origin']), 'https://github.com/owner/repo.git');
+  assert.equal(await gitText(f.target, ['config', 'branch.main.merge']), 'refs/heads/main');
+  await writeFile(join(f.target, 'README.md'), 'agent uncommitted work\n');
+  await git(f.target, ['add', 'README.md']);
+  const head = await gitText(f.target, ['rev-parse', 'HEAD']);
+  const index = await readFile(join(f.target, '.git', 'index'));
+  await git(f.target, ['remote', 'add', 'agent-added', 'https://example.test/agent.git']);
+  await git(f.local, ['remote', 'set-url', 'origin', 'https://github.com/owner/new.git']);
+  await git(f.local, ['remote', 'set-url', '--push', 'origin', 'ssh://git@github.com/owner/push.git']);
+  client = await f.client();
+  await client.send(false, true);
+  assert.equal(await gitText(f.target, ['remote', 'get-url', 'origin']), 'https://github.com/owner/new.git');
+  assert.equal(await gitText(f.target, ['remote', 'get-url', '--push', 'origin']), 'https://github.com/owner/push.git');
+  assert.equal(await gitText(f.target, ['remote', 'get-url', 'agent-added']), 'https://example.test/agent.git');
+  assert.equal(await gitText(f.target, ['rev-parse', 'HEAD']), head);
+  assert.deepEqual(await readFile(join(f.target, '.git', 'index')), index);
+  assert.equal(await readFile(join(f.target, 'README.md'), 'utf8'), 'agent uncommitted work\n');
+  await git(f.local, ['remote', 'remove', 'origin']);
+  client = await f.client(); await client.send(false, true);
+  assert.equal(await gitText(f.target, ['remote']), 'agent-added');
+});
+
+test('credentialed remote URLs fail before transfer without disclosing the token', async t => {
+  const f = await fixture(t);
+  await git(f.local, ['remote', 'add', 'origin', 'https://user:fixture-private-token@github.com/owner/repo.git']);
+  const client = await f.client();
+  await assert.rejects(client.send(false, true), error => error instanceof Error && !error.message.includes('fixture-private-token') && /credentials/.test(error.message));
+  assert.equal(f.commands.some(command => command.action === 'begin'), false);
+});

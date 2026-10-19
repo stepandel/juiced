@@ -1,3 +1,5 @@
+import type { GitRemoteConfiguration } from './git-remotes.js';
+
 export const UPLOAD_CHUNK_BYTES = 192 * 1024;
 export const DOWNLOAD_CHUNK_BYTES = 32 * 1024;
 export const MAX_TRANSFER_BYTES = 512 * 1024 * 1024;
@@ -12,6 +14,7 @@ export type ExportManifest = { head: string; sourceBranch: string | null; file: 
 export type StaleLease = { session: string; token: string };
 export type GitCommand = { type: 'git'; directoryName: string; binding: string } & (
   | { action: 'status' }
+  | { action: 'configure'; configuration: GitRemoteConfiguration }
   | { action: 'begin'; id: string; manifest: UploadManifest }
   | { action: 'chunk'; id: string; file: TransferFile; offset: number; data: string }
   | { action: 'apply'; id: string; initializeOnly: boolean }

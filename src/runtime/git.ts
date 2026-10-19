@@ -2,6 +2,7 @@ import { createReadStream } from 'node:fs';
 import { cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
+import { applyRemoteConfiguration, validateRemoteConfiguration, type GitRemoteConfiguration } from '../git-remotes.js';
 import { ancestor, cleanRepository, fileInfo, git, gitText } from '../git.js';
 import { DOWNLOAD_CHUNK_BYTES, MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, validTransferId, type ExportManifest, type GitCommand, type GitEvent, type GitResult, type UploadManifest } from '../git-protocol.js';
 import { validProjectName } from '../project-name.js';
@@ -103,6 +104,23 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
     };
 
     switch (command.action) {
+      case 'configure': {
+        validateRemoteConfiguration(command.configuration);
+        if (!current) throw new Error('Initialize the Git workspace before configuring remotes.');
+        if (current.sourceBranch !== command.configuration.branch) throw new Error('The local branch changed. Select a fresh --workspace for that branch.');
+        const path = join(paths.metadata, 'remotes.json');
+        const desired = JSON.stringify(command.configuration);
+        const stored = await readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
+        if (stored === desired) return {};
+        return maintenance(async signal => {
+          const latest = await readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
+          if (latest === desired) return {};
+          const previous = latest ? JSON.parse(latest) as GitRemoteConfiguration : undefined;
+          await applyRemoteConfiguration(paths.target, command.configuration, previous, signal);
+          await atomicJSON(path, command.configuration);
+          return {};
+        });
+      }
       case 'status': {
         if (await exists(join(paths.metadata, 'journal.json'))) await maintenance(async () => {});
         const lease = await acquireCheckout(await context.database(), project, context.session.id, 'session', () => {});

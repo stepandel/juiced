@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionEventCursor, SessionRef, WorkspaceRef } from '@cantelop/sdk';
+import { readRemoteConfiguration } from './git-remotes.js';
 import { ancestor, cleanRepository, createUpload, fileInfo, git, gitText, type Repository } from './git.js';
 import { MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, type GitCommand, type GitResult, type GitStatus, type ExportManifest } from './git-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
@@ -92,7 +93,8 @@ export class GitWorkspaceClient {
 
   async send(includeUncommitted: boolean, initializeOnly = false) {
     const status = await this.status();
-    if (initializeOnly && status.initialized) return;
+    const configuration = await readRemoteConfiguration(this.repository.root, this.repository.branch);
+    if (initializeOnly && status.initialized) { await this.call({ action: 'configure', configuration }); return; }
     const upload = await createUpload(this.repository, includeUncommitted, status.head, this.signal);
     try {
       if (upload.manifest.files.reduce((sum, file) => sum + file.size, 0) > MAX_TRANSFER_BYTES) throw new Error('Git transfer exceeds the 512 MiB limit');
@@ -111,6 +113,7 @@ export class GitWorkspaceClient {
         } finally { await file.close(); }
       }
       await this.call({ action: 'apply', id: upload.id, initializeOnly });
+      await this.call({ action: 'configure', configuration });
       await this.call({ action: 'cleanup', id: upload.id });
     } finally { await upload.close(); }
   }

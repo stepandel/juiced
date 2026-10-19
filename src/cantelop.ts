@@ -11,6 +11,7 @@ export const app = cantelop.app<TerminalCommand, TerminalEvent, TerminalReply>({
   auth: claudeAuth,
   dockerfile: claudeDockerfile,
   environment: {
+    GH_TOKEN: { secret: true },
     CLAUDE_PATH: { default: '/usr/local/bin/claude' },
   },
 });

@@ -1,6 +1,7 @@
 import { inspectionScope } from './inspection-protocol.js';
 
 export type Arguments =
+  | { command: 'env'; action: 'set' | 'unset'; name: string; secret: boolean; workspace: undefined; argv: [] }
   | { command: 'help' | 'version'; workspace: string | undefined; argv: string[] }
   | ({ command: 'claude'; workspace: string | undefined; argv: string[] } & (
     | { action: 'run' | 'login' | 'fast-forward' }
@@ -26,6 +27,15 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
   if (workspace !== undefined && !/^[a-z0-9][a-z0-9-]{0,62}$/.test(workspace)) throw new Error('Workspace must be 1–63 lowercase letters, numbers, or hyphens');
   const command = args[index];
   const argv = args.slice(index + 1);
+  if (command === 'env') {
+    const [action, name, ...flags] = argv;
+    if (argv.length === 1 && ['--help', '-h'].includes(action!)) return { command: 'help', workspace: undefined, argv: [] };
+    if (index > 0) throw new Error('Environment configuration is app-wide; omit --workspace.');
+    if (!['set', 'unset'].includes(action ?? '') || !name || !/^(?!CANTELOP_)[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name) ||
+        flags.some(flag => !['--stdin', '--plain'].includes(flag)) || new Set(flags).size !== flags.length ||
+        (action === 'set' ? !flags.includes('--stdin') : flags.includes('--stdin'))) throw new Error('Usage: juiced env set NAME --stdin [--plain] | juiced env unset NAME [--plain]');
+    return { command: 'env', action: action as 'set' | 'unset', name, secret: !flags.includes('--plain'), workspace: undefined, argv: [] };
+  }
   if (command === 'claude') {
     if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1) };
     if (argv[0] === 'ls' || argv[0] === 'peek') {
@@ -77,6 +87,8 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
 export const HELP = `Run Claude Code on Cantelop with Juiced's local terminal interface.
 
 Usage:
+  juiced env set NAME --stdin [--plain]
+  juiced env unset NAME [--plain]
   juiced [--workspace SLUG] claude [Claude arguments...]
   juiced [--workspace SLUG] claude login
   juiced [--workspace SLUG] claude sync --to-workspace [--include-uncommitted]
@@ -86,7 +98,11 @@ Usage:
   juiced [--workspace SLUG] claude ls [--include-ignored] [PATH]
   juiced [--workspace SLUG] claude peek [--include-ignored] [--changes-only] [PATH]
 
+Environment values are stored as Cantelop secrets by default. --plain selects a
+declared ordinary variable. Updates apply to new sessions without redeployment.
+
 Examples:
+  printf '%s' \"$GH_TOKEN\" | juiced env set GH_TOKEN --stdin
   juiced claude login
   juiced claude
   juiced claude --model sonnet

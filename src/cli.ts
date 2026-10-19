@@ -1,4 +1,5 @@
 import { app as claudeApp } from './cantelop.js';
+import { updateEnvironment } from './environment.js';
 import { HELP, parseArguments } from './args.js';
 import { ensureLogin } from './login.js';
 import { runRemoteTerminal } from './remote-terminal.js';
@@ -26,6 +27,9 @@ try {
   const args = parseArguments(process.argv.slice(2));
   if (args.command === 'help') process.stdout.write(HELP);
   else if (args.command === 'version') process.stdout.write('juiced 0.1.0\n');
+  else if (args.command === 'env') {
+    await updateEnvironment(claudeApp.environment(), args.action, args.name, args.secret, process, controller.signal);
+  }
   else if (args.command === 'claude' && (args.action === 'ls' || args.action === 'peek')) {
     process.exitCode = await inspectWorkspace(claudeApp, process.cwd(), args, controller.signal);
   }

@@ -86,6 +86,27 @@ snapshot is still uncommitted. Review and preserve that local work before making
 the checkout clean for fast-forwarding. Automatic snapshot reconciliation is
 not implemented.
 
+## Remotes and pushing
+
+Initialization and subsequent launches transfer explicit remote names, fetch and
+push URLs, source-branch upstream settings, and the default push remote. GitHub
+SSH URLs are normalized to HTTPS so Git can use the app's `GH_TOKEN`. Other
+remotes need portable HTTPS or `ssh://` URLs. Local filesystem remotes and URLs
+containing embedded credentials or query strings are rejected before upload.
+
+Only remotes managed by the local configuration are updated or removed;
+additional remotes created inside the workspace are preserved. Remote metadata
+updates do not transfer files, refresh the index, switch branches, or move HEAD.
+They use checkout maintenance ownership; unchanged settings can be reused while
+other sessions are active. Agent changes to a managed remote are preserved until
+the corresponding local configuration changes.
+
+Configure authentication with `juiced env set GH_TOKEN --stdin`, using a token
+with the necessary repository access. The token is stored separately from Git
+metadata and is not embedded in remote URLs. Claude inherits a Git credential
+helper backed by `gh` and its environment. A detached HEAD has no implicit
+branch destination; push explicitly, for example `git push origin HEAD:main`.
+
 ## Sessions and recovery
 
 Multiple terminals can start sessions sharing the same checkout. Their files and

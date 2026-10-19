@@ -125,6 +125,16 @@ export function createTerminal(
     for (const key of ['SSL_CERT_FILE', 'SSL_CERT_DIR', 'TMPDIR']) {
       if (process.env[key]) env[key] = process.env[key];
     }
+    if (context.env.GH_TOKEN) {
+      env.GH_TOKEN = context.env.GH_TOKEN;
+      env.GH_PROMPT_DISABLED = '1';
+      env.GIT_TERMINAL_PROMPT = '0';
+      // Empty first entry resets inherited helpers; the second uses the token from the environment.
+      env.GIT_CONFIG_COUNT = '2';
+      env.GIT_CONFIG_KEY_0 = env.GIT_CONFIG_KEY_1 = 'credential.https://github.com.helper';
+      env.GIT_CONFIG_VALUE_0 = '';
+      env.GIT_CONFIG_VALUE_1 = '!gh auth git-credential';
+    }
     const binary = options.binary ?? context.env.CLAUDE_PATH ?? '/usr/local/bin/claude';
     tty = command.tty;
     const running = tty

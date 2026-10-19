@@ -47,6 +47,37 @@ Claude sign-in is `juiced claude login`; there is no top-level `juiced login`.
 
 The local UI uses Claude's programmatic mode in the remote workspace you have chosen. It does not run native terminal onboarding or show a remote folder-trust dialog. Claude's own tool permission checks remain active; permission requests appear in Juiced with **Deny** selected by default. Permission grants apply once, without changing stored permission rules. `AskUserQuestion` prompts accept a typed answer or an option number.
 
+## GitHub access
+
+Set the GitHub token directly through Juiced:
+
+```sh
+printf '%s' "$GH_TOKEN" | juiced env set GH_TOKEN --stdin
+juiced env unset GH_TOKEN
+```
+
+Values are Cantelop secrets by default. `--plain` selects an ordinary variable
+that the deployed app declares. Input is read from stdin, with one trailing
+newline removed; values never appear in command arguments or Juiced output.
+The command uses the SDK and the existing app integration credential. It needs
+neither the Cantelop CLI nor Claude sign-in, and waits until Edge and compute
+configuration have applied the update. Token changes require no deployment.
+
+Configuration is app-wide, across all of its workspaces. New sessions receive
+the updated token; already-running sessions keep their environment until they
+exit. The runtime supplies `GH_TOKEN` to Claude and uses `gh` as Git's HTTPS
+credential helper. Scope the token to the intended repositories and permissions.
+Normal GitHub branch protection and token permissions still apply.
+
+Git workspaces copy remote URLs and source-branch tracking settings separately
+from repository contents. GitHub SSH URLs become HTTPS URLs for token access.
+Starting Juiced refreshes this metadata even for existing workspaces, without
+replacing their files, index, commits, or current branch. Close active sessions
+before changing managed remote settings. See [Git workspaces](docs/git-workspaces.md).
+
+This feature requires SDK 1.4.0 and the platform environment API. Deploy the new
+platform and Juiced runtime once; later token rotations are configuration updates.
+
 ## Use
 
 Arguments after `claude` configure the remote Claude process, except for Juiced's reserved `login`, `sync`, and `fast-forward` subcommands. Use `juiced claude -- login` to send a literal prompt named `login`. Interactive launches add the JSON transport flags needed by the local UI. Explicit print/introspection/output-format invocations use native passthrough:
