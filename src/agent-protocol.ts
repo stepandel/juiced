@@ -6,25 +6,32 @@ export const object = (value: unknown): ClaudeFrame => value !== null && typeof 
 /** JSONL boundaries and UTF-8 characters need not match Cantelop event boundaries. */
 export class ClaudeDecoder {
   private decoder = new StringDecoder('utf8');
-  private pending = '';
+  // A partial line is kept as chunks with a running byte count: rescanning or measuring the whole
+  // buffer on every push is quadratic for multi-megabyte frames delivered in small events.
+  private pending: string[] = [];
+  private pendingBytes = 0;
   push(bytes: Buffer): ClaudeFrame[] {
-    this.pending += this.decoder.write(bytes);
+    const text = this.decoder.write(bytes);
     const frames: ClaudeFrame[] = [];
-    for (let end; (end = this.pending.indexOf('\n')) !== -1;) {
-      const line = this.pending.slice(0, end).trim();
-      this.pending = this.pending.slice(end + 1);
-      if (!line) continue;
-      if (Buffer.byteLength(line) > 4 * 1024 * 1024) throw new Error('Claude output exceeded the JSON frame limit');
-      const frame = JSON.parse(line) as unknown;
-      if (typeof object(frame).type !== 'string') throw new Error('Invalid Claude protocol frame');
-      frames.push(object(frame));
+    let start = 0;
+    try {
+      for (let end; (end = text.indexOf('\n', start)) !== -1;) {
+        const line = (this.pending.length ? this.pending.join('') + text.slice(start, end) : text.slice(start, end)).trim();
+        this.pending = []; this.pendingBytes = 0; start = end + 1;
+        if (!line) continue;
+        if (Buffer.byteLength(line) > 4 * 1024 * 1024) throw new Error('Claude output exceeded the JSON frame limit');
+        const frame = JSON.parse(line) as unknown;
+        if (typeof object(frame).type !== 'string') throw new Error('Invalid Claude protocol frame');
+        frames.push(object(frame));
+      }
+    } finally {
+      if (start < text.length) { const rest = text.slice(start); this.pending.push(rest); this.pendingBytes += Buffer.byteLength(rest); }
     }
-    if (Buffer.byteLength(this.pending) > 4 * 1024 * 1024) throw new Error('Claude output exceeded the JSON frame limit');
+    if (this.pendingBytes > 4 * 1024 * 1024) throw new Error('Claude output exceeded the JSON frame limit');
     return frames;
   }
   finish(): void {
-    this.pending += this.decoder.end();
-    if (this.pending.trim()) throw new Error('Claude exited with an incomplete JSON frame');
+    if ((this.pending.join('') + this.decoder.end()).trim()) throw new Error('Claude exited with an incomplete JSON frame');
   }
 }
 
