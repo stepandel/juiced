@@ -1,5 +1,5 @@
-import { object, type ClaudeFrame, type SlashCommand } from '../agent-protocol.js';
-import { unsupportedControl as unsupported, type MenuChange, type MenuQuery, type RemoteAgent } from '../remote-agent.js';
+import { object, type ClaudeFrame, type MenuChange, type MenuQuery, type SlashCommand } from '../agent-protocol.js';
+import { unsupportedControl as unsupported, type RemoteAgent } from '../remote-agent.js';
 import type { MenuItem, MenuPage, MenuResult } from './menu.js';
 
 export const menuCommands: SlashCommand[] = [

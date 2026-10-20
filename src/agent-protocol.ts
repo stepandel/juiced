@@ -43,6 +43,20 @@ export type Approval = { id: string; tool: string; input: ClaudeFrame; descripti
 export type ApprovalOptions = { suggestions?: ClaudeFrame[]; message?: string };
 export type SlashCommand = { name: string; description: string; argumentHint: string };
 export type ModelOption = { value: string; displayName: string; description: string; supportedEffortLevels?: string[]; supportsFastMode?: boolean; resolvedModel?: string };
+/** Read-only control requests behind the command menus. */
+export type MenuQuery = { subtype: 'get_settings' | 'mcp_status' | 'get_session_cost' | 'list_models' | 'get_hooks_listing' | 'list_permission_rules' }
+  | { subtype: 'get_context_usage'; detail: 'summary' }
+  | { subtype: 'get_usage'; skip_behaviors: true }
+  | { subtype: 'read_file'; path: string; max_bytes: number }
+  | { subtype: 'get_task_output'; task_id: string };
+/** Control requests that change Claude's settings or session state. */
+export type MenuChange = { subtype: 'apply_flag_settings'; settings: ClaudeFrame }
+  | { subtype: 'set_permission_mode'; mode: string }
+  | { subtype: 'mcp_reconnect'; serverName: string }
+  | { subtype: 'mcp_toggle'; serverName: string; enabled: boolean }
+  | { subtype: 'reload_plugins' | 'reload_skills' }
+  | { subtype: 'rename_session'; title: string }
+  | { subtype: 'stop_task'; task_id: string };
 
 export function modelOptions(value: unknown): ModelOption[] {
   if (!Array.isArray(value)) return [];
