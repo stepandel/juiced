@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { edit, cursorParts } from '../src/tui/editor.js';
-import { emptyConversation, liveEntries, plain, receiveFrame, restoreHistory, userTurn } from '../src/tui/conversation.js';
+import { duration, emptyConversation, liveEntries, plain, preview, receiveFrame, restoreHistory, toolSummary, userTurn } from '../src/tui/conversation.js';
+import { foldedSummary, rows } from '../src/tui/transcript.js';
+import { spans } from '../src/tui/markdown.js';
 import { availableCommands, matchingCommands } from '../src/tui/commands.js';
 
 test('command suggestions filter the command word and preserve local command behavior', () => {
@@ -94,7 +96,7 @@ test('restored tools can finish and corrected snapshots remain visible', () => {
   state = restoreHistory(state);
   state = receiveFrame(state, { type: 'assistant', message: { id: 'saved', content: [{ type: 'text', text: 'Corrected snapshot' }] } });
   state = receiveFrame(state, { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool', is_error: true }] } });
-  assert.deepEqual(liveEntries(state).map(entry => [entry.text, entry.status]), [['Corrected snapshot', undefined], ['Read README.md', 'failed']]);
+  assert.deepEqual(liveEntries(state).map(entry => [entry.text, entry.status]), [['Corrected snapshot', undefined], ['Read(README.md)', 'failed']]);
   state = receiveFrame(state, { type: 'result', juiced_interrupted: true });
   assert.equal(state.history[1]?.entries.at(-1)?.text, 'Interrupted');
   assert.equal(state.history[1]?.entries.some(entry => entry.kind === 'user'), false);
@@ -136,7 +138,7 @@ test('per-block assistant snapshots reconcile text after thinking and tools usin
   assert.deepEqual(state.history[0]?.entries, [
     { id: 'user-0', kind: 'user', text: 'Check the README' },
     { id: 'mixed:1', kind: 'text', text: 'Let me check the code.' },
-    { id: 'read', kind: 'tool', text: 'Read README.md', status: 'done' },
+    { id: 'read', kind: 'tool', tool: 'Read', text: 'Read(README.md)', status: 'done', detail: 'Read 1 line' },
     { id: 'mixed:3', kind: 'text', text: 'The README needs an update.' },
     { id: 'mixed:4', kind: 'text', text: 'Let me check the code.' },
   ]);
@@ -172,4 +174,52 @@ test('full snapshots still reconcile by position and identical text in later mes
   state = receiveFrame(state, { type: 'result' });
   assert.equal(state.streamId, '');
   assert.equal(state.streamIndex, null);
+});
+
+test('tool calls use Claude Code headers and result summaries', () => {
+  assert.equal(toolSummary('Bash', { command: 'npm test\n  --watch' }), 'Bash(npm test --watch)');
+  assert.equal(toolSummary('Edit', { file_path: '/workspace/src/a.ts' }), 'Update(src/a.ts)');
+  assert.equal(toolSummary('Grep', { pattern: 'TODO', path: 'src' }), 'Search(pattern: "TODO", path: "src")');
+  assert.equal(toolSummary('mcp__github__get_issue', { number: 4, nested: {} }), 'github - get_issue (MCP)(number: 4)');
+  assert.equal(toolSummary('TodoWrite', { todos: [] }), 'Update Todos');
+
+  let state = userTurn(emptyConversation(), 'Work');
+  state = receiveFrame(state, { type: 'assistant', message: { id: 'tools', content: [
+    { type: 'tool_use', id: 'bash', name: 'Bash', input: { command: 'seq 1 12' } },
+    { type: 'tool_use', id: 'write', name: 'Write', input: { file_path: '/workspace/notes.txt', content: 'a\nb\n' } },
+    { type: 'tool_use', id: 'todo', name: 'TodoWrite', input: { todos: [{ content: 'Plan', status: 'completed' }, { content: 'Build', status: 'in_progress' }, { content: 'Ship', status: 'pending' }] } },
+    { type: 'tool_use', id: 'denied', name: 'Bash', input: { command: 'rm -rf build' } },
+  ] } });
+  state = receiveFrame(state, { type: 'user', message: { content: [
+    { type: 'tool_result', tool_use_id: 'bash', content: [{ type: 'text', text: Array.from({ length: 12 }, (_, i) => i + 1).join('\n') }] },
+    { type: 'tool_result', tool_use_id: 'write', content: 'File created successfully' },
+    { type: 'tool_result', tool_use_id: 'todo', content: 'Todos have been modified successfully' },
+    { type: 'tool_result', tool_use_id: 'denied', is_error: true, content: "The user doesn't want to proceed with this tool use." },
+  ] } });
+  const detail = (id: string) => state.live.find(entry => entry.id === id)?.detail;
+  assert.equal(detail('bash'), '1\n2\n3\n… +9 lines');
+  assert.equal(detail('write'), 'Wrote 2 lines to notes.txt');
+  assert.equal(detail('todo'), '☒ Plan\n◼ Build\n☐ Ship');
+  assert.equal(detail('denied'), 'User rejected this tool use');
+  assert.equal(preview('one\ntwo\n'), 'one\ntwo');
+  assert.equal(duration(65_000), '1m 5s');
+  state = receiveFrame(state, { type: 'result', duration_ms: 8_300 });
+  assert.deepEqual(state.history[0]?.entries.at(-1), { id: 'summary', kind: 'summary', text: 'Worked for 8s' });
+});
+
+test('finished reads and searches fold into one summary line', () => {
+  const tool = (id: string, name: string, status: 'done' | 'failed' | 'running' = 'done') => ({ id, kind: 'tool' as const, tool: name, text: `${name}(x)`, status });
+  const folded = rows([tool('a', 'Read'), tool('b', 'Read'), tool('c', 'Grep'), tool('d', 'Bash'), tool('e', 'Read', 'failed'), tool('f', 'Glob'), tool('g', 'Read', 'running')]);
+  assert.deepEqual(folded.map(row => row.kind === 'folded' ? row.entries.map(entry => entry.id).join('') : row.id), ['abc', 'd', 'e', 'f', 'g']);
+  const first = folded[0]!;
+  assert.ok(first.kind === 'folded');
+  assert.deepEqual(foldedSummary(first.entries), [{ verb: 'Read', count: 2, noun: 'files' }, { verb: 'searched for', count: 1, noun: 'pattern' }]);
+});
+
+test('inline Markdown renders emphasis and code without literal markers', () => {
+  assert.deepEqual(spans('Use **bold `x`** and `a*b*c`, *it* and [docs](https://d.e)'), [
+    { text: 'Use ' }, { bold: true, text: 'bold ' }, { bold: true, code: true, text: 'x' }, { text: ' and ' }, { code: true, text: 'a*b*c' },
+    { text: ', ' }, { italic: true, text: 'it' }, { text: ' and ' }, { text: 'docs' }, { dim: true, text: ' (https://d.e)' },
+  ]);
+  assert.deepEqual(spans('snake_case_name and 2 * 3 * 4'), [{ text: 'snake_case_name and 2 * 3 * 4' }]);
 });

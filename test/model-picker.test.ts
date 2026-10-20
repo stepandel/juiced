@@ -41,7 +41,7 @@ function fixture(agent = new ModelAgent({} as AgentSession)) {
   const frames: { text: string; rows: number }[] = [];
   const stdout = new Writable({ write(chunk, _, done) {
     const text = stripVTControlCharacters(chunk.toString());
-    if (text.includes('Enter send') || text.includes('Choose model')) { latest = text; frames.push({ text, rows: stdout.rows! }); }
+    if (text.includes('mode on') || text.includes('Choose model')) { latest = text; frames.push({ text, rows: stdout.rows! }); }
     done();
   } }) as TerminalOutput;
   stdout.isTTY = true; stdout.columns = 90; stdout.rows = 24;
@@ -60,7 +60,7 @@ test('the model command opens a real picker, switches after acknowledgment, and 
     await f.wait(() => f.agent.status === 'ready');
     await f.command('/model');
     await f.wait(() => f.latest.includes('Choose model'));
-    assert.ok(f.latest.includes('Default (current)') && f.latest.includes('Sonnet') && f.latest.includes('Use the default model'));
+    assert.ok(f.latest.includes('Default ✔') && f.latest.includes('Sonnet') && f.latest.includes('Use the default model'));
     assert.deepEqual(f.agent.submitted, [], '/model must not be sent as a model prompt');
     f.stdin.write('\x1b[200~sonnet\n\x1b[201~'); await delay(30);
     assert.equal(f.agent.changes.length, 0, 'Paste must not select a model');
@@ -73,10 +73,11 @@ test('the model command opens a real picker, switches after acknowledgment, and 
     await f.wait(() => f.latest.includes('Switching model…'));
     f.agent.changes[0]!.resolve();
     await f.wait(() => f.latest.includes('Model changed to Sonnet'));
-    assert.ok(f.latest.includes('Ready · sonnet'));
+    assert.ok(f.latest.includes('sonnet') && !f.latest.includes('Switching model'));
+    await delay(40);
 
     await f.command('/model');
-    await f.wait(() => f.latest.includes('Sonnet (current)'));
+    await f.wait(() => f.latest.includes('Sonnet ✔'));
     f.stdin.write('\x1b[B'); f.stdin.write('\x1b');
     await f.wait(() => !f.latest.includes('Choose model'));
     assert.equal(f.agent.changes.length, 1);

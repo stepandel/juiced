@@ -1,0 +1,78 @@
+import React from 'react';
+import { Box, Text } from 'ink';
+import type { Entry } from './conversation.js';
+import { Markdown } from './markdown.js';
+
+export function Header({ workspace, session }: { workspace: string; session: string }) {
+  return <Box flexDirection="column" marginBottom={1}>
+    <Text><Text color="green"> ▐▛███▜▌ </Text>  <Text bold>Juiced</Text> <Text dimColor>· Claude Code on Cantelop</Text></Text>
+    <Text><Text color="green">▝▜█████▛▘</Text>  <Text dimColor>workspace {workspace} · session {session}</Text></Text>
+    <Text><Text color="green">  ▘▘ ▝▝  </Text>  <Text dimColor>reattach with juiced claude in this tab</Text></Text>
+  </Box>;
+}
+
+// Claude Code folds finished reads and searches into one line per run of calls.
+const folded: Record<string, [string, string, string]> = {
+  Read: ['Read', 'file', 'files'], Grep: ['searched for', 'pattern', 'patterns'], Glob: ['searched for', 'pattern', 'patterns'], LS: ['listed', 'directory', 'directories'],
+};
+type Row = Entry | { id: string; kind: 'folded'; entries: Entry[] };
+const foldable = (entry: Entry) => entry.kind === 'tool' && entry.status === 'done' && Object.hasOwn(folded, entry.tool ?? '');
+
+export function rows(entries: Entry[]): Row[] {
+  const result: Row[] = [];
+  for (const entry of entries) {
+    const previous = result.at(-1);
+    if (!foldable(entry)) result.push(entry);
+    else if (previous?.kind === 'folded') previous.entries.push(entry);
+    else result.push({ id: `folded-${entry.id}`, kind: 'folded', entries: [entry] });
+  }
+  return result;
+}
+
+/** For example "Read 2 files, searched for 1 pattern". */
+export function foldedSummary(entries: Entry[]): { verb: string; count: number; noun: string }[] {
+  const counts = new Map<string, number>();
+  for (const entry of entries) counts.set(folded[entry.tool!]![0], (counts.get(folded[entry.tool!]![0]) ?? 0) + 1);
+  return [...counts].map(([verb, count], i) => {
+    const [, one, many] = Object.values(folded).find(word => word[0] === verb)!;
+    return { verb: i ? verb : verb[0]!.toUpperCase() + verb.slice(1), count, noun: count === 1 ? one : many };
+  });
+}
+
+function Folded({ entries }: { entries: Entry[] }) {
+  return <Box paddingLeft={2}><Text dimColor>{foldedSummary(entries).map((part, i) => <React.Fragment key={i}>{i ? ', ' : ''}{part.verb} <Text bold>{part.count}</Text> {part.noun}</React.Fragment>)}</Text></Box>;
+}
+
+function Result({ text, color }: { text: string; color?: string }) {
+  return <Box><Box width={5} flexShrink={0}><Text dimColor>  ⎿ </Text></Box><Box flexGrow={1}><Text dimColor={!color} {...(color ? { color } : {})}>{text}</Text></Box></Box>;
+}
+
+function Bullet({ color, dim = false, children }: { color?: string | undefined; dim?: boolean; children: React.ReactNode }) {
+  return <Box><Box width={2} flexShrink={0}><Text dimColor={dim} {...(color ? { color } : {})}>●</Text></Box><Box flexGrow={1} flexDirection="column">{children}</Box></Box>;
+}
+
+function Tool({ entry }: { entry: Entry }) {
+  const open = entry.text.indexOf('(');
+  const name = open > 0 && entry.text.endsWith(')') ? entry.text.slice(0, open) : entry.text;
+  const args = name === entry.text ? '' : entry.text.slice(open);
+  return <Box flexDirection="column">
+    <Bullet dim={entry.status === 'running'} color={entry.status === 'failed' ? 'yellow' : entry.status === 'done' ? 'green' : undefined}><Text><Text bold>{name}</Text>{args}</Text></Bullet>
+    {entry.status === 'running' ? <Result text="Running…" /> : entry.detail ? <Result text={entry.detail} {...(entry.status === 'failed' ? { color: 'yellow' } : {})} /> : null}
+  </Box>;
+}
+
+function Row({ row }: { row: Row }) {
+  if (row.kind === 'folded') return <Folded entries={row.entries} />;
+  if (row.kind === 'user') return <Box><Box width={2} flexShrink={0}><Text color="green">❯</Text></Box><Box flexGrow={1}><Text backgroundColor="blackBright">{row.text}</Text></Box></Box>;
+  if (row.kind === 'tool') return <Tool entry={row} />;
+  if (row.kind === 'summary') return <Text dimColor>✻ {row.text}</Text>;
+  if (row.kind === 'notice') {
+    if (row.status === 'done') return <Bullet color="green"><Text>{row.text}</Text></Bullet>;
+    return <Result color="yellow" text={row.id === 'interrupted' ? `${row.text} · What should Claude do instead?` : row.text} />;
+  }
+  return <Bullet><Markdown text={row.text} /></Bullet>;
+}
+
+export function Entries({ entries }: { entries: Entry[] }) {
+  return <Box flexDirection="column">{rows(entries).map(row => <Box key={row.id} marginBottom={1} flexDirection="column"><Row row={row} /></Box>)}</Box>;
+}

@@ -190,7 +190,7 @@ function ui(a: MenuAgent) {
   const frames: { text: string; rows: number }[] = [];
   const stdout = new Writable({ write(chunk, _, done) {
     const text = stripVTControlCharacters(chunk.toString());
-    if (text.includes('Enter send') || text.includes('Enter confirm')) { latest = text; frames.push({ text, rows: stdout.rows! }); }
+    if (text.includes('mode on') || text.includes('Esc to')) { latest = text; frames.push({ text, rows: stdout.rows! }); }
     done();
   } }) as TerminalOutput;
   stdout.isTTY = true; stdout.columns = 90; stdout.rows = 24;
@@ -206,13 +206,13 @@ test('reselecting the current model or setting closes locally without applying o
   a.settings.applied.effort = 'high';
   const f = ui(a);
   try {
-    await f.wait(() => f.latest.includes('Enter send'));
+    await f.wait(() => f.latest.includes('mode on'));
     for (const [command, title] of [['model', 'Choose model'], ['effort', 'Choose effort'], ['output-style', 'Choose output style'], ['fast', 'Fast mode'], ['permissions', 'Permissions']]) {
       await f.command(`/${command}`);
-      await f.wait(() => f.latest.includes(title!) && f.latest.includes('(current)'));
+      await f.wait(() => f.latest.includes(title!) && f.latest.includes(' ✔'));
       const reads = a.queries.length;
       f.stdin.write('\r');
-      await f.wait(() => f.latest.includes('is already selected.') && f.latest.includes('Enter send'));
+      await f.wait(() => f.latest.includes('is already selected.') && f.latest.includes('mode on'));
       assert.equal(a.queries.length, reads);
       assert.deepEqual(a.changes, []);
     }
@@ -224,7 +224,7 @@ test('settings and nested menus navigate locally, reject paste confirmation, and
   const a = await agent();
   const f = ui(a);
   try {
-    await f.wait(() => f.latest.includes('Enter send'));
+    await f.wait(() => f.latest.includes('mode on'));
     await f.command('/config'); await f.wait(() => f.latest.includes('Workspace settings'));
     assert.equal(a.queries.length, 1);
     f.stdin.write('output'); await f.wait(() => f.latest.includes('Filter: output'));
@@ -234,7 +234,7 @@ test('settings and nested menus navigate locally, reject paste confirmation, and
     f.stdin.write('\x1b'); await f.wait(() => f.latest.includes('Workspace settings'));
     assert.equal(a.queries.length, 1, 'Back uses the local page snapshot');
     f.stdin.write('\x1b'); await f.wait(() => !f.latest.includes('Filter: output'));
-    f.stdin.write('\x1b'); await f.wait(() => f.latest.includes('Enter send'));
+    f.stdin.write('\x1b'); await f.wait(() => f.latest.includes('mode on'));
     await f.command('/effort'); await f.wait(() => f.latest.includes('Choose effort'));
     const requests = a.queries.length;
     f.stdin.write('\x1b[200~high\n\x1b[201~'); await delay(30);
@@ -261,9 +261,9 @@ test('a slow menu read can be cancelled and cannot reopen over a local draft', {
   a.waitForQuery = () => new Promise(yes => { resolve = yes; });
   const f = ui(a);
   try {
-    await f.wait(() => f.latest.includes('Enter send'));
+    await f.wait(() => f.latest.includes('mode on'));
     await f.command('/mcp'); await f.wait(() => f.latest.includes('Loading menu'));
-    f.stdin.write('\x1b'); await f.wait(() => f.latest.includes('Enter send'));
+    f.stdin.write('\x1b'); await f.wait(() => f.latest.includes('mode on'));
     f.stdin.write('Keep typing locally'); await f.wait(() => f.latest.includes('Keep typing locally'));
     resolve({ mcpServers: [{ name: 'too-late', status: 'connected' }] }); await delay(40);
     assert.ok(f.latest.includes('Keep typing locally'));
@@ -277,7 +277,7 @@ test('MCP menu filtering and resizing stay within the viewport without remote ke
   a.responses.mcp_status = { mcpServers: Array.from({ length: 20 }, (_, index) => ({ name: `server-${index}`, status: 'connected' })) };
   const f = ui(a);
   try {
-    await f.wait(() => f.latest.includes('Enter send'));
+    await f.wait(() => f.latest.includes('mode on'));
     await f.command('/mcp'); await f.wait(() => f.latest.includes('MCP servers'));
     f.stdout.columns = 42; f.stdout.rows = 15; f.stdout.emit('resize'); await delay(30);
     for (let index = 0; index < 18; index++) f.stdin.write('\x1b[B');
@@ -302,7 +302,7 @@ test('a memory read can ask permission without losing the open menu or consuming
   };
   const f = ui(a);
   try {
-    await f.wait(() => f.latest.includes('Enter send'));
+    await f.wait(() => f.latest.includes('mode on'));
     await f.command('/memory'); await f.wait(() => f.latest.includes('Loaded memory files'));
     f.stdin.write('\r');
     // Permission frames use a different footer, so inspect the agent's active
