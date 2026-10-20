@@ -16,11 +16,7 @@ import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/proto
 import { prepareAgentSession } from '../src/session-state.js';
 import { commandMenu } from '../src/tui/command-menus.js';
 import type { Publication } from '../src/publish-protocol.js';
-
-async function until(check: () => boolean, ms = 10_000) {
-  const end = Date.now() + ms;
-  while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
-}
+import { until } from './fixtures/wait.js';
 
 async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 'test', agentOptions: ConstructorParameters<typeof RemoteAgent>[1] = {}) {
   const root = await mkdtemp('/tmp/juiced-durable-');
@@ -104,7 +100,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
       cancel() { finish(); return true; },
     } as unknown as ReturnType<typeof createTerminal>;
   };
-  const service = createDurableAgent(context, factory, root, { idleTimeoutMs });
+  const service = createDurableAgent(context, factory, root, { idleTimeoutMs, handoffRetryMs: 5, handoffRetryMaxMs: 20 });
   let activity = Promise.resolve();
   const view = { async commit(state: unknown) { views.push(Number(object(state).agentSequence)); viewState = state; viewCursor = stored.at(-1)?.cursor; await viewHook?.(); } };
   const intake = { ...context, output, view, activity: { queue(work: (context: unknown) => Promise<void>, options: { timeoutMs: number }) {
@@ -215,7 +211,7 @@ test('local publication requires its own explicit approval and denial never call
   await assert.rejects(f.agent.answer(allowed.id, true), /no longer active/);
   f.expireStream();
   await until(() => f.replays.length > 1);
-  await delay(50);
+  await delay(50); // Negative check: give the replayed offer time to (wrongly) reach the writer.
   assert.equal(writes, 1, 'Replaying a completed publication must never apply it again');
   assert.equal(f.agent.approvals.size, 0);
 });
@@ -235,7 +231,7 @@ test('reattachment restores a live publication offer and ignores historical or e
     await reattached.answer(pending.id, false);
     const old = publication(); await f.publish(old, false);
     const expired = { ...publication(), expiresAt: Date.now() - 1000 }; await f.publish(expired);
-    await delay(50);
+    await delay(50); // Negative check: stale offers must never surface.
     assert.equal(reattached.approvals.size, 0);
     assert.equal(writes, 0);
   } finally { await reattached.close(false); }
@@ -254,7 +250,7 @@ test('slow output acknowledgments use a bounded pipeline without skipping journa
   for (let index = 0; index < 40; index++) await f.frame({ type: 'assistant', message: { id: `pipelined-${index}`, content: [{ type: 'text', text: `${index}` }] } });
   const published = () => f.stored.filter(event => event.data.type === 'agent-output' && event.data.sequence > boundary);
   await until(() => published().length >= 12);
-  await delay(20);
+  await delay(20); // Negative check: no 13th output may be sent while acknowledgments are blocked.
   assert.equal(published().length, 12, 'Outstanding output must stay bounded while acknowledgments are blocked');
   assert.equal(f.views.at(-1), boundary + 12, 'The view must join the same handoff and stop at its last enqueued event');
   release();
@@ -284,7 +280,9 @@ test('a stalled view acknowledgment does not block live output or accumulate vie
   let release = () => {};
   t.after(() => release());
   const f = await fixture(t); await f.agent.start();
-  await delay(20);
+  const history = await f.service.replay(0); assert.ok(history.ok && history.replay);
+  const latest = history.replay.latest;
+  await until(() => f.views.at(-1) === latest);
   const before = f.views.length;
   const blocked = new Promise<void>(resolve => { release = resolve; });
   f.onView(() => blocked);
@@ -307,6 +305,10 @@ test('a failed handoff retries from its acknowledged prefix without duplicating 
   const sequence = first.data.sequence;
   await until(() => f.stored.filter(event => event.data.type === 'agent-output' && event.data.sequence === sequence).length === 2);
   assert.equal(f.received.filter(frame => frame.type === 'assistant' && object(frame.message).id === 'retry-handoff').length, 1);
+  const diagnostics = () => f.stored.filter(event => event.data.type === 'agent-output' && event.data.event.type === 'bytes' && event.data.event.channel === 'stderr' &&
+    Buffer.from(event.data.event.data, 'base64').toString().includes('Lost collector acknowledgment'));
+  await until(() => diagnostics().length > 0);
+  assert.equal(diagnostics().length, 1, 'The handoff error must be journaled once per failure streak');
 });
 
 test('a disconnected client recovers large history with one streamed replay and deduplicates output', { timeout: 20_000 }, async t => {
@@ -391,6 +393,17 @@ test('connection retries continue beyond three attempts and remain cancellable',
   const started = f.agent.start();
   await until(() => reconnects >= 4); assert.equal(f.stops, 0);
   f.offline(false); await started; assert.equal(f.agent.status, 'ready');
+  // Closing during a backoff wait must abort the retry loop promptly instead of waiting out the delay.
+  f.offline(true);
+  const cancelled = new RemoteAgent(f.session); let retries = 0;
+  cancelled.on('reconnecting', () => retries++);
+  const pending = cancelled.start(); void pending.catch(() => {});
+  await until(() => retries >= 2);
+  const closing = performance.now();
+  await cancelled.close(false);
+  await assert.rejects(pending);
+  assert.ok(performance.now() - closing < 400, 'Closing must interrupt the pending backoff delay');
+  assert.equal(retries, 2); assert.equal(f.stops, 0);
 });
 
 test('input receipts reject conflicting payloads and stale native process epochs', async t => {
@@ -588,4 +601,13 @@ test('a replacement runtime reports interruption and never resends an uncertain 
   assert.ok(reply.ok && reply.replay?.entries.some(entry => entry.event.type === 'reset' && entry.event.interrupted));
   await assert.rejects(service.send({ type: 'agent-input', id, epoch: 'old-process', frame }), /interrupted/);
   await service.dispose();
+});
+
+test('durable sessions reject every native session-selection flag, matching local terminal binding', async t => {
+  const root = await mkdtemp('/tmp/juiced-flags-'); t.after(() => rm(root, { recursive: true, force: true }));
+  const service = createDurableAgent({ signal: new AbortController().signal, session: { id: 'test', keepAliveSeconds: 120 }, env: {}, database: async () => { throw Error('unused'); } }, () => { throw Error('A rejected start must not launch Claude'); }, root);
+  t.after(() => service.dispose());
+  const start = (argv: string[]) => service.open({ type: 'start', durable: true, tty: false, argv, columns: 80, rows: 24, term: 'xterm-256color' }, {} as SessionContext<TerminalCommand, TerminalEvent, TerminalReply>);
+  for (const argv of [['--fork-session'], ['--resume'], ['--resume=abc'], ['-rabc'], ['-c'], ['--continue'], ['--session-id', randomUUID()], ['--from-pr', '1'], ['--teleport']])
+    await assert.rejects(start(argv), /Native conversation flags are unavailable/, argv.join(' '));
 });

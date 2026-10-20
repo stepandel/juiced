@@ -6,7 +6,6 @@ import { chmod, lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, symlink
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createInterface } from 'node:readline';
-import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { createClient } from '@libsql/client';
 import { CantelopClient, type AppCommandEnvelope, type SessionEvent } from '@cantelop/sdk';
@@ -20,10 +19,9 @@ import type { Publication, PublishResult } from '../src/publish-protocol.js';
 import { createGitRuntime } from '../src/runtime/git.js';
 import { createPublishBridge } from '../src/runtime/publish.js';
 import { createTerminal } from '../src/runtime/terminal.js';
+import { until as poll } from './fixtures/wait.js';
 
-async function until(check: () => boolean) {
-  for (let end = Date.now() + 10_000; !check();) { if (Date.now() > end) throw new Error('Publication did not arrive'); await delay(5); }
-}
+const until = (check: () => boolean) => poll(check, { message: 'Publication did not arrive' });
 
 async function fixture(t: test.TestContext, initialEdits = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'juiced-publish-')));

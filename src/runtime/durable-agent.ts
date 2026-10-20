@@ -4,8 +4,11 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionContext, SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
 import { ClaudeDecoder, object, type ClaudeFrame } from '../agent-protocol.js';
-import { MAX_INPUT_BYTES, type AgentJournalEvent, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
+import { MAX_AGENT_INPUT_BYTES, MAX_INPUT_BYTES, OUTPUT_CHUNK_BYTES, type AgentJournalEvent, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
+import { isENOENT } from '../fs-util.js';
+import { selectsClaudeSession } from '../terminal-session.js';
 import { AgentJournal } from './agent-journal.js';
+import { CHECKOUT_LEASES_TABLE } from './project-state.js';
 import type { createTerminal } from './terminal.js';
 
 type Context = SessionContext<TerminalCommand, TerminalEvent, TerminalReply>;
@@ -19,7 +22,7 @@ async function transcriptExists(workspace: string, id: string) {
   const root = join(workspace, '.claude', 'projects');
   let entries;
   try { entries = await readdir(root, { withFileTypes: true }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+  catch (error) { if (isENOENT(error)) return false; throw error; }
   for (const entry of entries) if (entry.isDirectory()) {
     try { if ((await stat(join(root, entry.name, `${id}.jsonl`))).size) return true; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
@@ -28,7 +31,8 @@ async function transcriptExists(workspace: string, id: string) {
 }
 
 /** Keep native menus and approvals while making process lifetime and output server-owned. */
-export function createDurableAgent(context: SessionHarnessContext, factory: () => ReturnType<typeof createTerminal>, workspace = process.cwd(), options: { idleTimeoutMs?: number; runTimeoutMs?: number } = {}) {
+export function createDurableAgent(context: SessionHarnessContext, factory: () => ReturnType<typeof createTerminal>, workspace = process.cwd(),
+  options: { idleTimeoutMs?: number; runTimeoutMs?: number; handoffRetryMs?: number; handoffRetryMaxMs?: number } = {}) {
   const journal = new AgentJournal(workspace, context.session.id);
   let loading: Promise<void> | undefined;
   let terminal: ReturnType<typeof createTerminal> | undefined;
@@ -77,25 +81,30 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
     // Drain from disk rather than dropping notifications while an acknowledgment
     // is pending. Only one bounded window of journal entries lives in memory.
     publication ??= (async () => {
-      type Handoff = { sequence: number; done: boolean; failed: boolean; settled: Promise<void> };
+      type Handoff = { sequence: number; done: boolean; failed: boolean; error?: unknown; settled: Promise<void> };
       const track = (sequence: number, work: Promise<void>): Handoff => {
         const item: Handoff = { sequence, done: false, failed: false, settled: Promise.resolve() };
-        item.settled = work.then(() => { item.done = true; }, () => { item.failed = true; }).then(wakePublication);
+        item.settled = work.then(() => { item.done = true; }, error => { item.failed = true; item.error = error; }).then(wakePublication);
         return item;
       };
       const pending: Handoff[] = [];
       let projection: Handoff | undefined;
       let after = publicationAfter!;
       let viewed = after;
+      const initialRetry = options.handoffRetryMs ?? 250, maxRetry = options.handoffRetryMaxMs ?? 5000;
+      let retry = initialRetry;
       const acknowledged = () => {
-        while (pending[0]?.done) publicationAfter = pending.shift()!.sequence;
-        if (projection?.done) { viewed = projection.sequence; projection = undefined; }
+        let progressed = false;
+        while (pending[0]?.done) { publicationAfter = pending.shift()!.sequence; progressed = true; }
+        if (projection?.done) { viewed = projection.sequence; projection = undefined; progressed = true; }
+        if (progressed) retry = initialRetry;
       };
       while (sink && !outputSignal.aborted) {
         const version = publicationVersion;
         try {
           acknowledged();
-          if (pending.some(item => item.failed) || projection?.failed) throw new Error('Agent output handoff failed');
+          const failed = pending.find(item => item.failed) ?? (projection?.failed ? projection : undefined);
+          if (failed) throw failed.error ?? new Error('Agent output handoff failed');
           while (pending.length < PUBLICATION_WINDOW && after < publicationThrough) {
             const page = await journal.page(after, publicationThrough);
             for (const entry of page.entries) {
@@ -112,13 +121,19 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
           // acknowledgment. The version check prevents a lost wake during reads.
           if (version === publicationVersion) await new Promise<void>(resolve => { publicationWake = resolve; });
         }
-        catch {
+        catch (error) {
           await Promise.all(pending.map(item => item.settled).concat(projection ? [projection.settled] : []));
           acknowledged();
           pending.length = 0; projection = undefined;
           after = publicationAfter!; viewed = Math.min(viewed, after);
           if (outputSignal.aborted) break;
-          await delay(1000, undefined, { signal: outputSignal }).catch(() => {});
+          // Journal the first failure of each streak so a reattached client can see why output stalled.
+          if (retry === initialRetry) {
+            const message = error instanceof Error ? error.message : String(error);
+            await bytes('stderr', Buffer.from(`juiced: agent output delivery failed (${message}); retrying.\n`)).catch(() => {});
+          }
+          await delay(retry, undefined, { signal: outputSignal }).catch(() => {});
+          retry = Math.min(maxRetry, retry * 2);
         }
       }
     })().finally(() => {
@@ -134,8 +149,8 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
   }
   async function bytes(channel: 'stdout' | 'stderr', bytes: Buffer) {
     const events: AgentJournalEvent[] = [];
-    for (let offset = 0; offset < bytes.length; offset += 12 * 1024)
-      events.push({ type: 'bytes', channel, data: bytes.subarray(offset, offset + 12 * 1024).toString('base64') });
+    for (let offset = 0; offset < bytes.length; offset += OUTPUT_CHUNK_BYTES)
+      events.push({ type: 'bytes', channel, data: bytes.subarray(offset, offset + OUTPUT_CHUNK_BYTES).toString('base64') });
     // One fsync per native output batch, including all of its bounded records.
     for (const entry of await journal.events(events)) if (sink) publish(entry);
   }
@@ -193,7 +208,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       await load();
       if (journal.configuration && (journal.configuration.directoryName !== command.directoryName || JSON.stringify(journal.configuration.git) !== JSON.stringify(command.git)))
         throw new Error('This session belongs to another project checkout. Use its original project and workspace.');
-      if (command.tty || command.argv.some(arg => ['--resume', '-r', '--continue', '-c', '--session-id'].includes(arg) || /^--(?:resume|session-id)=/.test(arg)))
+      if (command.tty || command.argv.some(selectsClaudeSession))
         throw new Error('Run juiced claude in the original terminal tab, or juiced claude --session ID to select a Juiced conversation. Native conversation flags are unavailable in the local TUI.');
       if (stopping) await running;
       if (!running) {
@@ -207,7 +222,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
           // Activation is fenced to one runtime. No native process owns an old
           // registration here, including one acquired just before sandbox loss.
           const db = await context.database();
-          await db.execute('CREATE TABLE IF NOT EXISTS juiced_checkout_leases (token TEXT PRIMARY KEY, project TEXT NOT NULL, session TEXT NOT NULL, kind TEXT NOT NULL, expires INTEGER NOT NULL)');
+          await db.execute(CHECKOUT_LEASES_TABLE);
           await db.execute({ sql: 'DELETE FROM juiced_checkout_leases WHERE project = ? AND session = ?', args: [command.directoryName, context.session.id] });
         }
         const interrupted = journal.state === 'working';
@@ -253,7 +268,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       await load();
       if (!/^[0-9a-f-]{36}$/i.test(command.id) || typeof object(command.frame).type !== 'string') throw new Error('Invalid agent input');
       const text = JSON.stringify(command.frame) + '\n';
-      if (Buffer.byteLength(text) > 768 * 1024) throw new Error('Agent input is too large');
+      if (Buffer.byteLength(text) > MAX_AGENT_INPUT_BYTES) throw new Error('Agent input is too large');
       const hash = createHash('sha256').update(text).digest('hex');
       const previous = journal.inputs.get(command.id);
       if (previous) {
@@ -269,9 +284,11 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       if (command.frame.type === 'control_response') await record({ type: 'approval-answer', id: String(object(command.frame.response).request_id) });
       if (command.frame.type === 'user') {
         const text = Buffer.from(String(object(command.frame.message).content));
-        for (let offset = 0; offset < text.length; offset += 12 * 1024)
-          await record({ type: 'user', id: command.id, data: text.subarray(offset, offset + 12 * 1024).toString('base64'), final: offset + 12 * 1024 >= text.length });
-        await record({ type: 'state', state: 'working' });
+        const events: AgentJournalEvent[] = [];
+        for (let offset = 0; offset < text.length; offset += OUTPUT_CHUNK_BYTES)
+          events.push({ type: 'user', id: command.id, data: text.subarray(offset, offset + OUTPUT_CHUNK_BYTES).toString('base64'), final: offset + OUTPUT_CHUNK_BYTES >= text.length });
+        // One ordered append and fsync for the whole prompt and its state change.
+        for (const entry of await journal.events([...events, { type: 'state', state: 'working' }])) if (sink) publish(entry);
       }
       const raw = Buffer.from(text);
       for (let offset = 0; offset < raw.length; offset += MAX_INPUT_BYTES)

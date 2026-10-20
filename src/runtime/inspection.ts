@@ -6,6 +6,7 @@ import { captureListing } from '../inspection-listing.js';
 import { sha256 } from '../git.js';
 import { INSPECTION_CHUNK_BYTES, MAX_INSPECTION_BYTES, InspectionIncomplete, validateInspectionCommand, type InspectionCommand, type InspectionEvent } from '../inspection-protocol.js';
 import { readBinding } from './git.js';
+import { isENOENT } from '../fs-util.js';
 
 /** Resolve existing state only. projectPaths/status would create or repair it. */
 export async function inspectRemote(command: InspectionCommand, output: SessionOutput<InspectionEvent>, signal: AbortSignal, workspace = process.cwd()) {
@@ -24,7 +25,7 @@ export async function inspectRemote(command: InspectionCommand, output: SessionO
       try {
         await readFile(join(metadata, 'journal.json'));
         throw new InspectionIncomplete('A Git publication is pending recovery. Inspection preserved it; retry after normal workspace recovery.');
-      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      } catch (error) { if (!isENOENT(error)) throw error; }
       const current = await lstat(target, { bigint: true });
       if (current.dev !== original.dev || current.ino !== original.ino) throw new InspectionIncomplete('The remote checkout changed during inspection. Retry.');
     };
@@ -40,7 +41,7 @@ export async function inspectRemote(command: InspectionCommand, output: SessionO
     await output.send({ type: 'inspection-end', id: command.id, size: bytes.length, sha256: sha256(bytes) });
   } catch (error) {
     if (signal.aborted) throw error;
-    const message = (error as NodeJS.ErrnoException).code === 'ENOENT'
+    const message = isENOENT(error)
       ? 'The remote Git checkout is not initialized. Inspection did not create it.'
       : error instanceof Error ? error.message : 'Workspace inspection failed';
     await output.send({ type: 'inspection-error', id: command.id, message });

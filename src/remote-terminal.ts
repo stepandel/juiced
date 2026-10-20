@@ -2,6 +2,7 @@ import type { Readable, Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionRef, SessionEventCursor } from '@cantelop/sdk';
 import { MAX_INPUT_BYTES, MAX_BUFFERED_INPUT, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
+import { backoffMs, isTransient, withTimeout } from './transport.js';
 
 export type TerminalSession = Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'stream' | 'stop'>;
 export type TerminalInput = Readable & { isTTY?: boolean; isRaw?: boolean; setRawMode?(raw: boolean): unknown };
@@ -16,13 +17,8 @@ async function write(output: Writable, bytes: Buffer): Promise<void> {
   await new Promise<void>((resolve, reject) => output.write(bytes, error => error ? reject(error) : resolve()));
 }
 
-function retryable(error: unknown): boolean {
-  if (error instanceof TerminalError) return false;
-  const remote = error as { status?: number; code?: string };
-  if (remote.status !== undefined) return remote.status === 0 || remote.status >= 500;
-  if (error instanceof Error && error.name === 'AbortError') return true;
-  return error instanceof Error && /stream|fetch|network|socket|terminated|connection/i.test(error.message);
-}
+// Remote-reported terminal failures are final; only the transport is retried.
+const retryable = (error: unknown) => !(error instanceof TerminalError) && isTransient(error);
 
 class TerminalError extends Error {}
 
@@ -62,7 +58,7 @@ export async function runRemoteTerminal(
     signal.throwIfAborted();
     const startedAt = Date.now();
     debug('control.send', { type: command.type });
-    const reply = await session.request(command, { timeoutMs: 30_000, signal: AbortSignal.any([signal, AbortSignal.timeout(35_000)]) });
+    const reply = await withTimeout(signal, 35_000, signal => session.request(command, { timeoutMs: 30_000, signal }));
     debug('control.accepted', { type: command.type, elapsedMs: Date.now() - startedAt });
     if (reply?.ok !== true) throw new Error('The remote terminal rejected input');
   };
@@ -178,7 +174,7 @@ export async function runRemoteTerminal(
         debug('stream.error', { aborted: signal.aborted, name: (error as Error)?.name, message: (error as Error)?.message });
         if (signal.aborted) throw signal.reason;
         if (!retryable(error) || ++failures > 3) throw error;
-        await delay(250 * 2 ** (failures - 1), undefined, { signal });
+        await delay(backoffMs(failures - 1), undefined, { signal });
       }
     }
   } finally {

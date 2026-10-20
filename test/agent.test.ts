@@ -6,11 +6,9 @@ import type { SessionEvent } from '@cantelop/sdk';
 import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, useLocalTui, type ClaudeFrame } from '../src/agent-protocol.js';
 import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
 import type { TerminalCommand, TerminalEvent } from '../src/protocol.js';
+import { until as poll } from './fixtures/wait.js';
 
-export async function until(check: () => boolean, ms = 2000) {
-  const end = Date.now() + ms;
-  while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
-}
+const until = (check: () => boolean) => poll(check, 2000);
 
 function fixture(options: ConstructorParameters<typeof RemoteAgent>[1] = {}, initialization: ClaudeFrame = {}, modelResponse: 'success' | 'error' | 'pending' = 'success', responses: Record<string, ClaudeFrame | Error> = {}) {
   const emitted = new EventEmitter();

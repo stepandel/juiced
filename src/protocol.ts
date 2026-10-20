@@ -48,6 +48,15 @@ export type TerminalReply = { ok: true; git?: GitResult; agent?: AgentConnection
 
 export const MAX_INPUT_BYTES = 16 * 1024;
 export const MAX_BUFFERED_INPUT = 1024 * 1024;
+/** Raw bytes per output/journal event; base64 keeps each event near 16 KiB. */
+export const OUTPUT_CHUNK_BYTES = 12 * 1024;
+/** One serialized durable agent-input frame, newline included. */
+export const MAX_AGENT_INPUT_BYTES = 768 * 1024;
+/** One submitted prompt, before framing. */
+export const MAX_PROMPT_BYTES = 512 * 1024;
+/** Canonical padded base64, as Buffer#toString('base64') produces. */
+export const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+export const validWorkspaceId = (id: unknown): id is string => typeof id === 'string' && /^wsp_[a-f0-9]{32}$/.test(id);
 
 export function dimensions(columns: number, rows: number): void {
   if (!Number.isInteger(columns) || columns < 1 || columns > 1000 ||
@@ -58,7 +67,7 @@ export function dimensions(columns: number, rows: number): void {
 
 export function decodeInput(data: string): Buffer {
   if (typeof data !== 'string' || data.length > Math.ceil(MAX_INPUT_BYTES / 3) * 4 ||
-      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) {
+      !BASE64.test(data)) {
     throw new Error('Invalid terminal input');
   }
   const bytes = Buffer.from(data, 'base64');

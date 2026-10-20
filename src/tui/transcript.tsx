@@ -63,7 +63,7 @@ function Tool({ entry }: { entry: Entry }) {
   </Box>;
 }
 
-function Row({ row }: { row: Row }) {
+function EntryRow({ row, tail }: { row: Row; tail?: number | undefined }) {
   if (row.kind === 'folded') return <Folded entries={row.entries} />;
   if (row.kind === 'user') return <Box><Box width={2} flexShrink={0}><Text color="green">❯</Text></Box><Box flexGrow={1}><Text backgroundColor="blackBright">{row.text}</Text></Box></Box>;
   if (row.kind === 'tool') return <Tool entry={row} />;
@@ -72,9 +72,15 @@ function Row({ row }: { row: Row }) {
     if (row.status === 'done') return <Bullet color="green"><Text>{row.text}</Text></Bullet>;
     return <Result color="yellow" text={row.id === 'interrupted' ? `${row.text} · What should Claude do instead?` : row.text} />;
   }
-  return <Bullet><Markdown text={row.text} /></Bullet>;
+  return <Bullet><Markdown text={row.text} tail={tail} /></Bullet>;
 }
 
-export function Entries({ entries }: { entries: Entry[] }) {
-  return <Box flexDirection="column">{rows(entries).map(row => <Box key={row.id} marginBottom={1} flexDirection="column"><Row row={row} /></Box>)}</Box>;
+// Unchanged entries keep their identity across frames, so only the entry that
+// changed renders again. Folded runs are rebuilt each time from the same entries.
+const sameRow = (a: Row, b: Row) => a === b || a.kind === 'folded' && b.kind === 'folded' && a.entries.length === b.entries.length && a.entries.every((entry, i) => entry === b.entries[i]);
+const MemoRow = React.memo(EntryRow, (a, b) => a.tail === b.tail && sameRow(a.row, b.row));
+
+/** `tail` limits each text entry to its last rows, for a view clipped to its bottom rows. */
+export function Entries({ entries, tail }: { entries: Entry[]; tail?: number }) {
+  return <Box flexDirection="column">{rows(entries).map(row => <Box key={row.id} marginBottom={1} flexDirection="column"><MemoRow row={row} tail={tail} /></Box>)}</Box>;
 }

@@ -29,13 +29,18 @@ export function spans(text: string, style: Omit<Span, 'text'> = {}): Span[] {
 
 export type Row = Span[];
 
-/** Assistant text as styled rows: rendered emphasis, no fences or heading markers. */
-export function markdownRows(text: string): Row[] {
+const fenceMarker = /^\s*(```+|~~~+)/u;
+/** The fence a line opens or closes, given the fence it starts in. */
+const nextFence = (raw: string, fence: string | undefined): string | undefined | false => {
+  const marker = fenceMarker.exec(raw)?.[1];
+  return marker && (!fence || marker.startsWith(fence)) ? fence ? undefined : marker : false;
+};
+
+function rowsFrom(lines: string[], fence: string | undefined): Row[] {
   const rows: Row[] = [];
-  let fence: string | undefined;
-  for (const raw of text.split('\n')) {
-    const marker = /^\s*(```+|~~~+)/u.exec(raw)?.[1];
-    if (marker && (!fence || marker.startsWith(fence))) { fence = fence ? undefined : marker; continue; }
+  for (const raw of lines) {
+    const toggled = nextFence(raw, fence);
+    if (toggled !== false) { fence = toggled; continue; }
     if (fence) { rows.push([{ text: raw, code: true }]); continue; }
     const heading = /^(#{1,6})\s+(.*?)\s*#*$/u.exec(raw);
     if (heading) { rows.push(spans(heading[2]!, { bold: true, ...(heading[1]!.length === 1 ? { italic: true } : {}) })); continue; }
@@ -49,11 +54,51 @@ export function markdownRows(text: string): Row[] {
   return rows;
 }
 
+/** Assistant text as styled rows: rendered emphasis, no fences or heading markers. */
+export function markdownRows(text: string): Row[] {
+  return rowsFrom(text.split('\n'), undefined);
+}
+
+// Fence state at a line offset, resumed from the last scan of the same growing
+// text so a streaming block is scanned once overall rather than once per delta.
+type Scan = { text: string; offset: number; fence: string | undefined };
+const scans: Scan[] = [];
+function fenceAt(text: string, offset: number): string | undefined {
+  let scan = scans.find(item => item.offset <= offset && text.startsWith(item.text));
+  if (!scan) {
+    scan = { text: '', offset: 0, fence: undefined };
+    scans.unshift(scan);
+    if (scans.length > 4) scans.pop();
+  }
+  for (let start = scan.offset; start < offset;) {
+    const end = text.indexOf('\n', start);
+    const toggled = nextFence(text.slice(start, end), scan.fence);
+    if (toggled !== false) scan.fence = toggled;
+    start = end + 1;
+  }
+  scan.text = text.slice(0, offset); scan.offset = offset;
+  return scan.fence;
+}
+
+/** The last `count` rows of `markdownRows(text)`, parsing only the trailing lines. */
+export function markdownTail(text: string, count: number): Row[] {
+  if (count <= 0) return [];
+  // Fence markers yield no row, so walk back until enough lines certainly do.
+  let start = text.length;
+  for (let found = 0, end = text.length; ; end = start - 1) {
+    start = end ? text.lastIndexOf('\n', end - 1) + 1 : 0;
+    if (!fenceMarker.test(text.slice(start, end))) found++;
+    if (found >= count || !start) break;
+  }
+  return rowsFrom(text.slice(start).split('\n'), start ? fenceAt(text, start) : undefined).slice(-count);
+}
+
 export function StyledRow({ row }: { row: Row }) {
   if (!row.some(part => part.text)) return <Text> </Text>;
   return <Text>{row.map((part, i) => <Text key={i} bold={part.bold ?? false} italic={part.italic ?? false} strikethrough={part.strikethrough ?? false} dimColor={part.dim ?? false} {...(part.code ? { color: 'cyan' } : part.color ? { color: part.color } : {})}>{part.text}</Text>)}</Text>;
 }
 
-export function Markdown({ text }: { text: string }) {
-  return <Box flexDirection="column">{markdownRows(text).map((row, i) => <StyledRow key={i} row={row} />)}</Box>;
+/** With `tail`, only the last rows: the live area shows the terminal's bottom rows anyway. */
+export function Markdown({ text, tail }: { text: string; tail?: number | undefined }) {
+  return <Box flexDirection="column">{(tail === undefined ? markdownRows(text) : markdownTail(text, tail)).map((row, i) => <StyledRow key={i} row={row} />)}</Box>;
 }

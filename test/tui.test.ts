@@ -2,9 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { edit, cursorParts } from '../src/tui/editor.js';
 import { duration, emptyConversation, liveEntries, plain, preview, receiveFrame, restoreHistory, toolSummary, turnTokens, userTurn } from '../src/tui/conversation.js';
-import { rememberLabel, transcriptLines, wrapLines } from '../src/tui/app.js';
-import { foldedSummary, rows } from '../src/tui/transcript.js';
-import { spans } from '../src/tui/markdown.js';
+import React from 'react';
+import { renderToString } from 'ink';
+import stringWidth from 'string-width';
+import { rememberLabel } from '../src/tui/permission.js';
+import { transcriptLines, transcriptRows, wrapLines } from '../src/tui/transcript-view.js';
+import { Entries, foldedSummary, rows } from '../src/tui/transcript.js';
+import { markdownRows, markdownTail, spans } from '../src/tui/markdown.js';
 import { availableCommands, matchingCommands } from '../src/tui/commands.js';
 
 test('command suggestions filter the command word and preserve local command behavior', () => {
@@ -257,4 +261,47 @@ test('the detailed transcript shows complete tool output and wraps to the termin
   assert.deepEqual(wrapped, [[{ text: 'ab' }, { text: 'cd', bold: true }], [{ text: 'ef', bold: true }], [{ text: '🍈🍈' }], [{ text: '🍈' }]]);
   assert.equal(rememberLabel([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'session' }, { type: 'setMode', mode: 'acceptEdits', destination: 'session' }]),
     'Yes, and don’t ask again for Bash(npm test:*) for this session and switch to accept edits for this session');
+});
+
+test('streaming Markdown parses only its tail and matches the full render across fences', () => {
+  const text = ['# Plan', 'Intro with **bold**', '```ts', 'const a = 1;', '~~~', '- not a list', '```', '', '> quoted *note*', '~~~~', 'raw ``` inside', '~~~~~', '- item `x`', '````', 'open fence', 'still code', ''].join('\n');
+  // Every prefix as it streams in, so fences open, close and span the cut.
+  for (let length = 0; length <= text.length; length++) {
+    const prefix = text.slice(0, length);
+    for (const count of [1, 2, 3, 5, 40]) assert.deepEqual(markdownTail(prefix, count), markdownRows(prefix).slice(-count), `${count} rows of ${JSON.stringify(prefix)}`);
+  }
+  // Unrelated text with a shared prefix cannot reuse another block's fence state.
+  assert.deepEqual(markdownTail('```\ncode\n```\nplain', 1), [[{ text: 'plain' }]]);
+  assert.deepEqual(markdownTail('```\ncode\nmore', 1), [[{ text: 'more', code: true }]]);
+  assert.deepEqual(markdownTail('text', 0), []);
+
+  const lines = (output: string) => output.split('\n');
+  const entry = { id: 'm', kind: 'text' as const, text: Array.from({ length: 30 }, (_, i) => i === 12 ? '```' : `line ${i} ${'word '.repeat(i % 5)}`).join('\n') };
+  const full = lines(renderToString(React.createElement(Entries, { entries: [entry] }), { columns: 30 }));
+  const tail = lines(renderToString(React.createElement(Entries, { entries: [entry], tail: 8 }), { columns: 30 }));
+  assert.deepEqual(tail.slice(-8), full.slice(-8), 'The visible bottom rows match the full render');
+  assert.ok(tail.length < full.length, 'Hidden rows are not laid out');
+});
+
+test('transcript wrapping keeps wide and emoji graphemes intact and reuses unchanged entries', () => {
+  const rows = [[{ text: 'ascii ' }, { text: '中文字', bold: true }, { text: '👩‍👩‍👧 é🍈x' }], [{ text: 'x'.repeat(9) }, { text: '' }, { text: 'yz', italic: true }], [{ text: 'tab\there' }], []];
+  const wrapped = wrapLines(rows, 4);
+  const text = (row: { text: string }[]) => row.map(span => span.text).join('');
+  assert.deepEqual(wrapped.map(text), ['asci', 'i 中', '文字', '👩‍👩‍👧 é', '🍈x', 'xxxx', 'xxxx', 'xyz', 'tab\th', 'ere', '']);
+  assert.ok(wrapped.every(row => stringWidth(text(row)) <= 4), 'Every row fits the width');
+  assert.deepEqual(wrapped[7], [{ text: 'x' }, { text: 'yz', italic: true }]);
+  assert.deepEqual(wrapLines([[{ text: 'abcdéfghijk' }]], 5).map(text), ['abcdé', 'fghij', 'k'], 'A combining mark stays with its ASCII base');
+  assert.deepEqual(wrapLines([[{ text: 'abc' }]], 0),[[{ text: 'a' }], [{ text: 'b' }], [{ text: 'c' }]]);
+
+  const entries = [
+    { id: 'u', kind: 'user' as const, text: 'Show 🍈 output' },
+    { id: 't', kind: 'tool' as const, tool: 'Bash', text: 'Bash(cat)', status: 'done' as const, output: `${'wide 中文 '.repeat(8)}\n${'plain '.repeat(20)}` },
+  ];
+  const first = transcriptRows(entries, 20);
+  assert.deepEqual(first, wrapLines(transcriptLines(entries), 20));
+  const changed = [entries[0]!, { ...entries[1]!, status: 'failed' as const }];
+  const second = transcriptRows(changed, 20);
+  assert.deepEqual(second, wrapLines(transcriptLines(changed), 20));
+  assert.equal(second[0], first[0], 'An unchanged entry reuses its wrapped rows');
+  assert.notEqual(transcriptRows(entries, 30)[0], first[0], 'A new width wraps again');
 });

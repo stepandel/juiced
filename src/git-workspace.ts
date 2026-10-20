@@ -9,6 +9,7 @@ import { ancestor, cleanRepository, createUpload, fileInfo, git, gitText, sha256
 import { MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, validTransferId, validateExportManifest, type GitCommand, type GitResult, type GitStatus, type ExportManifest, type FileInfo } from './git-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
 import type { selectProject } from './project.js';
+import { backoffMs, isTransient, messageId } from './transport.js';
 
 export type GitWorkspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'session'>;
 type Project = Awaited<ReturnType<typeof selectProject>>;
@@ -42,11 +43,6 @@ export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<Ter
   };
 }
 
-function retryable(error: unknown) {
-  const remote = error as { status?: number; name?: string; message?: string };
-  return remote.status === 0 || (remote.status !== undefined && remote.status >= 500) || /fetch|socket|network|connection|stream|timed out/i.test(remote.message ?? '');
-}
-
 export class GitWorkspaceClient {
   private session;
   private get namespace() {return this.project.scope?`${sha256(this.project.scope).slice(0,24)}/${this.project.workspace}`:this.project.workspace;}
@@ -56,15 +52,15 @@ export class GitWorkspaceClient {
 
   async call(action: Action): Promise<GitResult> {
     const command = { ...action, type: 'git', directoryName: this.project.directoryName, binding: this.repository.binding } as GitCommand;
-    let id = `msg_${randomUUID().replaceAll('-', '')}`;
+    let id = messageId();
     const startedAt = Date.now();
     for (let attempt = 0; ; attempt++) {
       this.signal.throwIfAborted();
       let reply: TerminalReply;
       try { reply = await this.session.request(command, { id, signal: this.signal, timeoutMs: 240_000 }); }
       catch (error) {
-        if (attempt >= 2 || !retryable(error)) throw error;
-        await delay(250 * 2 ** attempt, undefined, { signal: this.signal }); continue;
+        if (this.signal.aborted || attempt >= 2 || !isTransient(error)) throw error;
+        await delay(backoffMs(attempt), undefined, { signal: this.signal }); continue;
       }
       if (!reply?.ok) {
         if (reply && reply.stale?.length && action.action !== 'reap' && attempt < 2) {
@@ -76,12 +72,12 @@ export class GitWorkspaceClient {
         }
         if (reply?.busy === 'maintenance' && Date.now() - startedAt < 240_000) {
           await delay(500, undefined, { signal: this.signal });
-          id = `msg_${randomUUID().replaceAll('-', '')}`;
+          id = messageId();
           continue;
         }
         if (reply && /database_not_ready/.test(reply.error) && Date.now() - startedAt < 120_000) {
           await delay(1000, undefined, { signal: this.signal });
-          id = `msg_${randomUUID().replaceAll('-', '')}`;
+          id = messageId();
           continue;
         }
         throw new Error(reply && 'error' in reply ? reply.error : 'The Git workspace rejected the command');
@@ -152,8 +148,8 @@ export class GitWorkspaceClient {
           if (!complete) throw new Error('The Git download stream ended unexpectedly');
         } catch (error) {
           if (controller.signal.aborted) throw controller.signal.reason;
-          if (this.signal.aborted || !retryable(error) || ++failures > 3) throw error;
-          await delay(250 * 2 ** failures, undefined, { signal: this.signal });
+          if (this.signal.aborted || !isTransient(error) || ++failures > 3) throw error;
+          await delay(backoffMs(failures), undefined, { signal: this.signal });
         }
       }
       await requested;
