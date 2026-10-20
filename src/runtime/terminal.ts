@@ -252,7 +252,8 @@ let terminal: ReturnType<typeof createTerminal>;
 let gitRuntime: ReturnType<typeof createGitRuntime>;
 let agent: ReturnType<typeof createDurableAgent>;
 
-export function activateTerminal(context: SessionActivationContext<TerminalCommand, TerminalEvent>): void {
+export async function activateTerminal(context: SessionActivationContext<TerminalCommand, TerminalEvent>): Promise<void> {
+  await agent?.dispose();
   terminal = createTerminal(context);
   gitRuntime = createGitRuntime(context);
   agent = createDurableAgent(context, () => createTerminal(context));
@@ -263,7 +264,10 @@ export async function receiveTerminal(context: SessionContext<TerminalCommand, T
   if (command.type === 'agent-replay' || command.type === 'agent-input' || command.type === 'start' && command.durable) {
     try {
       if (command.type === 'start') { validateStart(command); context.reply(await agent.open(command, context)); }
-      else if (command.type === 'agent-replay') context.reply(await agent.replay(command.after));
+      else if (command.type === 'agent-replay') {
+        if (command.stream !== undefined) { await agent.streamReplay(command.after, command.stream, context); context.reply({ ok: true }); }
+        else context.reply(await agent.replay(command.after));
+      }
       else { await agent.send(command); context.reply({ ok: true }); }
     } catch (error) { context.reply({ ok: false, error: error instanceof Error ? error.message : 'Durable agent operation failed' }); }
     return;

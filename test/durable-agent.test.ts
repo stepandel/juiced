@@ -26,16 +26,19 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   const root = await mkdtemp('/tmp/juiced-durable-');
   const lifetime = new AbortController(), events = new EventEmitter();
   const stored: SessionEvent<TerminalEvent>[] = [];
-  const prompts: string[] = [], launches: string[][] = [], requests: TerminalCommand[] = [];
+  const prompts: string[] = [], launches: string[][] = [], requests: TerminalCommand[] = [], replays: Extract<TerminalCommand, { type: 'agent-replay' }>[] = [];
+  const replayWork: Promise<void>[] = [];
   const requestIds: Array<{ command: TerminalCommand; id: string | undefined }> = [];
   let currentOutput: { send(event: TerminalEvent): Promise<void> };
   let clientOffline = false, streamPaused = false, loseReply = false, expired = false, stops = 0, initializations = 0;
   let viewCursor: SessionEventCursor | undefined;
   let viewState: unknown;
   let activityTimeout = 0;
+  let replayHook: ((event: Extract<TerminalEvent, { type: 'agent-replay' }>) => Promise<void>) | undefined;
   const output = { async send(data: TerminalEvent) {
     stored.push({ data, sessionId, messageId: `msg_${'1'.repeat(32)}`, createdAt: new Date(), cursor: { streamId: 'a'.repeat(32), sequence: stored.length + 1 } });
     events.emit('event');
+    if (data.type === 'agent-replay') await replayHook?.(data);
   } };
   const raw = async (value: Buffer) => currentOutput.send({ type: 'output', channel: 'stdout', data: value.toString('base64') });
   const frame = async (value: ClaudeFrame) => raw(Buffer.from(JSON.stringify(value) + '\n'));
@@ -77,9 +80,10 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   };
   const service = createDurableAgent(context, factory, root, { idleTimeoutMs });
   let activity = Promise.resolve();
-  const intake = { ...context, output, activity: { queue(work: (context: unknown) => Promise<void>, options: { timeoutMs: number }) {
+  const view = { async commit(state: unknown) { viewState = state; viewCursor = stored.at(-1)?.cursor; } };
+  const intake = { ...context, output, view, activity: { queue(work: (context: unknown) => Promise<void>, options: { timeoutMs: number }) {
     activityTimeout = options.timeoutMs;
-    activity = activity.then(() => work({ output, signal: lifetime.signal, view: { async commit(state: unknown) { viewState = state; viewCursor = stored.at(-1)?.cursor; } } }));
+    activity = activity.then(() => work({ output, signal: lifetime.signal, view }));
     void activity.catch(() => {});
   } } } as unknown as SessionContext<TerminalCommand, TerminalEvent, TerminalReply>;
   const network = () => { if (clientOffline) throw new Error('network unavailable'); };
@@ -97,7 +101,14 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
       }
       return { ok: true };
     },
-    async dispatch() { throw new Error('Durable input must await an idempotent application receipt'); },
+    async dispatch(command) {
+      network();
+      if (command.type !== 'agent-replay' || !command.stream) throw new Error('Durable input must await an idempotent application receipt');
+      replays.push(command);
+      const work = service.streamReplay(command.after, command.stream, intake);
+      void work.catch(() => {}); replayWork.push(work);
+      return { id: `msg_${'2'.repeat(32)}`, state: 'accepted', acceptedAt: new Date(), async status() { return { id: `msg_${'2'.repeat(32)}`, state: 'handled', acceptedAt: new Date(), startedAt: new Date(), handledAt: new Date() }; } };
+    },
     async view() {
       network();
       if (!viewCursor) throw Object.assign(new Error('missing view'), { code: 'session_view_not_found', status: 404 });
@@ -120,8 +131,9 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   const agent = new RemoteAgent(session, { controlTimeoutMs: 10_000 });
   const received: ClaudeFrame[] = [];
   agent.on('frame', value => received.push(value));
-  t.after(async () => { await agent.close(false); lifetime.abort(); await activity; await service.dispose(); await rm(root, { recursive: true, force: true }); });
-  return { root, agent, session, service, frame, raw, prompts, launches, requests, requestIds, received,
+  t.after(async () => { await agent.close(false); lifetime.abort(); await activity; await Promise.allSettled(replayWork); await service.dispose(); await rm(root, { recursive: true, force: true }); });
+  return { root, agent, session, service, frame, raw, prompts, launches, requests, requestIds, replays, stored, received,
+    onReplay(hook: typeof replayHook) { replayHook = hook; },
     get stops() { return stops; }, get initializations() { return initializations; }, get activityTimeout() { return activityTimeout; },
     offline(value: boolean) { clientOffline = value; events.emit('event'); },
     pauseStream(value: boolean) { streamPaused = value; events.emit('event'); },
@@ -130,7 +142,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   };
 }
 
-test('a disconnected client does not own work lifetime; missed output is paginated and deduplicated', { timeout: 20_000 }, async t => {
+test('a disconnected client recovers large history with one streamed replay and deduplicates output', { timeout: 20_000 }, async t => {
   const f = await fixture(t);
   await f.agent.start(); await f.agent.submit('Keep working while the laptop sleeps');
   assert.equal(f.activityTimeout, 24 * 60 * 60 * 1000);
@@ -138,13 +150,64 @@ test('a disconnected client does not own work lifetime; missed output is paginat
   for (let index = 0; index < 330; index++) await f.frame({ type: 'assistant', message: { id: `answer-${index}`, content: [{ type: 'text', text: `${index} ` + '🍈'.repeat(1000) }] } });
   await f.frame({ type: 'result', result: 'Complete' });
   assert.equal(f.stops, 0); assert.equal(f.prompts.length, 1);
+  const before = f.replays.length;
   f.offline(false);
   await until(() => f.received.some(value => value.type === 'result'));
   assert.equal(f.received.filter(value => value.type === 'assistant').length, 330);
   assert.equal(f.received.filter(value => value.type === 'result').length, 1);
   assert.equal(f.prompts.length, 1);
   assert.equal(f.requests.some(value => value.type === 'heartbeat'), false);
-  assert.ok(f.requests.filter(value => value.type === 'agent-replay').length > 10);
+  assert.equal(f.requests.filter(value => value.type === 'agent-replay').length, 0);
+  assert.equal(f.replays.length - before, 1, 'History larger than the reply/transport window needs only one command');
+});
+
+test('an interrupted streamed reattachment resumes after its last journal entry without repeating frames', { timeout: 20_000 }, async t => {
+  const f = await fixture(t);
+  await f.agent.start(); await f.agent.submit('Restore a large conversation'); await f.agent.close(false);
+  for (let index = 0; index < 200; index++) await f.frame({ type: 'assistant', message: { id: `saved-${index}`, content: [{ type: 'text', text: `${index} ` + '🍈'.repeat(2000) }] } });
+  await f.frame({ type: 'result', result: 'Recovered' });
+  let dropped = false, boundary = 0;
+  const session: AgentSession = { ...f.session, async *stream(options) {
+    for await (const event of f.session.stream(options)) {
+      yield event;
+      if (!dropped && event.data.type === 'agent-replay') {
+        dropped = true; boundary = event.data.entries.at(-1)!.sequence;
+        throw new Error('network stream lost during replay');
+      }
+    }
+  } };
+  const next = new RemoteAgent(session); t.after(() => next.close(false));
+  const frames: ClaudeFrame[] = []; next.on('frame', frame => frames.push(frame));
+  const before = f.replays.length;
+  await next.start();
+  assert.equal(dropped, true);
+  assert.ok(boundary > 0);
+  assert.equal(f.replays[before + 1]?.after, boundary);
+  assert.equal(frames.filter(frame => frame.type === 'assistant').length, 200);
+  assert.equal(frames.filter(frame => frame.type === 'result').length, 1);
+  assert.equal(new Set(frames.filter(frame => frame.type === 'assistant').map(frame => object(frame.message).id)).size, 200);
+  assert.deepEqual(f.prompts, ['Restore a large conversation']);
+});
+
+test('live output interleaved with a fixed replay snapshot catches up through coalesced notifications', async t => {
+  const f = await fixture(t);
+  await f.agent.start(); await f.agent.submit('Continue during reconnect'); await f.agent.close(false);
+  for (let index = 0; index < 20; index++) await f.frame({ type: 'assistant', message: { id: `saved-${index}`, content: [{ type: 'text', text: 'saved '.repeat(2000) }] } });
+  let injected = false;
+  f.onReplay(async () => {
+    if (injected) return;
+    injected = true;
+    for (let index = 0; index < 10; index++) await f.frame({ type: 'assistant', message: { id: `live-${index}`, content: [{ type: 'text', text: `Live output ${index}` }] } });
+    await f.frame({ type: 'result', result: 'Finished during replay' });
+  });
+  const next = new RemoteAgent(f.session); t.after(() => next.close(false));
+  const frames: ClaudeFrame[] = []; next.on('frame', frame => frames.push(frame));
+  await next.start();
+  await until(() => frames.some(frame => frame.type === 'result'));
+  assert.equal(frames.filter(frame => frame.type === 'assistant').length, 30);
+  assert.equal(new Set(frames.filter(frame => frame.type === 'assistant').map(frame => object(frame.message).id)).size, 30);
+  assert.equal(frames.filter(frame => frame.type === 'result').length, 1);
+  assert.deepEqual(f.prompts, ['Continue during reconnect']);
 });
 
 test('an ambiguous input acknowledgment retries the same identity without delivering twice', async t => {
@@ -190,9 +253,9 @@ test('an expired transport cursor recovers journal history without duplicating a
   const f = await fixture(t); await f.agent.start(); await f.agent.submit('First');
   await f.frame({ type: 'result', result: 'One completed turn' });
   await until(() => f.received.some(value => value.type === 'result'));
-  const before = f.requests.filter(value => value.type === 'agent-replay').length;
+  const before = f.replays.length;
   f.expireStream();
-  await until(() => f.requests.filter(value => value.type === 'agent-replay').length > before);
+  await until(() => f.replays.length > before);
   await f.agent.submit('Second'); await f.frame({ type: 'result', result: 'Two' });
   await until(() => f.received.filter(value => value.type === 'result').length === 2);
   assert.deepEqual(f.prompts, ['First', 'Second']);

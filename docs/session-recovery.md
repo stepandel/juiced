@@ -68,12 +68,22 @@ memory. Journals currently remain until workspace deletion.
 
 SSE notifications carry journal sequence numbers and may coalesce under output
 backpressure. The runtime commits a small Cantelop view with the published
-sequence. Reattachment reads that view's event boundary, catches up from the
-journal, then subscribes after the boundary. Gaps, duplicate notifications, and
-expired/reset transport cursors recover through journal pagination. A 30-second
-read watchdog reconnects half-open subscriptions after sleep. View/subscription
+sequence. Reattachment subscribes at that boundary and dispatches one replay
+command. The runtime streams a fixed journal snapshot in bounded pages over the
+same subscription, pipelining up to twelve pages per durable handoff batch. This
+avoids a separate command round trip for every 48 KiB of history. Replay IDs
+isolate concurrent readers, and an explicit end marker confirms completeness.
+New output interleaved with recovery is reconciled by journal sequence; any
+remaining gap starts another snapshot from the last recovered entry. Interrupted
+transfers and expired/reset transport cursors resume there without repeating
+displayed frames. Replay advances the saved transport boundary between batches
+so large histories can exceed transport retention. Legacy paginated request
+replies remain available for diagnostics. A 30-second read watchdog reconnects
+half-open subscriptions after sleep. View/subscription
 reads do not keep compute alive; while a turn is working, a watchdog also checks
 the journal so sandbox loss can be reported.
+The streamed protocol requires rebuilding the CLI and deploying its matching
+runtime together; existing journals remain readable.
 
 ## Input and permissions
 
@@ -98,10 +108,13 @@ in the same TUI, but not a CLI restart.
 ## Verification
 
 `test/durable-agent.test.ts` exercises output beyond the transport replay window,
-paginated history, duplicate and ambiguous input acknowledgments, expired cursors,
-reattachment with pending approvals, idle native resumption, partial append
+streamed history, interrupted transfers, interleaved live output, duplicate and
+ambiguous input acknowledgments, expired cursors, reattachment with pending
+approvals, idle native resumption, partial append
 repair, and recovery of uncertain input after runtime replacement.
 `test/runtime-protocol.test.ts` additionally runs durable commands through the
-actual SDK activity handler and a real native JSON subprocess. Renderer tests
+actual SDK activity handler and a real native JSON subprocess, including a
+streamed replay larger than the SDK output buffer while native work stays alive.
+Renderer tests
 verify local editing while connectivity is stalled and detachment on terminal
 loss. Hosted sleep/wake verification still requires a matching runtime deployment.

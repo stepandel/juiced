@@ -13,6 +13,7 @@ import type { WorkspaceDatabase } from '@cantelop/sdk/session';
 import { activateTerminal, receiveTerminal } from '../src/runtime/terminal.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
 import { discoverRepository, git, sha256 } from '../src/git.js';
+import { ClaudeDecoder } from '../src/agent-protocol.js';
 
 test('durable agent routes run through the real SDK activity and native JSON process without client heartbeats', { timeout: 15_000 }, async t => {
   const previousDirectory = process.cwd();
@@ -66,7 +67,10 @@ test('durable agent routes run through the real SDK activity and native JSON pro
         const directory = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', 'fixture');
         fs.mkdirSync(directory,{recursive:true}); fs.writeFileSync(path.join(directory,process.argv.at(-1)+'.jsonl'),'checkpoint');
         send(frame);
-        setTimeout(()=>{send({type:'assistant',message:{id:'answer',content:[{type:'text',text:'DURABLE_NATIVE_OK'}]}});send({type:'result',result:'DURABLE_NATIVE_OK'});},25);
+        setTimeout(()=>{
+          if (frame.message.content === 'LARGE') for (let index=0;index<100;index++) send({type:'assistant',message:{id:'large-'+index,content:[{type:'text',text:'x'.repeat(18000)}]}});
+          send({type:'assistant',message:{id:'answer',content:[{type:'text',text:'DURABLE_NATIVE_OK'}]}});send({type:'result',result:'DURABLE_NATIVE_OK'});
+        },25);
       }
     });`;
   const opened = await submit({ type: 'start', durable: true, tty: false, argv: ['-e', fixture, '--'], columns: 80, rows: 24, term: 'dumb' });
@@ -90,6 +94,30 @@ test('durable agent routes run through the real SDK activity and native JSON pro
   assert.ok(Date.parse(status.activity.deadline) - Date.now() > 23 * 60 * 60 * 1000);
   const replay = await submit({ type: 'agent-replay', after: 0 });
   assert.ok(replay.ok && replay.replay?.entries.some(entry => entry.event.type === 'user'));
+
+  // A live native activity still owns the slot. Replay must use intake output,
+  // pipeline more than one handoff, and cross the SDK's 1 MiB output buffer.
+  await drain(() => { const last = events.at(-1); return last?.type === 'agent-output' && last.event.type === 'state' && last.event.state === 'ready'; });
+  const offset = events.length;
+  await send({ type: 'user', uuid: randomUUID(), message: { role: 'user', content: 'LARGE' } });
+  await drain(() => events.slice(offset).some(event => event.type === 'agent-output' && event.event.type === 'state' && event.event.state === 'ready'));
+  const id = randomUUID();
+  let settled = false;
+  const streamed = submit({ type: 'agent-replay', after: 0, stream: id }).then(reply => { settled = true; return reply; });
+  await delay(50);
+  const initial = await request(`/__cantelop/v2/runtime/events?after=${cursor}&wait=0`);
+  assert.ok(initial.events.filter((item: { event?: TerminalEvent }) => item.event?.type === 'agent-replay').length > 1, 'Replay pages must be pipelined before acknowledgment');
+  await drain(() => settled);
+  assert.deepEqual(await streamed, { ok: true });
+  const chunks = events.filter((event): event is Extract<TerminalEvent, { type: 'agent-replay' }> => event.type === 'agent-replay' && event.id === id);
+  assert.ok(chunks.length > 30);
+  const decoder = new ClaudeDecoder();
+  const frames = chunks.flatMap(chunk => chunk.entries.flatMap(entry => entry.event.type === 'bytes' && entry.event.channel === 'stdout' ? decoder.push(Buffer.from(entry.event.data, 'base64')) : []));
+  decoder.finish();
+  assert.equal(frames.filter(frame => frame.type === 'assistant' && String((frame.message as { id: string }).id).startsWith('large-')).length, 100);
+  const entries = chunks.flatMap(chunk => chunk.entries);
+  assert.deepEqual(entries.map(entry => entry.sequence), Array.from({ length: entries.length }, (_, index) => index + 1));
+  assert.ok(events.some(event => event.type === 'agent-replay-end' && event.id === id && event.latest === entries.at(-1)!.sequence && !event.error));
 });
 
 test('native runtime keeps terminal work alive after start intake and handles input, heartbeat, output acknowledgments and exit', { timeout: 10_000 }, async t => {
@@ -168,7 +196,7 @@ test('native runtime routes Git maintenance without starting Claude and returns 
   process.chdir(root);
   const sandboxId = `sbx-${'3'.repeat(32)}`;
   const server = createServer(createSessionRuntimeHandler<TerminalCommand, TerminalEvent, TerminalReply>({
-    onActivate(context) { activateTerminal({ ...context, database: async () => db as WorkspaceDatabase }); },
+    onActivate(context) { return activateTerminal({ ...context, database: async () => db as WorkspaceDatabase }); },
     receive(context) { return receiveTerminal({ ...context, database: async () => db as WorkspaceDatabase }); },
   }, { sandboxId }));
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -209,7 +237,7 @@ test('native runtime streams a Git inspection without database access or startin
   const sandboxId = `sbx-${'5'.repeat(32)}`;
   const noDatabase = async (): Promise<WorkspaceDatabase> => { throw new Error('Inspection must not access the database'); };
   const server = createServer(createSessionRuntimeHandler<TerminalCommand, TerminalEvent, TerminalReply>({
-    onActivate(context) { activateTerminal({ ...context, database: noDatabase }); },
+    onActivate(context) { return activateTerminal({ ...context, database: noDatabase }); },
     receive(context) { return receiveTerminal({ ...context, database: noDatabase }); },
   }, { sandboxId, env: { CLAUDE_PATH: '/missing-provider-binary' } }));
   t.after(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); process.chdir(previous); await rm(root, { recursive: true, force: true }); });

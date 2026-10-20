@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { SessionEventCursor, SessionRef } from '@cantelop/sdk';
+import type { SessionEvent, SessionEventCursor, SessionRef } from '@cantelop/sdk';
 import { MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, type Approval, type ClaudeFrame, type ModelOption, type SlashCommand } from './agent-protocol.js';
 import type { SavedSettings } from './settings.js';
@@ -431,55 +431,78 @@ export class RemoteAgent extends EventEmitter {
     this.sequence = entry.sequence;
   }
 
-  private async replay(): Promise<void> {
-    for (;;) {
-      const reply = await this.request({ type: 'agent-replay', after: this.sequence });
-      if (!reply.ok || !reply.replay) throw new Error('Cantelop did not return agent history');
-      const before = this.sequence;
-      for (const entry of reply.replay.entries) this.journalEntry(entry);
-      if (this.sequence >= reply.replay.latest) return;
-      if (this.sequence === before) throw new Error('Agent history made no progress');
-    }
-  }
-
   private async readDurable(): Promise<void> {
     let failures = 0, recover = true;
     while (!this.controller.signal.aborted) {
       let watchdog: AbortSignal | undefined;
+      let replayId: string | undefined;
+      let unseen: AgentJournalEntry | undefined;
+      let events: AsyncIterator<SessionEvent<TerminalEvent>> | undefined;
+      const subscription = new AbortController();
       try {
         const view = await this.session.view?.({ signal: this.controller.signal }).catch(error => {
           if (['session_view_not_found', 'session_not_found', 'resource_not_found'].includes(String((error as { code?: string }).code))) return undefined;
           throw error;
         });
-        if (recover || Number(object(view?.state).agentSequence) > this.sequence) await this.replay();
-        if (failures) this.emit('reconnected');
-        recover = false;
-        this.caughtUp?.(); this.caughtUp = undefined;
         // A read watchdog also recovers half-open connections after laptop sleep.
         // View and stream reads do not activate compute or extend a work lease.
         watchdog = AbortSignal.timeout(30_000);
-        const signal = AbortSignal.any([this.controller.signal, watchdog]);
-        const after = view?.cursor ?? this.cursor;
-        for await (const event of this.session.stream({ ...(after ? { after } : {}), signal })) {
-          if (event.data.type === 'agent-output') {
-            if (event.data.sequence > this.sequence + 1) await this.replay();
-            this.journalEntry(event.data);
-          } else if (event.data.type === 'error') throw new RemoteProcessError(event.data.message);
-          this.cursor = event.cursor;
+        const signal = AbortSignal.any([this.controller.signal, watchdog, subscription.signal]);
+        const replay = () => {
+          const id = replayId = randomUUID();
+          const command: TerminalCommand = { type: 'agent-replay', after: this.sequence, stream: id };
+          // Read the same subscription throughout recovery. One command streams all
+          // pages; its acceptance never blocks consuming output or durable handoffs.
+          void this.session.dispatch(command, { signal }).catch(error => {
+            if (replayId === id) subscription.abort(error);
+          });
+        };
+        const caughtUp = () => {
           if (failures) this.emit('reconnected');
           failures = 0;
+          this.caughtUp?.(); this.caughtUp = undefined;
+        };
+        const boundary = view?.cursor;
+        const after = this.cursor && (!boundary || this.cursor.streamId === boundary.streamId && this.cursor.sequence > boundary.sequence) ? this.cursor : boundary;
+        events = this.session.stream({ ...(after ? { after } : {}), signal })[Symbol.asyncIterator]();
+        // Issue the subscription before starting a producer that can exceed retention.
+        const first = events.next();
+        if (recover || Number(object(view?.state).agentSequence) > this.sequence) replay();
+        else caughtUp();
+        recover = false;
+        for (let next = await first; !next.done; next = await events.next()) {
+          const event = next.value;
+          if (event.data.type === 'agent-output') {
+            if (event.data.sequence > this.sequence + 1) {
+              if (!unseen || event.data.sequence > unseen.sequence) unseen = event.data;
+              if (!replayId) replay();
+            } else this.journalEntry(event.data);
+          } else if (event.data.type === 'agent-replay' && event.data.id === replayId) {
+            for (const entry of event.data.entries) this.journalEntry(entry);
+          } else if (event.data.type === 'agent-replay-end' && event.data.id === replayId) {
+            if (event.data.error) throw new RemoteProcessError(event.data.error);
+            if (this.sequence < event.data.latest) throw new Error('The agent history stream is incomplete');
+            replayId = undefined;
+            if (unseen && unseen.sequence === this.sequence + 1) this.journalEntry(unseen);
+            if (unseen && unseen.sequence > this.sequence) replay();
+            else { unseen = undefined; caughtUp(); }
+          } else if (event.data.type === 'error') throw new RemoteProcessError(event.data.message);
+          this.cursor = event.cursor;
+          if (!replayId) caughtUp();
         }
         throw new Error('The Claude output stream ended unexpectedly');
       } catch (error) {
         if (this.controller.signal.aborted) return;
-        if (watchdog?.aborted) { recover = this.remoteState === 'working'; continue; }
+        if (watchdog?.aborted) { recover = Boolean(replayId) || this.remoteState === 'working'; continue; }
+        if (subscription.signal.aborted) error = subscription.signal.reason;
         this.invalidateSettings();
         const expired = ['event_cursor_expired', 'event_stream_reset'].includes(String((error as { code?: string }).code));
+        if (expired) this.cursor = undefined;
         if (error instanceof RemoteProcessError || !expired && !this.retryable(error)) throw error;
         recover = true;
         this.emit('reconnecting', ++failures);
         await delay(Math.min(5000, 250 * 2 ** Math.min(failures - 1, 5)), undefined, { signal: this.controller.signal });
-      }
+      } finally { subscription.abort(); await events?.return?.(); }
     }
   }
 

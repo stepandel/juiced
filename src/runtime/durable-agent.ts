@@ -219,6 +219,38 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       if (journal.state === 'ready') armIdle();
     },
     async replay(after: number): Promise<TerminalReply> { await load(); return { ok: true, replay: await journal.page(after) }; },
+    async streamReplay(after: number, id: string, intake: Context): Promise<void> {
+      if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error('Invalid agent replay identity');
+      const pending: Promise<void>[] = [];
+      const flush = async () => {
+        await Promise.all(pending.splice(0));
+        // Keep a recent subscription boundary even when history exceeds transport retention.
+        await intake.view.commit({ agentSequence: journal.latest });
+      };
+      try {
+        await load();
+        let page = await journal.page(after);
+        const latest = page.latest;
+        while (page.entries.length) {
+          intake.signal.throwIfAborted();
+          const sent = intake.output.send({ type: 'agent-replay', id, entries: page.entries });
+          void sent.catch(() => {});
+          pending.push(sent);
+          // Pipeline bounded batches so each page does not wait for its own durable handoff.
+          if (pending.length === 12) await flush();
+          after = page.entries.at(-1)!.sequence;
+          if (after >= latest) break;
+          page = await journal.page(after, latest);
+        }
+        await flush();
+        await intake.output.send({ type: 'agent-replay-end', id, latest });
+        await intake.view.commit({ agentSequence: journal.latest });
+      } catch (error) {
+        await Promise.allSettled(pending);
+        if (intake.signal.aborted) throw error;
+        await intake.output.send({ type: 'agent-replay-end', id, latest: journal.latest, error: error instanceof Error ? error.message : 'Agent history replay failed' });
+      }
+    },
     get active() { return Boolean(running); },
     async input(command: TerminalCommand) {
       if (!terminal) throw new Error('Claude is sleeping');

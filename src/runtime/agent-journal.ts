@@ -96,12 +96,12 @@ export class AgentJournal {
     return entry;
   }
 
-  async page(after: number) {
+  async page(after: number, through?: number) {
     await this.pending;
-    if (!Number.isSafeInteger(after) || after < 0 || after > this.latest) throw new Error('Invalid agent history cursor');
+    const latest = through ?? this.latest;
+    if (!Number.isSafeInteger(after) || after < 0 || after > latest || !Number.isSafeInteger(latest) || latest > this.latest) throw new Error('Invalid agent history cursor');
     const entries: AgentJournalEntry[] = [];
     let size = 0;
-    const latest = this.latest;
     for (let index = after; index < latest; index++) {
       const position = this.positions[index]!;
       if (size + position.bytes > 48 * 1024 && entries.length) break;

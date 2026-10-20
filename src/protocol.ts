@@ -15,7 +15,7 @@ export type AgentConnection = { epoch: string; initialized?: ClaudeFrame };
 export type TerminalCommand =
   | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string; directoryName?: string; git?: { binding: string; relativeDirectory: string }; durable?: boolean }
   | { type: 'agent-input'; id: string; epoch: string; frame: ClaudeFrame }
-  | { type: 'agent-replay'; after: number }
+  | { type: 'agent-replay'; after: number; stream?: string }
   | { type: 'input'; data: string }
   | { type: 'resize'; columns: number; rows: number }
   | { type: 'signal'; signal: 'SIGINT' | 'SIGTERM' | 'SIGHUP' }
@@ -27,6 +27,8 @@ export type TerminalCommand =
 
 export type TerminalEvent =
   | ({ type: 'agent-output' } & AgentJournalEntry)
+  | { type: 'agent-replay'; id: string; entries: AgentJournalEntry[] }
+  | { type: 'agent-replay-end'; id: string; latest: number; error?: string }
   | { type: 'ready' }
   | { type: 'output'; channel: 'stdout' | 'stderr'; data: string }
   | { type: 'exit'; code: number }
