@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionContext, SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
 import { ClaudeDecoder, object, type ClaudeFrame } from '../agent-protocol.js';
 import { MAX_INPUT_BYTES, type AgentJournalEvent, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
+import { selectsClaudeSession } from '../terminal-session.js';
 import { AgentJournal } from './agent-journal.js';
 import type { createTerminal } from './terminal.js';
 
@@ -193,7 +194,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       await load();
       if (journal.configuration && (journal.configuration.directoryName !== command.directoryName || JSON.stringify(journal.configuration.git) !== JSON.stringify(command.git)))
         throw new Error('This session belongs to another project checkout. Use its original project and workspace.');
-      if (command.tty || command.argv.some(arg => ['--resume', '-r', '--continue', '-c', '--session-id'].includes(arg) || /^--(?:resume|session-id)=/.test(arg)))
+      if (command.tty || command.argv.some(selectsClaudeSession))
         throw new Error('Run juiced claude in the original terminal tab, or juiced claude --session ID to select a Juiced conversation. Native conversation flags are unavailable in the local TUI.');
       if (stopping) await running;
       if (!running) {

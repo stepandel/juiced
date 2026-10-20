@@ -589,3 +589,12 @@ test('a replacement runtime reports interruption and never resends an uncertain 
   await assert.rejects(service.send({ type: 'agent-input', id, epoch: 'old-process', frame }), /interrupted/);
   await service.dispose();
 });
+
+test('durable sessions reject every native session-selection flag, matching local terminal binding', async t => {
+  const root = await mkdtemp('/tmp/juiced-flags-'); t.after(() => rm(root, { recursive: true, force: true }));
+  const service = createDurableAgent({ signal: new AbortController().signal, session: { id: 'test', keepAliveSeconds: 120 }, env: {}, database: async () => { throw Error('unused'); } }, () => { throw Error('A rejected start must not launch Claude'); }, root);
+  t.after(() => service.dispose());
+  const start = (argv: string[]) => service.open({ type: 'start', durable: true, tty: false, argv, columns: 80, rows: 24, term: 'xterm-256color' }, {} as SessionContext<TerminalCommand, TerminalEvent, TerminalReply>);
+  for (const argv of [['--fork-session'], ['--resume'], ['--resume=abc'], ['-rabc'], ['-c'], ['--continue'], ['--session-id', randomUUID()], ['--from-pr', '1'], ['--teleport']])
+    await assert.rejects(start(argv), /Native conversation flags are unavailable/, argv.join(' '));
+});
