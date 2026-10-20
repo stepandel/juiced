@@ -1,5 +1,10 @@
 # Juiced
 
+The [managed multitenancy proposal](docs/multitenancy.md) describes per-account
+Cantelop Apps, Juiced-managed infrastructure and billing, and the platform and CLI
+work needed for a publicly installable product. The setup below describes the
+current self-managed CLI.
+
 File sync is off by default. Git repositories initialize from local `HEAD` once; later transfers are explicit. Non-Git directories use a persistent remote project folder, initially empty, with optional file sync through `juiced claude sync --files [--watch]`. See [Git workspaces](docs/git-workspaces.md) for snapshot transfer, importing commits, optional fast-forwarding, and migration from file sync.
 
 Run the real Claude Code CLI in a Cantelop session, attached to your local terminal:
