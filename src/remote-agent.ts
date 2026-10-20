@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionEvent, SessionEventCursor, SessionRef } from '@cantelop/sdk';
-import { MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
+import { MAX_AGENT_INPUT_BYTES, MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, MAX_PROMPT_BYTES, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, type Approval, type ApprovalOptions, type ClaudeFrame, type ModelOption, type SlashCommand } from './agent-protocol.js';
 import type { SavedSettings } from './settings.js';
 import { validateExportManifest, validTransferId } from './git-protocol.js';
@@ -187,7 +187,7 @@ export class RemoteAgent extends EventEmitter {
 
   private async sendBytes(bytes: Buffer, retryProcessChange = false): Promise<void> {
     if (this.durable) {
-      if (bytes.length > 768 * 1024) throw new Error('The submitted message is too large');
+      if (bytes.length > MAX_AGENT_INPUT_BYTES) throw new Error('The submitted message is too large');
       await this.enqueue({ type: 'agent-input', id: randomUUID(), epoch: this.epoch, frame: JSON.parse(bytes.toString()) as ClaudeFrame }, bytes.length, retryProcessChange);
       return;
     }
@@ -336,7 +336,7 @@ export class RemoteAgent extends EventEmitter {
   async submit(text: string): Promise<void> {
     if (this.status !== 'ready' || this.submitting) throw new Error('Claude is still working; your draft is kept locally');
     if (!text.trim()) return;
-    if (Buffer.byteLength(text) > 512 * 1024) throw new Error('The prompt is too large (maximum 512 KiB)');
+    if (Buffer.byteLength(text) > MAX_PROMPT_BYTES) throw new Error('The prompt is too large (maximum 512 KiB)');
     const bytes = this.encode({ type: 'user', uuid: randomUUID(), session_id: '', parent_tool_use_id: null, message: { role: 'user', content: text } });
     const submission = ++this.submission;
     this.invalidateSettings();

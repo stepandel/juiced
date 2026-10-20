@@ -1,7 +1,9 @@
 import { StringDecoder } from 'node:string_decoder';
 
 export type ClaudeFrame = Record<string, unknown>;
-export const object = (value: unknown): ClaudeFrame => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as ClaudeFrame : {};
+/** A plain JSON object (not null or an array). */
+export const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+export const object = (value: unknown): ClaudeFrame => isRecord(value) ? value : {};
 
 /** JSONL boundaries and UTF-8 characters need not match Cantelop event boundaries. */
 export class ClaudeDecoder {

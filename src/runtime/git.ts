@@ -10,6 +10,7 @@ import { validProjectName } from '../project-name.js';
 import { acquireCheckout, reapCheckout } from './project-state.js';
 import { workingTree } from '../working-tree.js';
 import { isENOENT, writeFileAtomic } from '../fs-util.js';
+import { BASE64 } from '../protocol.js';
 
 type Binding = { version: 1; binding: string; sourceBranch: string | null; publishBase?: { head: string; tree: string } };
 type Journal = { id: string; binding: Binding; hadOriginal: boolean };
@@ -158,7 +159,7 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
         return {};
       }
       case 'chunk': {
-        if (!['bundle', 'staged', 'unstaged'].includes(command.file) || !Number.isSafeInteger(command.offset) || command.offset < 0 || typeof command.data !== 'string' || command.data.length > UPLOAD_CHUNK_BYTES / 3 * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(command.data)) throw new Error('Invalid transfer chunk');
+        if (!['bundle', 'staged', 'unstaged'].includes(command.file) || !Number.isSafeInteger(command.offset) || command.offset < 0 || typeof command.data !== 'string' || command.data.length > UPLOAD_CHUNK_BYTES / 3 * 4 || !BASE64.test(command.data)) throw new Error('Invalid transfer chunk');
         const manifest = JSON.parse(await readFile(join(transfer!, 'upload.json'), 'utf8')) as UploadManifest;
         const expected = manifest.files.find(file => file.name === command.file);
         const bytes = Buffer.from(command.data, 'base64');

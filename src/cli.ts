@@ -18,6 +18,10 @@ import { terminalIdentity, usesTerminalSession } from './terminal-session.js';
 import { listSessions } from './list-sessions.js';
 import { LocalPublisher } from './local-publish.js';
 
+/** package.json version, injected by scripts/build.mjs; unbundled runs have none. */
+declare const JUICED_VERSION: string | undefined;
+const version = typeof JUICED_VERSION === 'string' ? JUICED_VERSION : 'development';
+
 const controller = new AbortController();
 let interrupted = 0;
 const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map((signal, index) => {
@@ -32,7 +36,7 @@ const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map((signal, index) 
 try {
   const args = parseArguments(process.argv.slice(2));
   if (args.command === 'help') process.stdout.write(args.argv[0] === 'github-configure' ? GITHUB_CONFIGURE_HELP : HELP);
-  else if (args.command === 'version') process.stdout.write('juiced 0.1.0\n');
+  else if (args.command === 'version') process.stdout.write(`juiced ${version}\n`);
   else if (args.command === 'env') {
     await updateEnvironment(claudeApp.environment(), args.action, args.name, args.secret, process, controller.signal);
   }

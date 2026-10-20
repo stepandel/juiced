@@ -3,8 +3,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { validateSavedSettings, type SavedSettings } from '../settings.js';
 import { isENOENT, writeFileAtomic } from '../fs-util.js';
-
-const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+import { isRecord as record } from '../agent-protocol.js';
 
 /** Save in Claude's user settings, outside the project directory. */
 export async function saveSettings(workspace: string, patch: SavedSettings, signal: AbortSignal): Promise<void> {

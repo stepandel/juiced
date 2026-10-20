@@ -1,4 +1,5 @@
 import { inspectionScope } from './inspection-protocol.js';
+import { validSessionId } from './session-list-protocol.js';
 
 type Arguments =
   | { command: 'env'; action: 'set' | 'unset'; name: string; secret: boolean; workspace: undefined; argv: [] }
@@ -54,7 +55,7 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
         if (session !== undefined) throw new Error('Pass --session only once.');
         session = flag === '--session' ? argv[++launchIndex] ?? '' : flag.slice('--session='.length);
         launchIndex++;
-        if (!/^ses_[a-f0-9]{32}$/.test(session)) throw new Error('Invalid Juiced session ID');
+        if (!validSessionId(session)) throw new Error('Invalid Juiced session ID');
       } else break;
     }
     if (launchIndex > 0) {

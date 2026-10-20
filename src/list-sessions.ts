@@ -1,13 +1,12 @@
-import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Writable } from 'node:stream';
 import type { WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
-import { discoverRepository } from './git.js';
+import { discoverRepository, sha256 } from './git.js';
 import { selectProject } from './project.js';
 import { isENOENT } from './fs-util.js';
 import { SESSION_LIST_TIMEOUT_MS, validSessionId, validateSessionListPage, type SessionListCommand } from './session-list-protocol.js';
-import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
+import { validWorkspaceId, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 
 type ListingApp = { workspace(selector: WorkspaceSelector): Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'inspect' | 'session'> };
 
@@ -20,7 +19,7 @@ async function localIdentities(project: { localDirectory: string; workspace: str
   for (const entry of entries) if (entry.isFile() && /^[a-f0-9]{64}\.json$/.test(entry.name)) {
     try {
       const state = JSON.parse(await readFile(join(directory, entry.name), 'utf8'));
-      if (state?.workspace === project.workspace && validSessionId(state.id)) ids.set(createHash('sha256').update(state.id).digest('hex'), state.id);
+      if (state?.workspace === project.workspace && validSessionId(state.id)) ids.set(sha256(state.id), state.id);
     } catch (error) {
       if (!(error instanceof SyntaxError) && !isENOENT(error)) throw error;
     }
@@ -34,7 +33,7 @@ export async function listSessions(app: ListingApp, directory: string, workspace
   const existing = await app.workspace({ slug: project.workspace }).inspect({ signal });
   signal.throwIfAborted();
   if (!existing) { stdout.write(`No saved sessions. Workspace ${project.workspace} does not exist.\n`); return; }
-  if (existing.slug !== project.workspace || !/^wsp_[a-f0-9]{32}$/.test(existing.id)) throw new Error('Cantelop returned an invalid workspace identity.');
+  if (existing.slug !== project.workspace || !validWorkspaceId(existing.id)) throw new Error('Cantelop returned an invalid workspace identity.');
   const repository = await discoverRepository(project.localDirectory);
   const known = await localIdentities(project);
   const session = app.workspace({ id: existing.id }).session({ keepAliveSeconds: 0 });
@@ -52,7 +51,7 @@ export async function listSessions(app: ListingApp, directory: string, workspace
       for (const item of page.items) {
         const id = item.id ?? known.get(item.key);
         if (id) {
-          if (createHash('sha256').update(id).digest('hex') !== item.key) throw new Error('The runtime returned an invalid session identity.');
+          if (sha256(id) !== item.key) throw new Error('The runtime returned an invalid session identity.');
           sessions.push({ id, updatedAt: item.updatedAt });
         } else unidentified++;
       }

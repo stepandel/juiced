@@ -3,7 +3,7 @@ import { mkdir, realpath, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import type { SessionActivationContext, SessionContext, SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
-import { decodeInput, dimensions, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
+import { decodeInput, dimensions, OUTPUT_CHUNK_BYTES, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
 import { PTY_HELPER } from './pty.js';
 import { validProjectName } from '../project-name.js';
 import { relativeProjectPath } from '../git.js';
@@ -192,8 +192,8 @@ export function createTerminal(
     const pump = async (stream: Readable, channel: 'stdout' | 'stderr') => {
       for await (const raw of stream) {
         const bytes = Buffer.from(raw as Uint8Array);
-        for (let offset = 0; offset < bytes.length; offset += 12 * 1024) {
-          await work.output.send({ type: 'output', channel, data: bytes.subarray(offset, offset + 12 * 1024).toString('base64') });
+        for (let offset = 0; offset < bytes.length; offset += OUTPUT_CHUNK_BYTES) {
+          await work.output.send({ type: 'output', channel, data: bytes.subarray(offset, offset + OUTPUT_CHUNK_BYTES).toString('base64') });
         }
       }
     };

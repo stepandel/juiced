@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionContext, SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
 import { ClaudeDecoder, object, type ClaudeFrame } from '../agent-protocol.js';
-import { MAX_INPUT_BYTES, type AgentJournalEvent, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
+import { MAX_AGENT_INPUT_BYTES, MAX_INPUT_BYTES, OUTPUT_CHUNK_BYTES, type AgentJournalEvent, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
 import { selectsClaudeSession } from '../terminal-session.js';
 import { AgentJournal } from './agent-journal.js';
+import { CHECKOUT_LEASES_TABLE } from './project-state.js';
 import type { createTerminal } from './terminal.js';
 
 type Context = SessionContext<TerminalCommand, TerminalEvent, TerminalReply>;
@@ -147,8 +148,8 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
   }
   async function bytes(channel: 'stdout' | 'stderr', bytes: Buffer) {
     const events: AgentJournalEvent[] = [];
-    for (let offset = 0; offset < bytes.length; offset += 12 * 1024)
-      events.push({ type: 'bytes', channel, data: bytes.subarray(offset, offset + 12 * 1024).toString('base64') });
+    for (let offset = 0; offset < bytes.length; offset += OUTPUT_CHUNK_BYTES)
+      events.push({ type: 'bytes', channel, data: bytes.subarray(offset, offset + OUTPUT_CHUNK_BYTES).toString('base64') });
     // One fsync per native output batch, including all of its bounded records.
     for (const entry of await journal.events(events)) if (sink) publish(entry);
   }
@@ -220,7 +221,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
           // Activation is fenced to one runtime. No native process owns an old
           // registration here, including one acquired just before sandbox loss.
           const db = await context.database();
-          await db.execute('CREATE TABLE IF NOT EXISTS juiced_checkout_leases (token TEXT PRIMARY KEY, project TEXT NOT NULL, session TEXT NOT NULL, kind TEXT NOT NULL, expires INTEGER NOT NULL)');
+          await db.execute(CHECKOUT_LEASES_TABLE);
           await db.execute({ sql: 'DELETE FROM juiced_checkout_leases WHERE project = ? AND session = ?', args: [command.directoryName, context.session.id] });
         }
         const interrupted = journal.state === 'working';
@@ -266,7 +267,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       await load();
       if (!/^[0-9a-f-]{36}$/i.test(command.id) || typeof object(command.frame).type !== 'string') throw new Error('Invalid agent input');
       const text = JSON.stringify(command.frame) + '\n';
-      if (Buffer.byteLength(text) > 768 * 1024) throw new Error('Agent input is too large');
+      if (Buffer.byteLength(text) > MAX_AGENT_INPUT_BYTES) throw new Error('Agent input is too large');
       const hash = createHash('sha256').update(text).digest('hex');
       const previous = journal.inputs.get(command.id);
       if (previous) {
@@ -283,8 +284,8 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       if (command.frame.type === 'user') {
         const text = Buffer.from(String(object(command.frame.message).content));
         const events: AgentJournalEvent[] = [];
-        for (let offset = 0; offset < text.length; offset += 12 * 1024)
-          events.push({ type: 'user', id: command.id, data: text.subarray(offset, offset + 12 * 1024).toString('base64'), final: offset + 12 * 1024 >= text.length });
+        for (let offset = 0; offset < text.length; offset += OUTPUT_CHUNK_BYTES)
+          events.push({ type: 'user', id: command.id, data: text.subarray(offset, offset + OUTPUT_CHUNK_BYTES).toString('base64'), final: offset + OUTPUT_CHUNK_BYTES >= text.length });
         // One ordered append and fsync for the whole prompt and its state change.
         for (const entry of await journal.events([...events, { type: 'state', state: 'working' }])) if (sink) publish(entry);
       }

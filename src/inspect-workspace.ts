@@ -7,7 +7,7 @@ import { selectProject } from './project.js';
 import { captureInspection } from './inspection-snapshot.js';
 import { compareInspection, renderInspection, renderRemoteListing } from './inspection-view.js';
 import { INSPECTION_CHUNK_BYTES, INSPECTION_TIMEOUT_MS, MAX_INSPECTION_BYTES, InspectionIncomplete, inspectionScope, validateInspectionListing, validateInspectionSnapshot, type InspectionListing, type InspectionSnapshot } from './inspection-protocol.js';
-import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
+import { BASE64, validWorkspaceId, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 import { isCursorExpired, isViewMissing } from './transport.js';
 
 type Workspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'inspect' | 'session' | 'selector'>;
@@ -58,7 +58,7 @@ async function remoteInventory<T>(workspace: InspectionWorkspace, command: Inspe
         if (!data || !('id' in data) || data.id !== command.id) continue;
         if (data.type === 'inspection-error') throw new InspectionIncomplete(data.message);
         if (data.type === 'inspection-chunk') {
-          if (typeof data.data !== 'string' || data.data.length > Math.ceil(INSPECTION_CHUNK_BYTES / 3) * 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data.data)) throw new InspectionIncomplete('Invalid inspection chunk.');
+          if (typeof data.data !== 'string' || data.data.length > Math.ceil(INSPECTION_CHUNK_BYTES / 3) * 4 || !BASE64.test(data.data)) throw new InspectionIncomplete('Invalid inspection chunk.');
           const bytes = Buffer.from(data.data, 'base64');
           if (!bytes.length || data.offset !== size || size + bytes.length > MAX_INSPECTION_BYTES) throw new InspectionIncomplete('The inspection stream is out of order or too large.');
           chunks.push(bytes); size += bytes.length;
@@ -98,7 +98,7 @@ export async function inspectWorkspace(app: InspectionApp, directory: string, op
   const existing = await app.workspace({ slug: project.workspace }).inspect({ signal });
   signal.throwIfAborted();
   if (!existing) { stdout.write(`Workspace ${project.workspace} does not exist. No workspace was created.\n`); return 2; }
-  if (existing.slug !== project.workspace || !/^wsp_[a-f0-9]{32}$/.test(existing.id)) throw new InspectionIncomplete('Cantelop returned an invalid workspace identity.');
+  if (existing.slug !== project.workspace || !validWorkspaceId(existing.id)) throw new InspectionIncomplete('Cantelop returned an invalid workspace identity.');
   const controller = new AbortController();
   const combined = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]);
   try {

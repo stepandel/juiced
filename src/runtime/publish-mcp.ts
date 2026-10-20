@@ -1,4 +1,6 @@
-/** Self-contained Node program passed to Claude's stdio MCP launcher. */
+import { PUBLISH_TIMEOUT_MS } from '../publish-protocol.js';
+
+/** Self-contained Node program passed to Claude's stdio MCP launcher. Its socket timeout matches the server's. */
 const PUBLISH_MCP_SOURCE = String.raw`
 import { connect } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
@@ -39,7 +41,7 @@ function handle(request) {
     complete = true; calls.delete(id); socket.destroy();
     send({ id, result: { isError: !['applied', 'already-applied'].includes(result.status), content: [{ type: 'text', text: JSON.stringify(result) }] } });
   };
-  socket.setEncoding('utf8'); socket.setTimeout(310000);
+  socket.setEncoding('utf8'); socket.setTimeout(${PUBLISH_TIMEOUT_MS + 10_000});
   socket.on('connect', () => socket.write(JSON.stringify({ name: params.name, ...args }) + '\n'));
   socket.on('data', data => {
     response += data;

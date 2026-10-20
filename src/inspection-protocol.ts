@@ -2,6 +2,7 @@ import { posix } from 'node:path';
 import { validOid, validTransferId } from './git-protocol.js';
 import { relativeProjectPath } from './git.js';
 import { validProjectName } from './project-name.js';
+import { isRecord as record } from './agent-protocol.js';
 
 export const MAX_INSPECTION_BYTES = 64 * 1024 * 1024;
 export const INSPECTION_CHUNK_BYTES = 32 * 1024;
@@ -48,7 +49,6 @@ export function validateInspectionCommand(command: InspectionCommand) {
       (command.mode !== undefined && command.mode !== 'listing')) throw new Error('Invalid workspace inspection command');
 }
 
-const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const name = (value: unknown): value is string => typeof value === 'string' && !!value && !['.', '..', '.git'].includes(value) && !value.includes('/') && !value.includes('\0');
 function entry(value: unknown): value is TreeEntry {
   return record(value) && name(value.name) && ['040000', '100644', '100755', '120000', '160000'].includes(String(value.mode)) && validOid(value.oid);
