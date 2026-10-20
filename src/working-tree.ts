@@ -27,12 +27,18 @@ export async function workingTree(root: string, signal: AbortSignal): Promise<st
     if ((await real(['ls-files', '--unmerged'])).length) throw new Error('Resolve merge conflicts before publishing.');
     const inventory = () => real(['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
     const before = await inventory();
-    for (const path of before.toString().split('\0').filter(Boolean)) {
-      try {
-        const info = await lstat(join(root, path));
-        if (!info.isFile() && !info.isSymbolicLink()) throw new Error('Publishing does not support embedded repositories or special files.');
-      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    }
+    const paths = before.toString().split('\0').filter(Boolean);
+    // Bounded parallel lstat: one await per file dominated capture time on large trees.
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(64, paths.length) }, async () => {
+      while (next < paths.length) {
+        const path = paths[next++]!;
+        try {
+          const info = await lstat(join(root, path));
+          if (!info.isFile() && !info.isSymbolicLink()) throw new Error('Publishing does not support embedded repositories or special files.');
+        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { next = paths.length; throw error; } }
+      }
+    }));
     await run(['update-index', '-z', '--index-info'], staged);
     await run(['add', '-A', '--', '.']);
     if ((await run(['ls-files', '--stage'])).toString().split('\n').some(line => line.startsWith('160000 '))) throw new Error('Publishing does not support embedded repositories.');
