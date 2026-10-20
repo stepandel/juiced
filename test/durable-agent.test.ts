@@ -15,13 +15,14 @@ import type { createTerminal } from '../src/runtime/terminal.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
 import { prepareAgentSession } from '../src/session-state.js';
 import { commandMenu } from '../src/tui/command-menus.js';
+import type { Publication } from '../src/publish-protocol.js';
 
 async function until(check: () => boolean, ms = 10_000) {
   const end = Date.now() + ms;
   while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
 }
 
-async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 'test') {
+async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 'test', agentOptions: ConstructorParameters<typeof RemoteAgent>[1] = {}) {
   const root = await mkdtemp('/tmp/juiced-durable-');
   const lifetime = new AbortController(), events = new EventEmitter();
   const stored: SessionEvent<TerminalEvent>[] = [];
@@ -37,6 +38,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   let outputHook: ((event: Extract<TerminalEvent, { type: 'agent-output' }>) => Promise<void>) | undefined;
   let viewHook: (() => Promise<void>) | undefined;
   const views: number[] = [];
+  const publications = new Map<string, string | undefined>();
   const output = { async send(data: TerminalEvent) {
     stored.push({ data, sessionId, messageId: `msg_${'1'.repeat(32)}`, createdAt: new Date(), cursor: { streamId: 'a'.repeat(32), sequence: stored.length + 1 } });
     events.emit('event');
@@ -59,6 +61,12 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
         return { ok: true };
       },
       async input(command: TerminalCommand) {
+        if (command.type === 'publish-status' || command.type === 'publish-claim' || command.type === 'publish-result') {
+          if (!publications.has(command.id)) throw new Error('This publication is no longer pending.');
+          if (command.type === 'publish-claim') publications.set(command.id, command.client);
+          if (command.type === 'publish-result') { publications.delete(command.id); await currentOutput.send({ type: 'local-publish-done', id: command.id }); }
+          return { ok: true };
+        }
         if (command.type === 'eof') { finish(); return { ok: true }; }
         if (command.type !== 'input') return { ok: true };
         for (const value of decoder.push(Buffer.from(command.data, 'base64'))) {
@@ -97,6 +105,9 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
       if (command.type === 'start') return service.open(command, intake);
       if (command.type === 'agent-replay') return service.replay(command.after);
       if (command.type === 'save-settings') return service.input(command);
+      if (command.type === 'publish-status' || command.type === 'publish-claim' || command.type === 'publish-result') {
+        try { return await service.input(command); } catch (error) { return { ok: false, error: (error as Error).message }; }
+      }
       if (command.type === 'agent-input') {
         try { await service.send(command); }
         catch (error) { return { ok: false, error: (error as Error).message }; }
@@ -131,11 +142,12 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
     },
     async stop() { stops++; lifetime.abort(); await activity; },
   };
-  const agent = new RemoteAgent(session, { controlTimeoutMs: 10_000 });
+  const agent = new RemoteAgent(session, { controlTimeoutMs: 10_000, ...agentOptions });
   const received: ClaudeFrame[] = [];
   agent.on('frame', value => received.push(value));
   t.after(async () => { await agent.close(false); lifetime.abort(); await activity; await Promise.allSettled(replayWork); await service.dispose(); await rm(root, { recursive: true, force: true }); });
   return { root, agent, session, service, frame, raw, prompts, launches, requests, requestIds, replays, stored, received, views,
+    async publish(publication: Publication, active = true) { if (active) publications.set(publication.id, undefined); await currentOutput.send({ type: 'local-publish', publication }); },
     onReplay(hook: typeof replayHook) { replayHook = hook; },
     onOutput(hook: typeof outputHook) { outputHook = hook; },
     onView(hook: typeof viewHook) { viewHook = hook; },
@@ -160,6 +172,57 @@ test('the first text delta is durable immediately and following deltas flush wit
   await f.frame(delta('batched-delta'));
   await until(() => JSON.stringify(f.received).includes('batched-delta'), 200);
   t.diagnostic(`Local journal/publication: leading ${leadingMs.toFixed(1)} ms, batched ${(performance.now() - next).toFixed(1)} ms`);
+});
+
+function publication(): Publication {
+  return { id: randomUUID(), kind: 'commits', summary: 'Bring completed changes back', expiresAt: Date.now() + 60_000, paths: ['README.md'], fileCount: 1,
+    manifest: { head: 'a'.repeat(40), sourceBranch: 'main', file: { name: 'bundle', size: 0, sha256: 'b'.repeat(64) } } };
+}
+
+test('local publication requires its own explicit approval and denial never calls the local writer', async t => {
+  let writes = 0;
+  const options = { localPublish: { head: 'a'.repeat(40), async apply() { writes++; return { status: 'applied' as const, message: 'Applied locally' }; } } };
+  const f = await fixture(t, 60_000, 'publication-approval', options);
+  await f.agent.start();
+  const denied = publication(); await f.publish(denied);
+  await until(() => f.agent.approvals.has(denied.id));
+  assert.equal(f.agent.approvals.get(denied.id)?.local, true);
+  assert.equal(writes, 0);
+  await f.agent.answer(denied.id, false);
+  assert.equal(writes, 0);
+  assert.ok(f.requests.some(command => command.type === 'publish-result' && command.id === denied.id && command.result.status === 'declined'));
+  const allowed = publication(); await f.publish(allowed);
+  await until(() => f.agent.approvals.has(allowed.id));
+  await f.agent.answer(allowed.id, true);
+  assert.equal(writes, 1);
+  assert.ok(f.received.some(frame => frame.type === 'juiced_publish' && frame.message === 'Applied locally'));
+  await assert.rejects(f.agent.answer(allowed.id, true), /no longer active/);
+  f.expireStream();
+  await until(() => f.replays.length > 1);
+  await delay(50);
+  assert.equal(writes, 1, 'Replaying a completed publication must never apply it again');
+  assert.equal(f.agent.approvals.size, 0);
+});
+
+test('reattachment restores a live publication offer and ignores historical or expired offers', async t => {
+  let writes = 0;
+  const options = { localPublish: { head: 'a'.repeat(40), async apply() { writes++; return { status: 'applied' as const, message: 'Applied' }; } } };
+  const f = await fixture(t, 60_000, 'publication-resume', options); await f.agent.start();
+  const pending = publication(); await f.publish(pending);
+  await until(() => f.agent.approvals.has(pending.id));
+  await f.agent.close(false);
+  const reattached = new RemoteAgent(f.session, options);
+  try {
+    await reattached.start();
+    await until(() => reattached.approvals.has(pending.id));
+    assert.equal(writes, 0);
+    await reattached.answer(pending.id, false);
+    const old = publication(); await f.publish(old, false);
+    const expired = { ...publication(), expiresAt: Date.now() - 1000 }; await f.publish(expired);
+    await delay(50);
+    assert.equal(reattached.approvals.size, 0);
+    assert.equal(writes, 0);
+  } finally { await reattached.close(false); }
 });
 
 test('slow output acknowledgments use a bounded pipeline without skipping journal entries or replaying', async t => {

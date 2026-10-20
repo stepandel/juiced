@@ -222,6 +222,27 @@ A Claude process exits after two minutes idle; the next prompt or menu request r
 
 For another machine, configure Cantelop's app integration profile or supply `CANTELOP_APP_SLUG` and `CANTELOP_INTEGRATION_TOKEN`, with `CANTELOP_EDGE_URL` for a local endpoint. The compiled CLI already carries its runtime identity. Keep app tokens private; they grant access to the app's workspaces. `CANTELOP_PROFILE` selects a configured profile.
 
+## Bring Claude's changes back locally
+
+Interactive Git sessions include the `juiced-local` MCP server. Ask Claude to
+**publish its commits to your local checkout**, or to **bring its file edits back
+as uncommitted changes**. The tools are `publish_commits` and `publish_snapshot`.
+Juiced shows the pinned commit or snapshot, a path preview, and Claude's summary
+in a local confirmation with **Deny** selected by default. Applying a publication
+does not require GitHub, a tunnel, or a local listening server.
+
+Commit publication fast-forwards a clean local source branch. Snapshot publication
+preserves local staging and unrelated edits, and refuses overlapping edits or a
+changed baseline commit. Successive snapshots use the last successfully published
+snapshot as their shared baseline. Keep the local Juiced TUI connected to review
+and apply requests; offers expire after five minutes. Claude receives an explicit
+completion or failure result. See [local publication](docs/local-publication.md)
+for the workflow, retained artifacts, and limitations.
+
+Build and deploy the updated CLI and runtime together. Existing conversations
+gain the tools when their native Claude process next starts; `/exit` followed by
+`juiced claude` in the same tab restarts it while retaining the conversation.
+
 ## Inspect a workspace
 
 ```sh
