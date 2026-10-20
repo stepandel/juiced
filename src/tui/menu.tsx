@@ -108,18 +108,21 @@ export function CommandMenu({ load, rows, done, cancel, active = true }: { load(
   const start = Math.max(0, current.index - limit + 1);
   const selected = items[current.index];
   const [before, cursor, after] = cursorParts(current.editor);
-  return <Box flexDirection="column" borderStyle="round" borderColor="green" paddingX={1} overflow="hidden">
+  return <Box flexDirection="column" borderStyle="single" borderLeft={false} borderRight={false} borderBottom={false} borderColor="green" overflow="hidden">
     <Box height={1} flexShrink={0}><Text bold color="green" wrap="truncate-end">{page?.title ?? 'Loading menu…'}</Text></Box>
     {page?.description && <Box maxHeight={2} overflow="hidden"><Text dimColor>{line(page.description)}</Text></Box>}
     {page?.input ? <Box maxHeight={3} overflow="hidden"><Text>{line(page.input.label)}: {before}<Text inverse>{cursor}</Text>{after}</Text></Box> : <>
-      {current.query && <Box height={1}><Text dimColor wrap="truncate-end">Filter: {current.query}</Text></Box>}
-      {items.slice(start, start + limit).map((item, i) => <Box key={item.id} height={1} flexShrink={0}>
-        <Text dimColor={item.disabled ?? false} inverse={start + i === current.index} wrap="truncate-end">{start + i === current.index ? '›' : ' '} {line(item.label)}{item.current ? ' (current)' : ''}</Text>
-      </Box>)}
+      {current.query && <Box height={1}><Text dimColor wrap="truncate-end">⌕ Filter: {current.query}</Text></Box>}
+      {items.slice(start, start + limit).map((item, i) => {
+        const selected = start + i === current.index;
+        return <Box key={item.id} height={1} flexShrink={0}>
+          <Text dimColor={(item.disabled ?? false) && !selected} wrap="truncate-end" {...(selected ? { color: 'green' } : {})}>{selected ? '❯' : ' '} {line(item.label)}{item.current ? ' ✔' : ''}</Text>
+        </Box>;
+      })}
       {page && !items.length && <Text dimColor>{current.query ? 'No matches' : 'No entries'}</Text>}
       {selected?.description && <Box maxHeight={2} overflow="hidden"><Text dimColor>{line(selected.description)}</Text></Box>}
     </>}
     {error && <Box height={1} flexShrink={0}><Text color="yellow" wrap="truncate-end">{error}</Text></Box>}
-    <Box height={1} flexShrink={0}><Text dimColor wrap="truncate-end">{loading ? 'Loading from Claude… Esc cancel' : current.pending ? page?.pendingLabel ?? 'Waiting for Claude…' : error && !page ? 'Enter retry · Esc cancel' : page?.footer ?? (page?.input ? 'Enter save · Esc back' : `${items.length ? current.index + 1 : 0}/${items.length} · ↑/↓ select · type to filter · Enter open · Esc back`)}</Text></Box>
+    <Box height={1} flexShrink={0}><Text dimColor wrap="truncate-end">{loading ? 'Loading from Claude… · Esc to cancel' : current.pending ? page?.pendingLabel ?? 'Waiting for Claude…' : error && !page ? 'Enter to retry · Esc to cancel' : page?.footer ? `${page.footer} · Esc to go back` : page?.input ? 'Enter to save · Esc to go back' : `Enter to confirm · Esc to go back · ↑/↓ to select · type to filter · ${items.length ? current.index + 1 : 0}/${items.length}`}</Text></Box>
   </Box>;
 }

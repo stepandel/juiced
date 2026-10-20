@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionEvent, SessionEventCursor, SessionRef } from '@cantelop/sdk';
 import { MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
-import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, type Approval, type ClaudeFrame, type ModelOption, type SlashCommand } from './agent-protocol.js';
+import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, type Approval, type ApprovalOptions, type ClaudeFrame, type ModelOption, type SlashCommand } from './agent-protocol.js';
 import type { SavedSettings } from './settings.js';
 import { validateExportManifest, validTransferId } from './git-protocol.js';
 import type { Publication, PublishResult } from './publish-protocol.js';
@@ -50,6 +50,7 @@ export class RemoteAgent extends EventEmitter {
   private sleeping = false;
   private remoteState = 'ready';
   private nativeInitialization: ClaudeFrame | undefined;
+  private sessionPermissionMode: { mode: string; epoch: string } | undefined;
   private submitting = false;
   private initializing = false;
   private startCommand?: Extract<TerminalCommand, { type: 'start' }>;
@@ -221,6 +222,14 @@ export class RemoteAgent extends EventEmitter {
       if (this.epoch !== reply.agent.epoch) this.nativeInitialization = undefined;
       this.epoch = reply.agent.epoch; this.sleeping = false;
       if (!this.nativeInitialization) this.initialize(reply.agent.initialized ?? await this.control({ subtype: 'initialize', hooks: null }));
+      // Idle restarts use the launch defaults. Restore the acknowledged session
+      // choice before any input, retaining it for another attempt if refused.
+      const permission = this.sessionPermissionMode;
+      if (permission && permission.epoch !== this.epoch) {
+        await this.control({ subtype: 'set_permission_mode', mode: permission.mode });
+        this.sessionPermissionMode = { mode: permission.mode, epoch: this.epoch };
+        this.info.current_permission_mode = permission.mode;
+      }
     })().finally(() => { this.reopening = undefined; });
   }
 
@@ -278,7 +287,8 @@ export class RemoteAgent extends EventEmitter {
     }
   }
 
-  async configure(request: MenuChange): Promise<ClaudeFrame> {
+  /** `persist: false` applies a permission mode to this session only, like Claude Code's Shift+Tab. */
+  async configure(request: MenuChange, options: { persist?: boolean } = {}): Promise<ClaudeFrame> {
     if (request.subtype === 'stop_task' && ['working', 'interrupting'].includes(this.status)) return this.control(request);
     if (this.status !== 'ready') throw new Error('Wait for Claude to finish before changing settings');
     this.invalidateSettings();
@@ -287,8 +297,9 @@ export class RemoteAgent extends EventEmitter {
       await this.ensureProcess(true);
       const response = await this.control(request);
       if (request.subtype === 'set_permission_mode') {
+        this.sessionPermissionMode = { mode: request.mode, epoch: this.epoch };
         this.info.current_permission_mode = request.mode;
-        await this.persist({ permissionMode: request.mode });
+        if (options.persist !== false) await this.persist({ permissionMode: request.mode });
       }
       if (request.subtype === 'apply_flag_settings') {
         if (typeof request.settings.outputStyle === 'string') this.info.output_style = request.settings.outputStyle;
@@ -332,7 +343,7 @@ export class RemoteAgent extends EventEmitter {
     } finally { this.submitting = false; }
   }
 
-  async answer(id: string, allow: boolean, answers?: Record<string, string>): Promise<void> {
+  async answer(id: string, allow: boolean, answers?: Record<string, string>, options: ApprovalOptions = {}): Promise<void> {
     const approval = this.approvals.get(id);
     if (!approval) throw new Error('This permission request is no longer active');
     if (approval.local) {
@@ -342,8 +353,8 @@ export class RemoteAgent extends EventEmitter {
       return;
     }
     const bytes = this.encode({ type: 'control_response', response: { subtype: 'success', request_id: id, response: allow
-      ? { behavior: 'allow', updatedInput: answers ? { ...approval.input, answers } : approval.input }
-      : { behavior: 'deny', message: 'The user declined this request.' } } });
+      ? { behavior: 'allow', updatedInput: answers ? { ...approval.input, answers } : approval.input, ...(options.suggestions?.length ? { updatedPermissions: options.suggestions } : {}) }
+      : { behavior: 'deny', message: options.message ? `The user declined this request and said: ${options.message}` : 'The user declined this request.' } } });
     this.approvals.delete(id);
     this.emit('approvals');
     await this.sendBytes(bytes);
@@ -412,7 +423,16 @@ export class RemoteAgent extends EventEmitter {
       this.invalidateSettings();
       this.updateCommands(frame.slash_commands);
       if (Array.isArray(frame.plugins)) this.info.plugins = frame.plugins;
-      if (typeof frame.permissionMode === 'string') this.info.current_permission_mode = frame.permissionMode;
+      if (typeof frame.permissionMode === 'string') {
+        this.info.current_permission_mode = frame.permissionMode;
+        // Shift+Tab offers bypass mode only to sessions launched with it.
+        this.info.launch_permission_mode ??= frame.permissionMode;
+      }
+    }
+    // Claude reports its own mode changes, such as leaving plan mode, in status frames.
+    if (frame.type === 'system' && frame.subtype === 'status' && typeof frame.permissionMode === 'string') {
+      this.info.current_permission_mode = frame.permissionMode;
+      if (this.sessionPermissionMode?.epoch === this.epoch) this.sessionPermissionMode.mode = frame.permissionMode;
     }
     if (frame.type === 'system' && typeof frame.task_id === 'string') {
       if (frame.subtype === 'task_started') this.tasks.set(frame.task_id, { ...frame, status: 'running' });
@@ -437,7 +457,8 @@ export class RemoteAgent extends EventEmitter {
       const request = object(frame.request);
       const id = String(frame.request_id);
       if (request.subtype === 'can_use_tool') {
-        this.approvals.set(id, { id, tool: String(request.tool_name), input: object(request.input), description: String(request.description ?? request.decision_reason ?? '') });
+        const suggestions = Array.isArray(request.permission_suggestions) ? request.permission_suggestions.map(object) : [];
+        this.approvals.set(id, { id, tool: String(request.tool_name), input: object(request.input), description: String(request.description ?? request.decision_reason ?? ''), ...(suggestions.length ? { suggestions } : {}) });
         this.emit('approvals');
       } else {
         void this.send({ type: 'control_response', response: { subtype: 'error', request_id: id, error: `Juiced does not support ${String(request.subtype)}` } }).catch(error => this.fail(error));

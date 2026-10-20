@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { stripVTControlCharacters } from 'node:util';
 import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
+import type { Approval, ApprovalOptions } from '../src/agent-protocol.js';
 import { runLocalTui } from '../src/tui/app.js';
 import type { TerminalInput, TerminalOutput } from '../src/remote-terminal.js';
 
@@ -36,7 +37,7 @@ test('reattaching prints saved turns and the entire unfinished turn into scrollb
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
   const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${writes.join('')}`); await delay(5); } };
   try {
-    await wait(() => writes.join('').includes('Allow Write'));
+    await wait(() => writes.join('').includes('Create file'));
     await delay(60);
     const restored = writes.join('');
     for (const marker of ['SAVED_PROMPT_0', 'SAVED_ANSWER_0', 'SAVED_PROMPT_1', 'SAVED_ANSWER_1', 'UNFINISHED_PROMPT', ...Array.from({ length: 24 }, (_, i) => `SAVED_PROGRESS_${i}:`)]) {
@@ -85,7 +86,7 @@ test('slash commands preview, filter, navigate, complete and submit locally', { 
   const frames: { text: string; rows: number }[] = [];
   const stdout = new Writable({ write(chunk, _, done) {
     const text = stripVTControlCharacters(chunk.toString());
-    if (text.includes('Enter send')) { latest = text; frames.push({ text, rows: stdout.rows! }); }
+    if (text.includes('mode on')) { latest = text; frames.push({ text, rows: stdout.rows! }); }
     done();
   } }) as TerminalOutput;
   stdout.isTTY = true; stdout.columns = 100; stdout.rows = 24;
@@ -98,19 +99,19 @@ test('slash commands preview, filter, navigate, complete and submit locally', { 
     await wait(() => latest.includes('Summarize conversation'));
     assert.ok(latest.includes('[instructions]'));
     stdin.write('comp');
-    await wait(() => latest.includes('1/2 ·'));
+    await wait(() => latest.includes('❯ /compact') && latest.includes('/compare') && latest.includes('Compare project changes'));
     assert.equal(latest.includes('Show Juiced keyboard shortcuts'), false);
     stdin.write('\x1b[B'); stdin.write('\t');
-    await wait(() => latest.includes('/compare ') && !latest.includes('Tab complete'));
+    await wait(() => latest.includes('❯ /compare') && !latest.includes('Compare project changes'));
     assert.deepEqual(agent.submitted, [], 'Completion must not submit a turn');
     stdin.write('\r');
     await wait(() => agent.submitted.length === 1);
     assert.deepEqual(agent.submitted, ['/compare ']);
 
     stdin.write('/comp');
-    await wait(() => latest.includes('1/2 ·'));
+    await wait(() => latest.includes('Compare project changes'));
     stdin.write('\x1b');
-    await wait(() => !latest.includes('Tab complete'));
+    await wait(() => !latest.includes('Compare project changes'));
     assert.ok(latest.includes('/comp'), 'Escape keeps the draft');
     assert.equal(agent.interrupts, 0, 'Closing suggestions must not interrupt Claude');
     stdin.write('\x1b');
@@ -119,15 +120,15 @@ test('slash commands preview, filter, navigate, complete and submit locally', { 
     await wait(() => latest.includes('Ask Claude to work'));
     agent.status = 'ready'; agent.emit('status', agent.status);
     stdin.write('/comp');
-    await wait(() => latest.includes('1/2 ·'));
+    await wait(() => latest.includes('Compare project changes'));
     stdin.write('\x1b[B'); stdin.write('\r');
     await wait(() => agent.submitted.length === 2);
     assert.equal(agent.submitted[1], '/compare', 'Rapid arrow + Enter runs the selected command');
 
     stdin.write('/project:');
-    await wait(() => latest.includes('1/20 ·'));
+    await wait(() => latest.includes('❯ /project:command-00'));
     for (let i = 0; i < 12; i++) stdin.write('\x1b[B');
-    await wait(() => latest.includes('13/20 ·') && latest.includes('/project:command-12'));
+    await wait(() => latest.includes('❯ /project:command-12'));
     stdout.columns = 50; stdout.rows = 16; stdout.emit('resize');
     await delay(80);
     assert.ok(latest.includes('/project:command-12'), 'The selected row remains visible on resize');
@@ -137,7 +138,7 @@ test('slash commands preview, filter, navigate, complete and submit locally', { 
     await wait(() => latest.includes('Ask Claude to work'));
     stdin.write('\x1b[200~/compact keep decisions\nsecond line\x1b[201~');
     await wait(() => latest.includes('second line'));
-    assert.equal(latest.includes('Tab complete'), false);
+    assert.equal(latest.includes('A project command'), false);
     assert.equal(agent.submitted.length, 2, 'Pasted newlines must stay in the draft');
   } finally { lifetime.abort(); await running; }
   assert.equal(stdin.isRaw, false);
@@ -185,11 +186,11 @@ test('the real TUI edits and displays input while the network is stalled, withou
   assert.equal(stdin.isRaw, false);
 });
 
-test('permission UI defaults to deny, ignores pasted approval shortcuts and preserves the local draft', { timeout: 5000 }, async () => {
+test('permission UI preselects Yes, ignores early and pasted keys, offers remembered grants and feedback, and preserves the draft', { timeout: 5000 }, async () => {
   class PreviewAgent extends RemoteAgent {
-    answers: boolean[] = [];
+    answers: { allow: boolean; options?: ApprovalOptions }[] = [];
     override async start() { this.status = 'ready'; this.emit('status', this.status); }
-    override async answer(id: string, allow: boolean) { this.answers.push(allow); this.approvals.delete(id); this.emit('approvals'); }
+    override async answer(id: string, allow: boolean, _?: Record<string, string>, options?: ApprovalOptions) { this.answers.push({ allow, ...(options ? { options } : {}) }); this.approvals.delete(id); this.emit('approvals'); }
     override async close() { this.status = 'closed'; this.emit('status', this.status); }
   }
   const agent = new PreviewAgent({} as AgentSession);
@@ -203,34 +204,98 @@ test('permission UI defaults to deny, ignores pasted approval shortcuts and pres
   const lifetime = new AbortController();
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
   const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error('UI did not update'); await delay(5); } };
+  const ask = async (id: string, extra: Partial<Approval> = {}) => {
+    const offset = output.length;
+    agent.approvals.set(id, { id, tool: 'Bash', input: { command: 'printf OK' }, description: '', ...extra });
+    agent.emit('approvals');
+    await wait(() => stripVTControlCharacters(output.slice(offset)).includes(extra.local ? 'in your local checkout?' : 'Bash command'));
+    return offset;
+  };
   try {
     await wait(() => agent.status === 'ready');
     stdin.write('my draft'); await delay(40);
-    agent.approvals.set('first', { id: 'first', tool: 'Bash', input: { command: 'printf OK' }, description: '' });
-    agent.emit('approvals');
-    await wait(() => output.includes('Allow Bash'));
-    stdin.write('\x1b[200~y\x1b[201~'); await delay(40);
+    await ask('first');
+    stdin.write('\r'); stdin.write('1'); await delay(40);
+    assert.deepEqual(agent.answers, [], 'Keys typed for the prompt as the dialog opens must not answer it');
+    stdin.write('\x1b[200~y\x1b[201~'); await delay(320);
     assert.deepEqual(agent.answers, [], 'Pasting y must not approve a tool');
     stdin.write('\r'); await wait(() => agent.answers.length === 1);
-    assert.equal(agent.answers[0], false);
+    assert.deepEqual(agent.answers[0], { allow: true }, 'Yes is preselected');
     await delay(40);
     assert.ok(stripVTControlCharacters(output).includes('my draft'));
-    const offset = output.length;
-    agent.approvals.set('second', { id: 'second', tool: 'Bash', input: { command: 'printf OK' }, description: '' });
-    agent.emit('approvals');
-    await wait(() => output.slice(offset).includes('Allow Bash'));
-    await delay(40); // Let the newly mounted permission attach its input handler.
-    stdin.write('\x1b[C'); stdin.write('\r');
+
+    const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'printf:*' }], behavior: 'allow', destination: 'localSettings' }];
+    const offset = await ask('second', { suggestions });
+    assert.ok(stripVTControlCharacters(output.slice(offset)).includes('2. Yes, and don’t ask again for Bash(printf:*) in this project'));
+    await delay(320);
+    stdin.write('\x1b[B'); stdin.write('\r');
     await wait(() => agent.answers.length === 2);
-    assert.equal(agent.answers[1], true, 'A rapid arrow then Enter must confirm the selected choice');
-    const localOffset = output.length;
-    agent.approvals.set('local-publication', { id: 'local-publication', local: true, tool: 'Publish snapshot', input: { files: 2, paths: ['README.md', 'src/app.ts'] }, description: 'Apply remote edits locally' });
-    agent.emit('approvals');
-    await wait(() => stripVTControlCharacters(output.slice(localOffset)).includes('in your local checkout?'));
+    assert.deepEqual(agent.answers[1], { allow: true, options: { suggestions } }, 'A rapid arrow then Enter confirms the remembered grant');
+
+    await ask('third');
+    await delay(40); stdin.write('\t'); await wait(() => output.includes('Tell Claude what to do differently'));
+    await delay(40); stdin.write('use echo instead'); await delay(40); stdin.write('\r');
+    await wait(() => agent.answers.length === 3);
+    assert.deepEqual(agent.answers[2], { allow: false, options: { message: 'use echo instead' } });
+
+    await ask('local-publication', { local: true, tool: 'Publish snapshot', input: { files: 2, paths: ['README.md', 'src/app.ts'] }, description: 'Apply remote edits locally' });
+    await delay(320);
     stdin.write('\x1b[200~y\x1b[201~'); await delay(40);
-    assert.equal(agent.answers.length, 2, 'Pasted text cannot approve a local publication');
-    stdin.write('\r'); await wait(() => agent.answers.length === 3);
-    assert.equal(agent.answers[2], false, 'Local publication defaults to Deny');
+    assert.equal(agent.answers.length, 3, 'Pasted text cannot approve a local publication');
+    stdin.write('\r'); await wait(() => agent.answers.length === 4);
+    assert.deepEqual(agent.answers[3], { allow: false }, 'Local publication defaults to No');
+  } finally { lifetime.abort(); await running; }
+  assert.equal(stdin.isRaw, false);
+});
+
+test('questions ignore early selections and approval feedback remains interruptible', { timeout: 5000 }, async () => {
+  class PermissionAgent extends RemoteAgent {
+    answers: { allow: boolean; answers?: Record<string, string> }[] = [];
+    interrupts = 0;
+    override async start() { this.status = 'working'; this.emit('status', this.status); }
+    override async answer(id: string, allow: boolean, answers?: Record<string, string>) {
+      this.answers.push({ allow, ...(answers ? { answers } : {}) }); this.approvals.delete(id); this.emit('approvals');
+    }
+    override async interrupt() { this.interrupts++; }
+    override async close() { this.status = 'closed'; this.emit('status', this.status); }
+  }
+  const agent = new PermissionAgent({} as AgentSession);
+  const stdin = new PassThrough() as PassThrough & TerminalInput & { ref(): void; unref(): void };
+  stdin.isTTY = true; stdin.isRaw = false;
+  stdin.setRawMode = raw => { stdin.isRaw = raw; };
+  stdin.ref = () => {}; stdin.unref = () => {};
+  let latest = '';
+  const stdout = new Writable({ write(chunk, _, done) {
+    const text = stripVTControlCharacters(chunk.toString());
+    if (text.includes('──')) latest = text;
+    done();
+  } }) as TerminalOutput;
+  stdout.isTTY = true; stdout.columns = 100; stdout.rows = 30;
+  const lifetime = new AbortController();
+  const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
+  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${latest}`); await delay(5); } };
+  try {
+    await wait(() => agent.status === 'working');
+    agent.approvals.set('question', { id: 'question', tool: 'AskUserQuestion', input: { questions: [{ question: 'Choose a target', options: [{ label: 'Staging' }, { label: 'Production' }] }] }, description: '' });
+    agent.emit('approvals');
+    await wait(() => latest.includes('Choose a target'));
+    await delay(40);
+    stdin.write('\r'); stdin.write('2'); stdin.write('\x1b[200~1\x1b[201~');
+    await delay(40);
+    assert.deepEqual(agent.answers, [], 'Prompt keys arriving with a question must not select an answer');
+    stdin.write('\x03'); await wait(() => agent.interrupts === 1);
+    await delay(320);
+    stdin.write('\r'); await wait(() => agent.answers.length === 1);
+    assert.deepEqual(agent.answers, [{ allow: true, answers: { 'Choose a target': 'Staging' } }]);
+
+    agent.approvals.set('command', { id: 'command', tool: 'Bash', input: { command: 'pwd' }, description: '' });
+    agent.emit('approvals');
+    await wait(() => latest.includes('Bash command'));
+    await delay(40); stdin.write('\t');
+    await wait(() => latest.includes('Tell Claude what to do differently'));
+    await delay(40); stdin.write('Keep this draft'); await delay(40); stdin.write('\x03');
+    await wait(() => agent.interrupts === 2);
+    assert.equal(agent.answers.length, 1, 'Interrupting from feedback must not answer the approval');
   } finally { lifetime.abort(); await running; }
   assert.equal(stdin.isRaw, false);
 });
@@ -254,7 +319,7 @@ test('long conversations and permission previews stay inside the terminal while 
   const stdout = new Writable({ write(chunk, _, done) {
     const text = stripVTControlCharacters(chunk.toString());
     writes.push(text);
-    if (text.includes('Enter send') || text.includes('Esc decline')) frames.push({ text, rows: stdout.rows! });
+    if (text.includes('mode on') || text.includes('Esc to cancel')) frames.push({ text, rows: stdout.rows! });
     done();
   } }) as TerminalOutput;
   stdout.isTTY = true; stdout.columns = 60; stdout.rows = 24;
@@ -268,21 +333,21 @@ test('long conversations and permission previews stay inside the terminal while 
     for (let i = 0; i < 10; i++) agent.emit('frame', { type: 'assistant', message: { id: `message-${i}`, content: [{ type: 'text', text: `Response ${i}: ${'wrapped text '.repeat(12)}` }] } });
     agent.approvals.set('permission', { id: 'permission', tool: 'Bash', input: { command: Array.from({ length: 30 }, (_, i) => `echo line ${i}`).join('\n') }, description: 'Check the command before allowing it.' });
     agent.emit('approvals');
-    await wait(() => frames.some(frame => frame.text.includes('Allow Bash')));
+    await wait(() => frames.some(frame => frame.text.includes('Bash command')));
     await delay(40);
     for (const key of ['\x1b[C', '\x1b[D', '\x1b[C', '\x1b[D']) { stdin.write(key); await delay(40); }
     stdout.columns = 42; stdout.rows = 16; stdout.emit('resize');
     await delay(80);
     stdin.write('\x1b[C'); await delay(40);
     stdin.write('\x1b[D'); await delay(40);
-    stdin.write('\x1b[C'); stdin.write('\r');
+    stdin.write('\x1b[C'); stdin.write('\x1b[D'); stdin.write('\r');
     await wait(() => agent.answers.length === 1);
     assert.deepEqual(agent.answers, [true]);
 
     agent.approvals.set('question', { id: 'question', tool: 'AskUserQuestion', input: { questions: [{ question: 'Which option?', options: Array.from({ length: 20 }, (_, i) => ({ label: `Option ${i + 1}`, description: 'A detailed option description that wraps onto multiple rows.' })) }] }, description: '' });
     agent.emit('approvals');
-    await wait(() => frames.at(-1)?.text.includes('Claude has a question') ?? false);
-    await delay(40); stdin.write('2'); await delay(40); stdin.write('\r');
+    await wait(() => frames.at(-1)?.text.includes('Which option?') ?? false);
+    await delay(320); stdin.write('2'); await delay(40); stdin.write('\r');
     await wait(() => agent.answers.length === 2);
     assert.deepEqual(agent.questionAnswers, { 'Which option?': 'Option 2' });
 
@@ -298,14 +363,94 @@ test('long conversations and permission previews stay inside the terminal while 
     for (const frame of frames) {
       const lines = frame.text.trimEnd().split('\n');
       assert.ok(lines.length < frame.rows, `A ${lines.length}-row live frame overflows the ${frame.rows}-row terminal:\n${frame.text}`);
-      if (frame.text.includes('Esc decline')) {
-        if (frame.text.includes('Claude has a question')) assert.ok(frame.text.includes('Which option?'), 'The question must stay visible');
+      if (frame.text.includes('Esc to cancel')) {
+        if (frame.text.includes('Which option?')) assert.ok(frame.text.includes('Which option?'), 'The question must stay visible');
         else {
-          assert.ok(frame.text.includes('Allow Bash'), 'The permission title must stay visible');
-          assert.ok(frame.text.includes('Deny') && frame.text.includes('Allow once'), 'Both approval choices must stay visible');
+          assert.ok(frame.text.includes('Bash command'), 'The permission title must stay visible');
+          assert.ok(frame.text.includes('1. Yes') && frame.text.includes('2. No'), 'Both approval choices must stay visible');
         }
       }
     }
   } finally { lifetime.abort(); await running; }
   assert.equal(stdout.listenerCount('resize'), 0);
+});
+
+test('Claude Code prompt keys: history, shortcuts, mode cycling, double Esc and double Ctrl-C', { timeout: 5000 }, async () => {
+  class KeyAgent extends RemoteAgent {
+    submitted: string[] = [];
+    modes: string[] = [];
+    refuseAuto = false;
+    override async start() { this.info.current_permission_mode = 'default'; this.status = 'ready'; this.emit('status', this.status); }
+    override async submit(text: string) {
+      this.submitted.push(text);
+      this.emit('frame', { type: 'result', result: `Answer ${this.submitted.length}`, duration_ms: 1000 });
+    }
+    override async configure(request: Parameters<RemoteAgent['configure']>[0], options?: Parameters<RemoteAgent['configure']>[1]) {
+      this.status = 'configuring'; this.emit('status', this.status);
+      if (options?.persist !== false) throw new Error('Shift+Tab must not save a workspace default');
+      if (request.subtype === 'set_permission_mode' && request.mode === 'auto' && this.refuseAuto) {
+        this.modes.push('auto refused'); this.status = 'ready'; this.emit('status', this.status);
+        throw new Error('Cannot set permission mode: auto mode is not available');
+      }
+      if (request.subtype === 'set_permission_mode') { this.modes.push(request.mode); this.info.current_permission_mode = request.mode; }
+      this.status = 'ready'; this.emit('status', this.status);
+      return {};
+    }
+    override async close() { this.status = 'closed'; this.emit('status', this.status); }
+  }
+  const agent = new KeyAgent({} as AgentSession);
+  const stdin = new PassThrough() as PassThrough & TerminalInput & { ref(): void; unref(): void };
+  stdin.isTTY = true; stdin.isRaw = false;
+  stdin.setRawMode = raw => { stdin.isRaw = raw; };
+  stdin.ref = () => {}; stdin.unref = () => {};
+  let latest = '';
+  const stdout = new Writable({ write(chunk, _, done) { const text = stripVTControlCharacters(chunk.toString()); if (text.includes('──')) latest = text; done(); } }) as TerminalOutput;
+  stdout.isTTY = true; stdout.columns = 100; stdout.rows = 24;
+  const lifetime = new AbortController();
+  let exited = false;
+  const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal).then(code => { exited = true; return code; });
+  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${latest}`); await delay(5); } };
+  const prompt = () => /❯ (.*)\n─/u.exec(latest)?.[1]?.trimEnd();
+  try {
+    await wait(() => latest.includes('manual mode on · ? for shortcuts'));
+    for (const text of ['first prompt', 'second prompt']) {
+      stdin.write(text); await wait(() => prompt() === text); stdin.write('\r');
+      await wait(() => latest.includes('? for shortcuts') && prompt()?.startsWith('Ask Claude') === true);
+    }
+    stdin.write('draft'); await wait(() => prompt() === 'draft');
+    stdin.write('\x1b[A'); await wait(() => prompt() === 'second prompt');
+    stdin.write('\x1b[A'); await wait(() => prompt() === 'first prompt');
+    stdin.write('\x1b[B'); stdin.write('\x1b[B'); await wait(() => prompt() === 'draft');
+
+    stdin.write('\x1b'); await wait(() => latest.includes('Esc again to clear'));
+    assert.equal(prompt(), 'draft', 'One Esc keeps the draft');
+    stdin.write('\x1b'); await wait(() => prompt()?.startsWith('Ask Claude') === true);
+
+    stdin.write('?'); await wait(() => latest.includes('shift + tab to cycle modes'));
+    assert.ok(prompt()?.startsWith('Ask Claude'), '? opens shortcuts without editing the draft');
+    stdin.write('x'); await wait(() => prompt() === 'x' && !latest.includes('shift + tab to cycle modes'));
+    stdin.write('\x15'); await wait(() => prompt()?.startsWith('Ask Claude') === true);
+
+    stdin.write('\x1b[Z'); await wait(() => latest.includes('accept edits on (shift+tab to cycle)'));
+    stdin.write('\x1b[Z'); await wait(() => latest.includes('plan mode on'));
+    stdin.write('\x1b[Z'); await wait(() => latest.includes('auto mode on'));
+    stdin.write('\x1b[Z'); await wait(() => latest.includes('manual mode on'));
+    agent.refuseAuto = true;
+    for (const mode of ['accept edits on', 'plan mode on', 'manual mode on', 'accept edits on', 'plan mode on', 'manual mode on']) { stdin.write('\x1b[Z'); await wait(() => latest.includes(mode)); }
+    assert.deepEqual(agent.modes, ['acceptEdits', 'plan', 'auto', 'default', 'acceptEdits', 'plan', 'auto refused', 'default', 'acceptEdits', 'plan', 'default'], 'A refused auto mode is skipped silently and not retried');
+    assert.equal(latest.includes('not available'), false);
+    assert.deepEqual(agent.submitted, ['first prompt', 'second prompt']);
+
+    stdin.write('draft'); await wait(() => prompt() === 'draft');
+    stdin.write('\x0f'); await wait(() => latest.includes('Showing detailed transcript') && latest.includes('Answer 2') && latest.includes('❯ first prompt'));
+    stdin.write('x'); await delay(30);
+    stdin.write('\x1b'); await wait(() => prompt() === 'draft');
+    stdin.write('\x15'); await wait(() => prompt()?.startsWith('Ask Claude') === true);
+
+    stdin.write('\x03'); await wait(() => latest.includes('Press Ctrl-C again to exit'));
+    await delay(30);
+    assert.equal(exited, false, 'One Ctrl-C on an empty prompt does not exit');
+    stdin.write('\x03'); await wait(() => exited);
+  } finally { lifetime.abort(); await running; }
+  assert.equal(stdin.isRaw, false);
 });

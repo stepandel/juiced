@@ -24,7 +24,9 @@ Claude’s native settings resolution; command-line flags override them for one
 invocation. The defaults follow the workspace across clients and stay outside
 project files and Git transfers. Other settings and permission rules are preserved.
 A failed save is reported explicitly; the running session retains its applied
-choice. Individual tool approvals remain one-time grants. Settings changes do not
+choice. Tool approvals are one-time grants unless you choose a "don't ask again"
+option, which applies Claude's suggested rule. Shift+Tab mode changes apply to
+the running session only. Settings changes do not
 submit user prompts or spend model turns.
 
 Catalogs come from Claude: models and their effort levels, output styles,
