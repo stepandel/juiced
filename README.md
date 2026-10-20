@@ -1,6 +1,7 @@
 # Juiced
 
-The [managed multitenancy proposal](docs/multitenancy.md) describes per-account
+The [managed multitenancy proposal](docs/multitenancy.md) and
+[implementation plan](docs/multitenancy-implementation.md) describe per-account
 Cantelop Apps, Juiced-managed infrastructure and billing, and the platform and CLI
 work needed for a publicly installable product. The setup below describes the
 current self-managed CLI.

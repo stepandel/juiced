@@ -2,6 +2,10 @@
 
 Status: architecture proposal; the managed service described here is not implemented.
 
+The [full implementation plan](multitenancy-implementation.md) defines the proposed
+contracts, work sequence, tests and rollout. It incorporates the confirmed GitHub
+and Google sign-in and subscription-with-included-usage/hard-cap requirements.
+
 Juiced will manage infrastructure and billing. End users sign in to Juiced and
 do not need a Cantelop account, the Cantelop CLI, Docker, or a source checkout.
 This is the product direction confirmed during the design discussion.
@@ -63,11 +67,11 @@ provisioning operations. Start with a maintained authentication provider/library
 and a browser sign-in flow. Link identities by verified provider subject through
 an authenticated linking flow, never by a user-supplied email.
 
-Use browser authorization with a one-time code, state, and PKCE for the CLI;
-loopback redirects are appropriate on desktop. This follows
+Use a maintained OAuth device authorization flow for V1 desktop and remote CLI
+login, with explicit browser approval. A future loopback authorization-code
+flow must use state and PKCE, following
 [OAuth for native apps, RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html).
-Provide a supported device authorization flow for remote terminals without a
-local browser. Store a revocable Juiced device credential in the OS credential
+Store a revocable Juiced device credential in the OS credential
 store, with a private file fallback where needed. Rotate refresh credentials
 and detect replay. Access tokens should be short-lived and audience-bound.
 
@@ -108,7 +112,8 @@ and adds that App's integration credential to the upstream request. Permit only
 the known public SDK protocol routes and methods. Do not accept an arbitrary
 upstream URL or caller-selected infrastructure headers. Use the canonical Edge
 origin from trusted installation metadata and do not follow redirects carrying
-credentials. Separate typed Juiced routes handle App environment updates.
+credentials. SDK 1.4.0 environment commands use the same validated connection;
+the relay applies account permissions to those operations too.
 
 Preserve message IDs, request bodies, runtime compatibility headers, errors,
 AbortSignals, and SSE response streaming. Retries must preserve the existing
@@ -121,6 +126,8 @@ The existing Claude browser-terminal flow returns a short-lived, single-use
 App/Workspace terminal ticket. It can continue to connect directly to that
 terminal after an authorized ticket request. Test its origin, scope, expiry,
 and suspension behavior separately; it must not expose an App integration token.
+The managed CLI's existing direct database cleanup also moves behind a narrow
+service operation so provider database tokens do not bypass device revocation.
 
 Revoking a Juiced device session blocks subsequent requests and closes its relay
 streams within a defined bounded interval. Bound stream authorization by token
@@ -291,8 +298,9 @@ contract tests across platform, SDK, and CLI.
 
 Acceptance must demonstrate that account A cannot read, resume, inspect, sync,
 publish from, configure, authenticate to, or delete account B's resources using
-either slugs or copied canonical IDs. Include identical project slugs and
-Session IDs in both Apps. Verify mismatched runtime rejection, revoked/expired
+either slugs or copied canonical IDs. Include identical project slugs and attempts
+to reuse Session IDs across Apps; existing global-ID collisions may safely fail
+without accessing the other App. Verify mismatched runtime rejection, revoked/expired
 device credentials, unknown App IDs, forged routing headers, terminal tickets,
 and non-enumerating errors. Verify App integration credentials never appear in
 the installed package, managed configuration, CLI responses, or logs.
