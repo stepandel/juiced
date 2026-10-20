@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline/promises';
 import type { Readable, Writable } from 'node:stream';
 import type { WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
+import { validWorkspaceId } from './protocol.js';
 
 type DeletionApp = {
   readonly name: string;
@@ -16,7 +17,7 @@ export async function deleteWorkspace(app: DeletionApp, slug: string, yes: boole
   const existing = await app.workspace({ slug }).inspect({ signal });
   signal.throwIfAborted();
   if (!existing) { io.stderr.write(`Workspace ${slug} does not exist.\n`); return; }
-  if (existing.slug !== slug || !/^wsp_[0-9a-f]{32}$/.test(existing.id)) throw new Error('Cantelop returned an invalid Workspace identity.');
+  if (existing.slug !== slug || !validWorkspaceId(existing.id)) throw new Error('Cantelop returned an invalid Workspace identity.');
   io.stderr.write(`Delete workspace ${slug} (${existing.id}) in ${app.name}.\nAll sessions will stop. All remote files, Git commits, Claude login, and database data in this workspace will be deleted, including other project folders sharing this workspace.\nLocal files and imported Git refs will be kept. Import any remote commits you want to keep before deleting.\n`);
   if (!yes) {
     const reader = createInterface({ input: io.stdin, output: io.stderr, terminal: true });

@@ -116,20 +116,23 @@ export class AgentJournal {
     await this.pending;
     const latest = through ?? this.latest;
     if (!Number.isSafeInteger(after) || after < 0 || after > latest || !Number.isSafeInteger(latest) || latest > this.latest) throw new Error('Invalid agent history cursor');
-    const entries: AgentJournalEntry[] = [];
-    let size = 0;
-    for (let index = after; index < latest; index++) {
-      const position = this.positions[index]!;
-      if (size + position.bytes > 48 * 1024 && entries.length) break;
-      const bytes = Buffer.alloc(position.bytes);
-      for (let offset = 0; offset < bytes.length;) {
-        const result = await this.file.read(bytes, offset, bytes.length - offset, position.offset + offset);
-        if (!result.bytesRead) throw new Error('Agent history is incomplete');
-        offset += result.bytesRead;
-      }
-      entries.push((JSON.parse(bytes.toString()) as Extract<Record, { kind: 'event' }>).entry);
-      size += bytes.length;
+    let end = after, size = 0;
+    for (; end < latest; end++) {
+      const position = this.positions[end]!;
+      if (size + position.bytes > 48 * 1024 && end > after) break;
+      size += position.bytes;
     }
+    if (end === after) return { entries: [], latest };
+    // One read spans the page; interleaved non-event records are small and skipped by position.
+    const start = this.positions[after]!.offset, last = this.positions[end - 1]!;
+    const bytes = Buffer.alloc(last.offset + last.bytes - start);
+    for (let offset = 0; offset < bytes.length;) {
+      const result = await this.file.read(bytes, offset, bytes.length - offset, start + offset);
+      if (!result.bytesRead) throw new Error('Agent history is incomplete');
+      offset += result.bytesRead;
+    }
+    const entries = this.positions.slice(after, end).map(position =>
+      (JSON.parse(bytes.toString('utf8', position.offset - start, position.offset - start + position.bytes)) as Extract<Record, { kind: 'event' }>).entry);
     return { entries, latest };
   }
 }

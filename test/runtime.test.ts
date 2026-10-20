@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, realpath, rm, mkdir, writeFile, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { createTerminal } from '../src/runtime/terminal.js';
 import { decodeInput, type TerminalCommand, type TerminalEvent } from '../src/protocol.js';
+import { until } from './fixtures/wait.js';
 
 const start = (argv: string[], tty = false): Extract<TerminalCommand, { type: 'start' }> => ({ type: 'start', argv, tty, columns: 91, rows: 32, term: 'xterm-256color' });
 
@@ -32,13 +32,7 @@ async function fixture(t: test.TestContext) {
   const events: TerminalEvent[] = [];
   const output = { async send(event: TerminalEvent) { events.push(event); } };
   const text = (channel: 'stdout' | 'stderr' = 'stdout') => Buffer.concat(events.filter(event => event.type === 'output' && event.channel === channel).map(event => Buffer.from((event as Extract<TerminalEvent, { type: 'output' }>).data, 'base64'))).toString();
-  const waitFor = async (value: string) => {
-    const deadline = Date.now() + 5000;
-    while (!text().includes(value)) {
-      if (Date.now() > deadline) throw new Error(`Expected ${value}, received ${text()} / ${text('stderr')}`);
-      await delay(10);
-    }
-  };
+  const waitFor = (value: string) => until(() => text().includes(value), { timeoutMs: 5000, intervalMs: 10, message: () => `Expected ${value}, received ${text()} / ${text('stderr')}` });
   return { terminal, events, output, text, waitFor, signal: lifetime.signal, workspace };
 }
 

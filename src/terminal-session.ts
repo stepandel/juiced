@@ -4,10 +4,13 @@ import { promisify } from 'node:util';
 const execute = promisify(execFile);
 const selectionFlags = new Set(['--resume', '-r', '--continue', '-c', '--session-id', '--fork-session', '--from-pr', '--teleport']);
 
+/** Native Claude flags that pick a conversation, including `--flag=value` and combined short flags such as `-rID`. */
+export const selectsClaudeSession = (arg: string) => selectionFlags.has(arg.split('=')[0]!) || /^-[rc].+/u.test(arg);
+
 /** Explicit Claude session selection takes precedence over the terminal binding. */
 export function usesTerminalSession(argv: string[], fresh = false): boolean {
   const flags = argv.slice(0, argv.indexOf('--') === -1 ? argv.length : argv.indexOf('--'));
-  const selected = flags.some(arg => selectionFlags.has(arg.split('=')[0]!) || /^-[rc].+/u.test(arg));
+  const selected = flags.some(selectsClaudeSession);
   if (fresh && selected) throw new Error('--new cannot be combined with Claude session-selection flags.');
   return !selected && !flags.includes('--no-session-persistence');
 }

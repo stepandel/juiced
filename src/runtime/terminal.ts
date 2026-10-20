@@ -3,7 +3,8 @@ import { mkdir, realpath, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import type { SessionActivationContext, SessionContext, SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
-import { decodeInput, dimensions, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
+import { decodeInput, dimensions, OUTPUT_CHUNK_BYTES, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
+import { isENOENT } from '../fs-util.js';
 import { PTY_HELPER } from './pty.js';
 import { validProjectName } from '../project-name.js';
 import { relativeProjectPath } from '../git.js';
@@ -192,8 +193,8 @@ export function createTerminal(
     const pump = async (stream: Readable, channel: 'stdout' | 'stderr') => {
       for await (const raw of stream) {
         const bytes = Buffer.from(raw as Uint8Array);
-        for (let offset = 0; offset < bytes.length; offset += 12 * 1024) {
-          await work.output.send({ type: 'output', channel, data: bytes.subarray(offset, offset + 12 * 1024).toString('base64') });
+        for (let offset = 0; offset < bytes.length; offset += OUTPUT_CHUNK_BYTES) {
+          await work.output.send({ type: 'output', channel, data: bytes.subarray(offset, offset + OUTPUT_CHUNK_BYTES).toString('base64') });
         }
       }
     };
@@ -206,7 +207,7 @@ export function createTerminal(
     } catch (error) {
       terminate();
       if (!signal.aborted) {
-        const message = (error as NodeJS.ErrnoException).code === 'ENOENT'
+        const message = isENOENT(error)
           ? 'The remote image is missing Claude or Python. Rebuild and deploy the Juiced runtime.'
           : 'The remote terminal failed.';
         await work.output.send({ type: 'error', message }).catch(() => {});
@@ -236,7 +237,7 @@ export function createTerminal(
         if (command.directoryName) {
           let paths;
           try { paths = await projectPaths(workspace, command.directoryName); }
-          catch (error) { await work.output.send({ type: 'error', message: 'The project directory is unavailable or unsafe.' }); throw error; }
+          catch (error) { await work.output.send({ type: 'error', message: 'The project directory is unavailable or unsafe.' }).catch(() => {}); throw error; }
           if (command.git) {
             lease = await acquireSessionCheckout(await context.database(), command.directoryName, context.session.id, AbortSignal.any([context.signal, work.signal]), error => { controller.abort(error); stop?.(); });
             const binding = await readBinding(paths.metadata);
@@ -250,7 +251,11 @@ export function createTerminal(
         }
         return await runTerminal(command, { ...work, signal: AbortSignal.any([work.signal, controller.signal]) });
       } catch (error) { prepareFailed?.(error); throw error; }
-      finally { await publisher?.close(); publisher = undefined; await lease?.release(); }
+      finally {
+        // The checkout lease must be released even if tearing down the bridge fails.
+        try { await publisher?.close(); }
+        finally { publisher = undefined; await lease?.release(); }
+      }
     },
     input,
     cancel() {
@@ -292,7 +297,8 @@ export async function receiveTerminal(context: SessionContext<TerminalCommand, T
     return;
   }
   if (command.type === 'save-settings' && agent.active) {
-    context.reply(await agent.input(command));
+    try { context.reply(await agent.input(command)); }
+    catch (error) { context.reply({ ok: false, error: error instanceof Error ? error.message : 'Unable to save Claude settings' }); }
     return;
   }
   if (command.type === 'publish-status' || command.type === 'publish-claim' || command.type === 'publish-result') {

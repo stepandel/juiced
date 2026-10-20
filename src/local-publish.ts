@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isENOENT, writeFileAtomic } from './fs-util.js';
 import { ancestor, cleanRepository, discoverRepository, git, gitText, sha256, type Repository } from './git.js';
 import { GitWorkspaceClient, type GitWorkspace } from './git-workspace.js';
 import { validateExportManifest, validTransferId } from './git-protocol.js';
@@ -36,10 +37,8 @@ async function checkoutLock(root: string) {
   throw new Error('Another Juiced client is updating this repository. Retry.');
 }
 
-async function saveJSON(path: string, value: unknown) {
-  await writeFile(path + '.next', JSON.stringify(value), { mode: 0o600 });
-  await rename(path + '.next', path);
-}
+// The receipt guards against applying twice, so it must survive a crash.
+const saveJSON = (path: string, value: unknown) => writeFileAtomic(path, JSON.stringify(value));
 
 export class LocalPublisher {
   constructor(private workspace: GitWorkspace, private project: Project, private original: Repository) {}
@@ -52,6 +51,18 @@ export class LocalPublisher {
     if (!repository || repository.root !== this.original.root || repository.binding !== this.original.binding || await realpath(repository.root) !== repository.root)
       throw new Error('The local repository binding changed. Reconnect Juiced.');
     const release = await checkoutLock(repository.root);
+    let result: PublishResult;
+    try { result = await this.applyLocked(publication, signal, repository); }
+    catch (error) { await release().catch(() => {}); throw error; }
+    // Local files may already be changed; a lock failure must not be reported as a conflict.
+    try { await release(); }
+    catch (error) {
+      return { ...result, message: `${result.message} The local publication lock could not be released (${error instanceof Error ? error.message : String(error)}); if later publications report a busy repository, delete refs/juiced/local-publish-lock.` };
+    }
+    return result;
+  }
+
+  private async applyLocked(publication: Publication, signal: AbortSignal, repository: Repository): Promise<PublishResult> {
     let client: GitWorkspaceClient | undefined;
     try {
       const root = await gitText(repository.root, ['rev-parse', '--path-format=absolute', '--git-path', 'juiced-publications']);
@@ -61,7 +72,7 @@ export class LocalPublisher {
       const fingerprint = sha256(JSON.stringify({ kind: publication.kind, manifest: publication.manifest }));
       let receipt: Receipt | undefined;
       try { receipt = JSON.parse(await readFile(receiptPath, 'utf8')); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      catch (error) { if (!isENOENT(error)) throw error; }
       if (receipt?.fingerprint !== undefined && receipt.fingerprint !== fingerprint) throw new Error('This publication identity was used for different contents.');
       if (receipt?.result) return { status: 'already-applied', message: 'This publication was already applied locally; no files were changed again.' };
       const check = async () => {
@@ -105,7 +116,7 @@ export class LocalPublisher {
         for (const part of path.split('/').slice(0, -1)) {
           parent = join(parent, part);
           try { if (!(await lstat(parent)).isDirectory()) throw new Error(`A snapshot path has a symlink or non-directory ancestor: ${path}`); }
-          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; break; }
+          catch (error) { if (!isENOENT(error)) throw error; break; }
         }
       }
       const matches = async (expected: string, actual: string) => !(await git(repository.root, ['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', expected, actual, '--', ...paths], { env: { GIT_LITERAL_PATHSPECS: '1' }, signal })).length;
@@ -119,9 +130,6 @@ export class LocalPublisher {
       // is preserved, and an ordinary patch rejection does not apply a subset.
       await git(repository.root, ['apply', '--binary', '--whitespace=nowarn', '-'], { input: imported.patch!, signal });
       return complete('applied', `Applied ${paths.length} snapshot path${paths.length === 1 ? '' : 's'} as local uncommitted edits; the index was preserved.`);
-    } finally {
-      await client?.close().catch(() => {});
-      await release();
-    }
+    } finally { await client?.close().catch(() => {}); }
   }
 }

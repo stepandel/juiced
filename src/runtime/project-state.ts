@@ -31,12 +31,14 @@ export class CheckoutBusy extends Error {
   }
 }
 
-/** Shared SQL is the authority across independent Session sandboxes. */
-export async function acquireCheckout(db: LeaseDatabase, project: string, session: string, kind: 'session' | 'maintenance', onLost: (error: Error) => void) {
-  await busyRetry(() => db.execute(`CREATE TABLE IF NOT EXISTS juiced_checkout_leases (
+export const CHECKOUT_LEASES_TABLE = `CREATE TABLE IF NOT EXISTS juiced_checkout_leases (
     token TEXT PRIMARY KEY, project TEXT NOT NULL, session TEXT NOT NULL,
     kind TEXT NOT NULL, expires INTEGER NOT NULL
-  )`));
+  )`;
+
+/** Shared SQL is the authority across independent Session sandboxes. */
+export async function acquireCheckout(db: LeaseDatabase, project: string, session: string, kind: 'session' | 'maintenance', onLost: (error: Error) => void) {
+  await busyRetry(() => db.execute(CHECKOUT_LEASES_TABLE));
   const token = randomUUID();
   await busyRetry(async () => {
     const tx = await db.transaction('write');

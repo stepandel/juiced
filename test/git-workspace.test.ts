@@ -348,3 +348,9 @@ test('credentialed remote URLs fail before transfer without disclosing the token
   await assert.rejects(client.send(false, true), error => error instanceof Error && !error.message.includes('fixture-private-token') && /credentials/.test(error.message));
   assert.equal(f.commands.some(command => command.action === 'begin'), false);
 });
+
+test('an unborn HEAD is reported as a repository without commits', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'juiced-unborn-')); t.after(() => rm(root, { recursive: true, force: true }));
+  await git(root, ['init', '-q']);
+  await assert.rejects(discoverRepository(root), /has no commits/);
+});

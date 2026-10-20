@@ -49,6 +49,12 @@ export async function git(directory: string, args: string[], options: { input?: 
 export const gitText = async (directory: string, args: string[], options: Parameters<typeof git>[2] = {}) => (await git(directory, args, options)).toString().trim();
 export const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 
+/** Whether core.sparseCheckout is on. git config exits 1 only for an unset key; aborts and other failures propagate. */
+export async function sparseCheckout(text: (args: string[]) => Promise<string>): Promise<boolean> {
+  try { return await text(['config', '--bool', 'core.sparseCheckout']) === 'true'; }
+  catch (error) { if (error instanceof GitError && error.code === 1) return false; throw error; }
+}
+
 export async function fileInfo(path: string, name: TransferFile): Promise<FileInfo> {
   const hash = createHash('sha256');
   for await (const bytes of createReadStream(path)) hash.update(bytes);
@@ -63,7 +69,11 @@ export async function discoverRepository(directory: string): Promise<Repository 
     if (error instanceof GitError && /not a git repository|must be run in a work tree/i.test(error.message)) return;
     throw error;
   }
-  const head = await gitText(root, ['rev-parse', '--verify', 'HEAD']).catch(() => { throw new Error('This Git repository has no commits. Create an initial commit before using a Git workspace.'); });
+  // With --quiet, only an unresolvable (unborn) HEAD exits 1; other failures must not read as "no commits".
+  const head = await gitText(root, ['rev-parse', '--verify', '--quiet', 'HEAD']).catch(error => {
+    if (error instanceof GitError && error.code === 1) throw new Error('This Git repository has no commits. Create an initial commit before using a Git workspace.');
+    throw error;
+  });
   if (await gitText(root, ['rev-parse', '--is-shallow-repository']) === 'true') throw new Error('Git workspaces require a complete repository. Unshallow this clone first.');
   const branch = await gitText(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => null);
   const objectFormat = await gitText(root, ['rev-parse', '--show-object-format']) as Repository['objectFormat'];

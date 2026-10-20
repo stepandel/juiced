@@ -3,13 +3,14 @@ import { PassThrough, Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { stripVTControlCharacters } from 'node:util';
 import test from 'node:test';
-import type { ClaudeFrame } from '../src/agent-protocol.js';
-import { RemoteAgent, type AgentSession, type MenuChange, type MenuQuery } from '../src/remote-agent.js';
+import type { ClaudeFrame, MenuChange, MenuQuery } from '../src/agent-protocol.js';
+import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
 import { commandMenu, menuCommand, menuCommands } from '../src/tui/command-menus.js';
 import { availableCommands } from '../src/tui/commands.js';
 import type { MenuPage, MenuResult } from '../src/tui/menu.js';
 import { runLocalTui } from '../src/tui/app.js';
 import type { TerminalInput, TerminalOutput } from '../src/remote-terminal.js';
+import { until } from './fixtures/wait.js';
 
 class MenuAgent extends RemoteAgent {
   queries: MenuQuery[] = [];
@@ -213,7 +214,7 @@ function ui(a: MenuAgent) {
   stdout.isTTY = true; stdout.columns = 90; stdout.rows = 24;
   const lifetime = new AbortController();
   const running = runLocalTui(a, [], 'test', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
-  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 400) throw new Error(`UI did not update: ${latest}`); await delay(5); } };
+  const wait = (check: () => boolean) => until(check, { attempts: 400, message: () => `UI did not update: ${latest}` });
   const command = async (text: string) => { stdin.write(text); await wait(() => latest.includes(text)); stdin.write('\r'); };
   return { stdin, stdout, frames, wait, command, get latest() { return latest; }, async close() { lifetime.abort(); await running; assert.equal(stdin.isRaw, false); } };
 }
@@ -296,7 +297,7 @@ test('MCP menu filtering and resizing stay within the viewport without remote ke
   try {
     await f.wait(() => f.latest.includes('mode on'));
     await f.command('/mcp'); await f.wait(() => f.latest.includes('MCP servers'));
-    f.stdout.columns = 42; f.stdout.rows = 15; f.stdout.emit('resize'); await delay(30);
+    f.stdout.columns = 42; f.stdout.rows = 15; f.stdout.emit('resize'); await delay(30); // A resize may repaint nothing new, so there is no frame to wait for.
     for (let index = 0; index < 18; index++) f.stdin.write('\x1b[B');
     await f.wait(() => f.latest.includes('server-18'));
     f.stdin.write('19'); await f.wait(() => f.latest.includes('Filter: 19'));

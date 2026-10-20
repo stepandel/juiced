@@ -8,13 +8,13 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
-import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { createCantelopCompilerPlugin } from '@cantelop/sdk/build';
 import { CantelopClient } from '@cantelop/sdk';
 import { syncFiles } from '../src/file-sync.js';
 import { selectProject } from '../src/project.js';
+import { until as poll } from './fixtures/wait.js';
 
 // Only the remote transport is a fixture. Local files and persistent baselines
 // use the SDK's native adapter, without the Cantelop CLI or a Claude process.
@@ -93,10 +93,7 @@ test('explicit file sync and CLI watch transfer both ways, preserve conflicts an
     t.after(() => { clearTimeout(timeout); child.kill('SIGKILL'); });
     return { child, done, get stderr() { return stderr; } };
   };
-  const until = async (check: () => boolean | Promise<boolean>) => {
-    for (let i = 0; i < 200; i++) { if (await check()) return; await delay(25); }
-    throw new Error('File-sync CLI did not reach the expected state');
-  };
+  const until = (check: () => boolean | Promise<boolean>) => poll(check, { attempts: 200, intervalMs: 25, message: 'File-sync CLI did not reach the expected state' });
   const watching = cli(true);
   await until(() => watching.stderr.includes('Press Ctrl+C'));
   await writeFile(join(directory, 'README.md'), 'watched local edit'); files.set('watched.txt', Buffer.from('watched remote edit'));

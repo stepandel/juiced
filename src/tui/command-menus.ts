@@ -1,5 +1,5 @@
-import { object, type ClaudeFrame, type SlashCommand } from '../agent-protocol.js';
-import type { MenuChange, MenuQuery, RemoteAgent } from '../remote-agent.js';
+import { object, type ClaudeFrame, type MenuChange, type MenuQuery, type SlashCommand } from '../agent-protocol.js';
+import { unsupportedControl as unsupported, type RemoteAgent } from '../remote-agent.js';
 import type { MenuItem, MenuPage, MenuResult } from './menu.js';
 
 export const menuCommands: SlashCommand[] = [
@@ -47,7 +47,6 @@ export function menuCommand(text: string): { name: string; argument: string } | 
 const records = (value: unknown) => Array.isArray(value) ? value.map(object) : [];
 const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 const str = (value: unknown, fallback = '') => typeof value === 'string' ? value : fallback;
-const unsupported = (error: unknown) => /Unsupported control request subtype/u.test((error as Error).message);
 const message = (text: string): MenuResult => ({ message: text });
 
 function safe(value: unknown): string {
