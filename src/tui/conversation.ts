@@ -4,9 +4,9 @@ import { object, type ClaudeFrame } from '../agent-protocol.js';
 /** `tool` is the native tool name; `detail` is the summary printed under a tool call. */
 /** `output` is the bounded full result shown in the Ctrl+O transcript. */
 export type Entry = { id: string; kind: 'user' | 'text' | 'tool' | 'notice' | 'summary'; text: string; tool?: string; detail?: string; output?: string; status?: 'running' | 'done' | 'failed' };
-export type Turn = { id: number; entries: Entry[] };
+type Turn = { id: number; entries: Entry[] };
 /** `outputTokens` counts finished messages this turn; `streamChars` estimates the one streaming now. */
-export type Conversation = { history: Turn[]; live: Entry[]; printed: Entry[]; streamId: string; streamIndex: number | null; model: string; turn: number; tokens: number; outputTokens: number; streamChars: number };
+type Conversation = { history: Turn[]; live: Entry[]; printed: Entry[]; streamId: string; streamIndex: number | null; model: string; turn: number; tokens: number; outputTokens: number; streamChars: number };
 export const emptyConversation = (): Conversation => ({ history: [], live: [], printed: [], streamId: '', streamIndex: null, model: '', turn: 0, tokens: 0, outputTokens: 0, streamChars: 0 });
 /** Output tokens for the spinner: reported usage plus an estimate for the streaming message. */
 export const turnTokens = (state: Conversation) => state.outputTokens + Math.round(state.streamChars / 4);
@@ -71,7 +71,7 @@ export function preview(text: string, rows = 3): string {
 }
 
 /** The `⎿` line under a completed tool call. */
-export function toolResult(entry: Entry, content: unknown, failed: boolean): string {
+function toolResult(entry: Entry, content: unknown, failed: boolean): string {
   const text = resultText(content).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gu, '').trim().slice(0, 64 * 1024);
   if (failed) {
     if (/doesn.t want to (proceed|take this action)|rejected|denied/iu.test(text)) return 'User rejected this tool use';

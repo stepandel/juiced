@@ -9,7 +9,7 @@ export type GitRemoteConfiguration = {
 const remoteName = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value);
 
 /** Convert GitHub SSH URLs for token authentication; never transfer embedded credentials or local paths. */
-export function portableRemoteURL(value: string): string {
+function portableRemoteURL(value: string): string {
   const scp = /^git@github\.com:([^\s?#]+)$/i.exec(value);
   if (scp) return portableRemoteURL(`https://github.com/${scp[1]}`);
   let url: URL;

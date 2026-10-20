@@ -1,6 +1,6 @@
 import { inspectionScope } from './inspection-protocol.js';
 
-export type Arguments =
+type Arguments =
   | { command: 'env'; action: 'set' | 'unset'; name: string; secret: boolean; workspace: undefined; argv: [] }
   | { command: 'help' | 'version'; workspace: string | undefined; argv: string[] }
   | ({ command: 'claude'; workspace: string | undefined; argv: string[]; session?: string } & (

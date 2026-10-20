@@ -4,7 +4,7 @@ import type { InStatement } from '@cantelop/sdk/database';
 import type { StaleLease } from '../git-protocol.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export type LeaseDatabase = Pick<WorkspaceDatabase, 'execute' | 'transaction'>;
+type LeaseDatabase = Pick<WorkspaceDatabase, 'execute' | 'transaction'>;
 const LEASE_MS = 180_000;
 
 async function busyRetry<T>(work: () => Promise<T>): Promise<T> {
