@@ -236,7 +236,7 @@ export function createTerminal(
         if (command.directoryName) {
           let paths;
           try { paths = await projectPaths(workspace, command.directoryName); }
-          catch (error) { await work.output.send({ type: 'error', message: 'The project directory is unavailable or unsafe.' }); throw error; }
+          catch (error) { await work.output.send({ type: 'error', message: 'The project directory is unavailable or unsafe.' }).catch(() => {}); throw error; }
           if (command.git) {
             lease = await acquireSessionCheckout(await context.database(), command.directoryName, context.session.id, AbortSignal.any([context.signal, work.signal]), error => { controller.abort(error); stop?.(); });
             const binding = await readBinding(paths.metadata);
@@ -250,7 +250,11 @@ export function createTerminal(
         }
         return await runTerminal(command, { ...work, signal: AbortSignal.any([work.signal, controller.signal]) });
       } catch (error) { prepareFailed?.(error); throw error; }
-      finally { await publisher?.close(); publisher = undefined; await lease?.release(); }
+      finally {
+        // The checkout lease must be released even if tearing down the bridge fails.
+        try { await publisher?.close(); }
+        finally { publisher = undefined; await lease?.release(); }
+      }
     },
     input,
     cancel() {
@@ -292,7 +296,8 @@ export async function receiveTerminal(context: SessionContext<TerminalCommand, T
     return;
   }
   if (command.type === 'save-settings' && agent.active) {
-    context.reply(await agent.input(command));
+    try { context.reply(await agent.input(command)); }
+    catch (error) { context.reply({ ok: false, error: error instanceof Error ? error.message : 'Unable to save Claude settings' }); }
     return;
   }
   if (command.type === 'publish-status' || command.type === 'publish-claim' || command.type === 'publish-result') {
