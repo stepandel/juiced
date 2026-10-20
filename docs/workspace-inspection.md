@@ -29,18 +29,27 @@ and local file contents are not inspected.
 A typical `peek` root view contains one row per immediate entry:
 
 ```text
-LOCAL             REMOTE
-README.md       = README.md
-src/            ! src/
-docs/           L -
--               R scripts/
-package.json    ! package.json
+  Workspace  juiced                     wsp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  Local      /Users/you/code/juiced     main a7f3c9d2e1b4
+  Remote     /workspace/juiced          main c04be71f33a9
+
+  LOCAL             REMOTE
+  README.md      =  README.md
+  docs/          L  -
+  package.json   !  package.json
+  -              R  scripts/
+  src/           !  src/
+
+  = 1 matching   ! 2 different   L 1 local only   R 1 remote only
+  Git view; ignored files excluded. One level; directory status includes descendants. Sequential live reads.
+  Drill into a directory: juiced claude peek PATH
 ```
 
 `peek src/` displays the immediate entries in `src`, including summaries of its
 subdirectories. The footer counts entries at the selected level, including
 matching entries hidden by `--changes-only`. That flag is supported only by
-`peek`; `ls --changes-only` is rejected. The comparison symbols mean:
+`peek`; `ls --changes-only` is rejected. Each count carries the symbol it
+explains, and statuses no entry has are left out. The comparison symbols mean:
 
 | Symbol | Meaning |
 | --- | --- |
@@ -50,13 +59,17 @@ matching entries hidden by `--changes-only`. That flag is supported only by
 | `R` | Included only in the remote Git snapshot |
 | `?` | Comparison excluded by ignore rules or a nested Git repository |
 
-Comparison headers identify the selected workspace and canonical ID, local and remote
-paths, and both actual branch names and HEADs. Symlinks have an `@` suffix;
-comparison uses their target text. Directory rows have a `/` suffix. Long paths
-wrap independently in both columns without truncation. Below 30 terminal
-columns, entries use labeled local and remote lines. Printable Unicode retains
-its display width; controls and bidirectional formatting characters are escaped.
-Piped output is plain and untruncated. Errors use stderr.
+Comparison headers identify the selected workspace and canonical ID, local and
+remote paths, and both actual branch names and HEADs, with each path beside its
+Git ref. Symlinks have an `@` suffix; comparison uses their target text.
+Directory rows have a `/` suffix. Columns take the width their names need and
+share the terminal only when the names cannot all fit, wrapping independently
+without truncation. Below 30 terminal columns, each entry is named once and
+annotated only where the two sides disagree. Printable Unicode retains its
+display width; controls and bidirectional formatting characters are escaped, and
+an escape is never split across wrapped lines. Differences carry colour on a
+terminal, with a hue per side and matching rows dimmed; piped output, `NO_COLOR`,
+and `TERM=dumb` stay plain and untruncated. Errors use stderr.
 
 PATH is a literal relative path beneath the launch directory; its default is
 `.`. Absolute paths, parent traversal, Git metadata paths, and traversal through
@@ -108,7 +121,7 @@ directory, including `.`. Git metadata is always outside the comparison.
 
 ## Live reads and failures
 
-The `peek` header labels the view as sequential live reads. Git captures each side
+The `peek` footer labels the view as sequential live reads. Git captures each side
 independently, so the view is not an atomic snapshot across machines and cannot
 guarantee that a later sync succeeds. Git checks the temporary index against the
 working tree after capture; root identity, HEAD, branch, real index bytes,

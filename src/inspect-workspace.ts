@@ -102,7 +102,9 @@ export async function inspectWorkspace(app: InspectionApp, directory: string, op
   const combined = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]);
   try {
     const command: Extract<TerminalCommand, { type: 'inspect' }> = { type: 'inspect', id: randomUUID(), directoryName: project.directoryName, binding: repository.binding, scope, includeIgnored: options.includeIgnored };
-    const view = { remoteRoot: posix.join(project.remoteDirectory, scope), workspace: project.workspace, workspaceId: existing.id, includeIgnored: options.includeIgnored, columns: stdout.isTTY ? stdout.columns ?? 80 : undefined };
+    // Piped output stays plain; colour needs a terminal that has not opted out.
+    const color = Boolean(stdout.isTTY) && !process.env.NO_COLOR && process.env.TERM !== 'dumb';
+    const view = { remoteRoot: posix.join(project.remoteDirectory, scope), workspace: project.workspace, workspaceId: existing.id, includeIgnored: options.includeIgnored, columns: stdout.isTTY ? stdout.columns ?? 80 : undefined, color };
     if (options.action === 'ls') {
       const remote = await checkoutContext('Remote', remoteListing(app.workspace({ id: existing.id }), command, combined));
       stdout.write(renderRemoteListing(remote, view));
