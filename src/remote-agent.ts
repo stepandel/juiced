@@ -233,6 +233,20 @@ export class RemoteAgent extends EventEmitter {
     })().finally(() => { this.reopening = undefined; });
   }
 
+  /** Reopening the picker refreshes Claude's catalog without submitting a turn. */
+  async refreshModels(): Promise<ModelOption[]> {
+    try {
+      const response = await this.query({ subtype: 'list_models' });
+      if (!Array.isArray(response.models)) throw new Error('Claude did not provide a model list. Use /model <name> to choose a model.');
+      this.models = modelOptions(response.models);
+      this.emit('models', this.models);
+    } catch (error) {
+      // Older binaries only expose the initialization catalog.
+      if (!/Unsupported control request subtype/u.test((error as Error).message)) throw error;
+    }
+    return this.models;
+  }
+
   async setModel(model: string): Promise<void> {
     if (this.status !== 'ready') throw new Error('Wait for Claude to finish before switching models');
     if (!model || /\s|[\x00-\x1f\x7f-\x9f]/u.test(model)) throw new Error('Specify one model alias or full model ID');

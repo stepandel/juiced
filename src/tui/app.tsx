@@ -460,7 +460,6 @@ function Juiced({ agent, argv, workspace, rows, columns, quit }: { agent: Remote
     const command = menuCommand(text);
     if (command) {
       if (!['ready', 'working', 'interrupting'].includes(agent.status)) { setNotice('Wait for Claude to connect or finish changing settings.'); return; }
-      if (command.name === 'model' && !agent.models.length) { setNotice('Claude did not provide a model list. Use /model <name> to choose a model.'); return; }
       menuOpen.current = true;
       setMenu({ load: () => commandMenu(agent, command.name, command.argument) });
       setEditor({ text: '', cursor: 0 }); setNotice(''); return;

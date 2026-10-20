@@ -126,6 +126,58 @@ test('models come from Claude and switching uses a control request in the same c
   assert.equal(f.commands.filter(command => command.type === 'start').length, 1, 'Switching must retain the remote process');
 });
 
+test('model refresh replaces stale metadata on each read without changing the session or submitting a turn', async t => {
+  const old = { value: 'opus', displayName: 'Opus', description: 'Previous version', resolvedModel: 'provider.opus-old' };
+  const latest = { ...old, description: 'Latest version', resolvedModel: 'provider.opus-new', supportedEffortLevels: ['low', 'high'] };
+  const responses: Record<string, ClaudeFrame | Error> = { list_models: { models: [latest] } };
+  const f = fixture({}, { models: [old] }, 'success', responses);
+  t.after(() => f.agent.close());
+  await f.agent.start(['--model', 'opus']);
+  const updates: unknown[] = [];
+  f.agent.on('models', models => updates.push(models));
+  assert.deepEqual(await f.agent.refreshModels(), [latest]);
+  assert.deepEqual(updates, [[latest]]);
+  assert.equal(f.agent.model, 'opus');
+  assert.equal(f.agent.status, 'ready');
+  responses.list_models = { models: [{ value: 'provider.new-model', displayName: 'New model' }] };
+  f.agent.status = 'working';
+  await f.agent.refreshModels();
+  assert.equal(f.agent.models[0]?.value, 'provider.new-model');
+  assert.equal(f.agent.status, 'working', 'Reading the catalog must preserve an active turn');
+  assert.equal(f.frames.filter(frame => object(frame.request).subtype === 'list_models').length, 2);
+  assert.equal(f.commands.filter(command => command.type === 'start').length, 1);
+  assert.equal(f.frames.some(frame => frame.type === 'user'), false);
+  assert.equal(f.commands.some(command => command.type === 'save-settings'), false);
+});
+
+test('unsupported model refresh retains the startup catalog and remembers the missing capability', async t => {
+  const models = [{ value: 'provider.model', displayName: 'Provider model', description: '' }];
+  const f = fixture({}, { models }, 'success', { list_models: new Error('Unsupported control request subtype: list_models') });
+  t.after(() => f.agent.close());
+  await f.agent.start();
+  assert.deepEqual(await f.agent.refreshModels(), models);
+  assert.deepEqual(await f.agent.refreshModels(), models);
+  assert.equal(f.frames.filter(frame => object(frame.request).subtype === 'list_models').length, 1);
+  assert.equal(f.agent.status, 'ready');
+});
+
+test('failed model reads preserve the catalog for retry, while a successful empty list clears it', async t => {
+  const models = [{ value: 'provider.model', displayName: 'Provider model', description: '' }];
+  const responses: Record<string, ClaudeFrame | Error> = { list_models: new Error('Catalog temporarily unavailable') };
+  const f = fixture({}, { models }, 'success', responses);
+  t.after(() => f.agent.close());
+  await f.agent.start();
+  await assert.rejects(f.agent.refreshModels(), /Catalog temporarily unavailable/);
+  assert.deepEqual(f.agent.models, models);
+  responses.list_models = {};
+  await assert.rejects(f.agent.refreshModels(), /did not provide a model list/);
+  assert.deepEqual(f.agent.models, models);
+  responses.list_models = { models: [] };
+  assert.deepEqual(await f.agent.refreshModels(), []);
+  assert.deepEqual(f.agent.models, []);
+  assert.equal(f.agent.status, 'ready');
+});
+
 test('model changes wait for confirmation and block concurrent submissions', async t => {
   const f = fixture({}, {}, 'pending');
   t.after(() => f.agent.close());

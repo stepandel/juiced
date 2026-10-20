@@ -76,6 +76,9 @@ try {
     assert.ok(page.title);
     console.log(`PASS /${name}: ${page.items.length} entries`);
   }
+  const refreshed = await agent.refreshModels();
+  assert.ok(refreshed.length, 'Claude must return a nonempty live model catalog');
+  console.log(`PASS refreshed model catalog: ${refreshed.map(model => `${model.value} → ${model.resolvedModel ?? model.displayName}`).join(', ')}`);
   const model = agent.models.find(model => model.value !== 'default');
   assert.ok(model, 'Claude must advertise at least one model');
   await agent.setModel(model.value);

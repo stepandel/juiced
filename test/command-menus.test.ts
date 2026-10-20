@@ -38,6 +38,7 @@ class MenuAgent extends RemoteAgent {
     this.queries.push(query);
     if (this.waitForQuery) return this.waitForQuery(query);
     if (query.subtype === 'get_settings') return this.settings;
+    if (query.subtype === 'list_models' && !Object.hasOwn(this.responses, 'list_models')) return { models: this.models };
     const response = this.responses[query.subtype] ?? {};
     if (response instanceof Error) throw response;
     return response;
@@ -83,6 +84,22 @@ test('effort and output style choices use provider metadata and change only afte
   await assert.rejects(commandMenu(a, 'effort', 'invented'), /Claude offers/);
   a.models = [];
   assert.deepEqual((await commandMenu(a, 'effort')).items, [], 'No fabricated effort catalog when metadata is absent');
+  assert.deepEqual(a.submitted, []);
+});
+
+test('opening the model picker refreshes its catalog, including through settings, while direct IDs skip discovery', async () => {
+  const a = await agent();
+  const latest = { value: 'provider-new', displayName: 'Latest model', description: 'Newly available model', supportedEffortLevels: ['medium', 'high'] };
+  a.responses.list_models = { models: [latest] };
+  assert.deepEqual((await commandMenu(a, 'model')).items.map(item => item.id), ['provider-new']);
+  assert.deepEqual(a.models, [latest]);
+  a.responses.list_models = { models: [{ ...latest, value: 'provider-newer' }] };
+  const settings = await commandMenu(a, 'config');
+  assert.deepEqual(page(await choose(settings, 'model')).items.map(item => item.id), ['provider-newer']);
+  assert.equal(a.queries.filter(query => query.subtype === 'list_models').length, 2);
+  assert.deepEqual((await commandMenu(a, 'model', 'provider.custom-id')).items.map(item => item.id), ['provider.custom-id']);
+  assert.equal(a.queries.filter(query => query.subtype === 'list_models').length, 2);
+  assert.deepEqual(a.changes, []);
   assert.deepEqual(a.submitted, []);
 });
 

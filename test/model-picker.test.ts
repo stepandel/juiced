@@ -15,12 +15,14 @@ class ModelAgent extends RemoteAgent {
     ...Array.from({ length: 8 }, (_, i) => ({ value: `custom-${i}`, displayName: `Custom ${i}`, description: 'A provider-specific model with a description that wraps on narrow terminals.' })),
   ];
   starts = 0;
+  catalog?: typeof this.models;
   submitted: string[] = [];
   changes: { value: string; resolve(): void; reject(error: Error): void }[] = [];
   override async start() {
     this.starts++; this.emit('models', this.models); this.emit('model', this.model);
     this.status = 'ready'; this.emit('status', this.status);
   }
+  override async query() { return { models: this.catalog ?? this.models }; }
   override async setModel(value: string) {
     this.status = 'configuring'; this.emit('status', this.status);
     try {
@@ -41,7 +43,7 @@ function fixture(agent = new ModelAgent({} as AgentSession)) {
   const frames: { text: string; rows: number }[] = [];
   const stdout = new Writable({ write(chunk, _, done) {
     const text = stripVTControlCharacters(chunk.toString());
-    if (text.includes('mode on') || text.includes('Choose model')) { latest = text; frames.push({ text, rows: stdout.rows! }); }
+    if (text.includes('mode on') || text.includes('Choose model') || text.includes('Loading menu')) { latest = text; frames.push({ text, rows: stdout.rows! }); }
     done();
   } }) as TerminalOutput;
   stdout.isTTY = true; stdout.columns = 90; stdout.rows = 24;
@@ -119,6 +121,25 @@ test('a missing model catalog explains the direct command without submitting a p
     await f.command('/model');
     await f.wait(() => f.latest.includes('Claude did not provide a model list'));
     assert.equal(f.latest.includes('Choose model'), false);
+    f.stdin.write('\x1b');
+    await f.wait(() => !f.latest.includes('Enter to retry'));
     assert.deepEqual(agent.submitted, []);
+  } finally { await f.close(); }
+});
+
+test('the picker discovers models even when the startup catalog was empty', { timeout: 5000 }, async () => {
+  const agent = new ModelAgent({} as AgentSession);
+  agent.models = [];
+  agent.catalog = [{ value: 'provider.latest', displayName: 'Latest model', description: 'Available after startup' }];
+  const f = fixture(agent);
+  try {
+    await f.wait(() => agent.status === 'ready');
+    await f.command('/model');
+    await f.wait(() => f.latest.includes('Choose model') && f.latest.includes('Latest model'));
+    assert.equal(f.latest.includes('did not provide'), false);
+    assert.equal(agent.models[0]?.value, 'provider.latest');
+    assert.deepEqual(agent.submitted, []);
+    f.stdin.write('\x1b');
+    await f.wait(() => !f.latest.includes('Choose model'));
   } finally { await f.close(); }
 });

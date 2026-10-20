@@ -1,4 +1,4 @@
-import { modelOptions, object, type ClaudeFrame, type SlashCommand } from '../agent-protocol.js';
+import { object, type ClaudeFrame, type SlashCommand } from '../agent-protocol.js';
 import type { MenuChange, MenuQuery, RemoteAgent } from '../remote-agent.js';
 import type { MenuItem, MenuPage, MenuResult } from './menu.js';
 
@@ -95,6 +95,7 @@ export async function commandMenu(agent: RemoteAgent, name: string, argument = '
       } satisfies MenuItem))],
   };
   if (name === 'model') {
+    if (!argument) await agent.refreshModels();
     const page: MenuPage = { title: 'Choose model', pendingLabel: 'Switching model…', footer: '/model <name> also accepts a full model ID', items: [] };
     page.items = agent.models.map(model => ({ id: model.value, label: model.displayName, description: model.description, current: model.value === agent.model,
       run: async () => { snapshots.clear(); await agent.setModel(model.value); return message(`Model changed to ${model.displayName}`); } }));

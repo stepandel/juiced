@@ -1,0 +1,9 @@
+**
+!Dockerfile
+!node_modules/
+!node_modules/@cantelop/
+!node_modules/@cantelop/sdk/
+!node_modules/@cantelop/sdk/dist/
+!node_modules/@cantelop/sdk/dist/harnesses/
+!node_modules/@cantelop/sdk/dist/harnesses/claude/
+!node_modules/@cantelop/sdk/dist/harnesses/claude/login-pty.py

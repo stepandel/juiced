@@ -30,6 +30,15 @@ npm link
 
 The app is named `juiced` in `src/cantelop.ts`. If you need another deployment name, change that literal before building and deploying. Build the CLI and deploy the runtime from the same source: Cantelop checks their runtime identities. Deployment saves app credentials in your local Cantelop integration profile, which Juiced reads automatically.
 
+The root `Dockerfile` pins Claude Code 2.1.305 independently of the Cantelop SDK's
+older bundled image. Model choices and alias targets come from that remote CLI;
+`/model` refreshes its catalog whenever the picker opens. To update Claude Code,
+bump `CLAUDE_CODE_VERSION` in the Dockerfile, run the model-free compatibility
+check in [Local command menus](docs/local-command-menus.md), then rebuild and
+deploy. Existing processes keep their loaded CLI: use `/exit` and reopen the
+conversation after deployment to load the new version. Check the deployed
+version with `juiced claude --version`.
+
 Sign in to Claude once for your remote workspace:
 
 ```sh
