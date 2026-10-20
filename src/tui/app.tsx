@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Box, Text, Static, render, useInput, usePaste } from 'ink';
 import stringWidth from 'string-width';
 import { object, type Approval, type ApprovalOptions, type ClaudeFrame, type SlashCommand } from '../agent-protocol.js';
@@ -309,46 +309,96 @@ function Permission({ approval, rows, answer, cancel }: { approval: Approval; ro
 
 /** Rows of the Ctrl+O transcript: every entry, with complete tool output. */
 export function transcriptLines(entries: Entry[]): Row[] {
-  const lead = (rows: Row[], first: Span, rest = ' '.repeat(first.text.length)) => rows.map((row, i) => [i ? { text: rest } : first, ...row]);
-  const plainRows = (text: string, style: Omit<Span, 'text'> = {}) => text.split('\n').map(line => [{ ...style, text: line }]);
-  const result = (text: string, style: Omit<Span, 'text'> = {}) => lead(plainRows(text, style), { text: '  ⎿  ', dim: true }, '     ');
-  return entries.flatMap(entry => {
-    const open = entry.text.indexOf('(');
-    const body = entry.kind === 'user' ? lead(plainRows(entry.text), { text: '❯ ', color: 'green' })
-      : entry.kind === 'text' ? lead(markdownRows(entry.text), { text: '● ' })
-      : entry.kind === 'tool' ? [
-        [{ text: '● ', ...(entry.status === 'failed' ? { color: 'yellow' } : entry.status === 'done' ? { color: 'green' } : { dim: true }) }, { text: open > 0 ? entry.text.slice(0, open) : entry.text, bold: true }, { text: open > 0 ? entry.text.slice(open) : '' }],
-        ...result(entry.output ?? entry.detail ?? (entry.status === 'running' ? 'Running…' : '(No content)'), entry.status === 'failed' ? { color: 'yellow' } : {}),
-      ]
-      : entry.kind === 'summary' ? [[{ text: `✻ ${entry.text}`, dim: true }]] : result(entry.text, { color: 'yellow' });
-    return [...body, []];
-  });
+  return entries.flatMap(entryLines);
 }
+
+const lead = (rows: Row[], first: Span, rest = ' '.repeat(first.text.length)) => rows.map((row, i) => [i ? { text: rest } : first, ...row]);
+const plainRows = (text: string, style: Omit<Span, 'text'> = {}) => text.split('\n').map(line => [{ ...style, text: line }]);
+const result = (text: string, style: Omit<Span, 'text'> = {}) => lead(plainRows(text, style), { text: '  ⎿  ', dim: true }, '     ');
+function entryLines(entry: Entry): Row[] {
+  const open = entry.text.indexOf('(');
+  const body = entry.kind === 'user' ? lead(plainRows(entry.text), { text: '❯ ', color: 'green' })
+    : entry.kind === 'text' ? lead(markdownRows(entry.text), { text: '● ' })
+    : entry.kind === 'tool' ? [
+      [{ text: '● ', ...(entry.status === 'failed' ? { color: 'yellow' } : entry.status === 'done' ? { color: 'green' } : { dim: true }) }, { text: open > 0 ? entry.text.slice(0, open) : entry.text, bold: true }, { text: open > 0 ? entry.text.slice(open) : '' }],
+      ...result(entry.output ?? entry.detail ?? (entry.status === 'running' ? 'Running…' : '(No content)'), entry.status === 'failed' ? { color: 'yellow' } : {}),
+    ]
+    : entry.kind === 'summary' ? [[{ text: `✻ ${entry.text}`, dim: true }]] : result(entry.text, { color: 'yellow' });
+  return [...body, []];
+}
+
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+// Printable ASCII is one column per character and every character is its own
+// grapheme, except where it borders other text (combining marks, prepended
+// characters). Inside a run, skip segmentation and width lookups.
+const ascii = /[\x20-\x7e]{3,}/gu;
+// Output repeats the same few wide graphemes; their width lookup is the slow part.
+const widths = new Map<string, number>();
+const graphemeWidth = (segment: string) => {
+  let width = widths.get(segment);
+  if (width === undefined) {
+    if (widths.size > 10_000) widths.clear();
+    widths.set(segment, width = stringWidth(segment));
+  }
+  return width;
+};
 
 /** Split styled rows to the terminal width so scrolling moves by screen rows. */
 export function wrapLines(rows: Row[], width: number): Row[] {
-  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
   return rows.flatMap(row => {
     const lines: Row[] = [];
     let line: Row = [], used = 0;
     for (const span of row) {
       let text = '';
-      for (const { segment } of segmenter.segment(span.text)) {
-        const size = stringWidth(segment);
-        if (used + size > width && used) {
-          if (text) line.push({ ...span, text });
-          lines.push(line); line = []; used = 0; text = '';
+      const fits = (size: number) => {
+        if (used + size <= width || !used) return;
+        if (text) line.push({ ...span, text });
+        lines.push(line); line = []; used = 0; text = '';
+      };
+      const segments = (part: string) => {
+        if (!part) return;
+        for (const { segment } of segmenter.segment(part)) {
+          const size = graphemeWidth(segment);
+          fits(size);
+          text += segment; used += size;
         }
-        text += segment; used += size;
+      };
+      let done = 0;
+      for (const match of span.text.matchAll(ascii)) {
+        const start = match.index + (match.index ? 1 : 0);
+        const end = match.index + match[0].length - (match.index + match[0].length < span.text.length ? 1 : 0);
+        if (end <= start) continue;
+        segments(span.text.slice(done, start));
+        for (let offset = start; offset < end;) {
+          fits(1);
+          const size = Math.max(1, Math.min(end - offset, width - used));
+          text += span.text.slice(offset, offset + size); used += size; offset += size;
+        }
+        done = end;
       }
+      segments(span.text.slice(done));
       if (text) line.push({ ...span, text });
     }
     return [...lines, line];
   });
 }
 
+// Entries are immutable, so each one's wrapped rows are reused until it changes.
+const wrapped = new WeakMap<Entry, { width: number; lines: Row[] }>();
+/** The Ctrl+O transcript wrapped to `width`. */
+export function transcriptRows(entries: Entry[], width: number): Row[] {
+  return entries.flatMap(entry => {
+    const cached = wrapped.get(entry);
+    if (cached?.width === width) return cached.lines;
+    const lines = wrapLines(entryLines(entry), width);
+    wrapped.set(entry, { width, lines });
+    return lines;
+  });
+}
+
 function Transcript({ entries, rows, columns, close }: { entries: Entry[]; rows: number; columns: number; close(): void }) {
-  const lines = wrapLines(transcriptLines(entries), Math.max(10, columns - 1));
+  const width = Math.max(10, columns - 1);
+  const lines = useMemo(() => transcriptRows(entries, width), [entries, width]);
   const height = Math.max(1, rows - 4);
   const [offset, setOffset] = useState(0);
   const limit = Math.max(0, lines.length - height);
@@ -477,8 +527,10 @@ function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent
     }));
   };
   const active = approvals[0];
-  const live = liveEntries(conversation);
-  const history = [...conversation.history.flatMap(item => item.entries), ...conversation.live].filter(entry => entry.kind === 'user').map(entry => entry.text);
+  const live = useMemo(() => liveEntries(conversation), [conversation.live, conversation.printed]);
+  const entries = useMemo(() => [...conversation.history.flatMap(item => item.entries), ...conversation.live], [conversation.history, conversation.live]);
+  const history = useMemo(() => entries.filter(entry => entry.kind === 'user').map(entry => entry.text), [entries]);
+  const scrollback = useMemo(() => [{ id: 'header', entries: [] as Entry[] }, ...conversation.history.map(turn => ({ id: String(turn.id), entries: turn.entries }))], [conversation.history]);
   const tokens = turnTokens(conversation);
   const spinner = closing ? 'Disconnecting' : status === 'connecting' ? 'Connecting to Claude' : status === 'configuring' ? 'Updating Claude' : status === 'interrupting' ? 'Interrupting' : status === 'working' ? turn.current?.verb : undefined;
   // Ink can only erase rows still in the viewport. An overflowing live frame
@@ -487,11 +539,11 @@ function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent
   // and the actual height of the controls before clipping conversation rows.
   const height = Math.max(1, rows - 1);
   return <Box flexDirection="column">
-    <Static key={reflow} items={[{ id: 'header', entries: [] }, ...conversation.history.map(turn => ({ id: String(turn.id), entries: turn.entries }))]}>{item => item.id === 'header'
+    <Static key={reflow} items={scrollback}>{item => item.id === 'header'
       ? <Header key="header" workspace={workspace} session={agent.session.id} />
       : <Entries key={item.id} entries={item.entries} />}</Static>
-    {transcript && !active && !menu ? <Transcript entries={[...conversation.history.flatMap(item => item.entries), ...conversation.live]} rows={rows} columns={columns} close={() => setTranscript(false)} /> : <Box flexDirection="column" maxHeight={height} overflow="hidden">
-      <Clipped tail><Entries entries={live.slice(-12)} /></Clipped>
+    {transcript && !active && !menu ? <Transcript entries={entries} rows={rows} columns={columns} close={() => setTranscript(false)} /> : <Box flexDirection="column" maxHeight={height} overflow="hidden">
+      <Clipped tail><Entries entries={live.slice(-12)} tail={height} /></Clipped>
       <Box flexDirection="column" flexShrink={0} maxHeight={height} overflow="hidden">
         {spinner && !active && <Box marginBottom={1} flexShrink={0} height={1}><Spinner label={spinner} since={status === 'working' ? turn.current?.since : undefined} tokens={tokens} /></Box>}
         {notice && <Box flexShrink={0} maxHeight={2} overflow="hidden"><Box width={5} flexShrink={0}><Text dimColor>  ⎿ </Text></Box><Text color="yellow">{notice}</Text></Box>}
