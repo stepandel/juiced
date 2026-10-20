@@ -228,7 +228,7 @@ test('permission UI preselects Yes, ignores early and pasted keys, offers rememb
     await ask('first');
     stdin.write('\r'); stdin.write('1'); await delay(40); // Negative check: no event marks ignored keys.
     assert.deepEqual(agent.answers, [], 'Keys typed for the prompt as the dialog opens must not answer it');
-    // 320 ms outlasts the dialog's 300 ms settle window (src/tui/app.tsx), so Enter below is accepted.
+    // 320 ms outlasts the dialog's 300 ms settle window (src/tui/permission.tsx), so Enter below is accepted.
     stdin.write('\x1b[200~y\x1b[201~'); await delay(320);
     assert.deepEqual(agent.answers, [], 'Pasting y must not approve a tool');
     stdin.write('\r'); await wait(() => agent.answers.length === 1);

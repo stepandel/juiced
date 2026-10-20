@@ -5,7 +5,8 @@ import { duration, emptyConversation, liveEntries, plain, preview, receiveFrame,
 import React from 'react';
 import { renderToString } from 'ink';
 import stringWidth from 'string-width';
-import { rememberLabel, transcriptLines, transcriptRows, wrapLines } from '../src/tui/app.js';
+import { rememberLabel } from '../src/tui/permission.js';
+import { transcriptLines, transcriptRows, wrapLines } from '../src/tui/transcript-view.js';
 import { Entries, foldedSummary, rows } from '../src/tui/transcript.js';
 import { markdownRows, markdownTail, spans } from '../src/tui/markdown.js';
 import { availableCommands, matchingCommands } from '../src/tui/commands.js';

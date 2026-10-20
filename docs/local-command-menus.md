@@ -103,7 +103,8 @@ removes its temporary files. It does not verify hosted latency, subscription ent
 MCP OAuth, or native-only screens.
 
 Add new commands in `src/tui/command-menus.ts` using `MenuPage`/`MenuItem`; add
-typed query or mutation requests in `src/remote-agent.ts` when needed. A read
+typed query or mutation requests (`MenuQuery`/`MenuChange` in
+`src/agent-protocol.ts`, handled by `src/remote-agent.ts`) when needed. A read
 must preserve the current agent status. Mutations must wait for acknowledgment
 and preserve existing metadata on failure. Never infer missing choices from a
 local CLI version, automatically retry a mutation, or treat an unknown response
