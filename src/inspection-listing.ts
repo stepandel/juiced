@@ -1,23 +1,8 @@
-import { lstat, readFile, realpath } from 'node:fs/promises';
 import { join, posix } from 'node:path';
-import { git, GitError, relativeProjectPath } from './git.js';
+import { GitError, relativeProjectPath } from './git.js';
+import { checkoutRoot, indexBytes as index, inspectionFailure, inspectionGit, lstatOptional as info, nulStrings as paths, settleAll, stagedSubmodules } from './inspection-git.js';
 import { InspectionIncomplete, submoduleContents, type InspectionListing, type ListingEntry } from './inspection-protocol.js';
 
-function paths(bytes: Buffer): string[] {
-  if (!bytes.length) return [];
-  if (bytes.at(-1) !== 0) throw new InspectionIncomplete('Git returned a truncated inventory.');
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, -1)).split('\0'); }
-  catch { throw new InspectionIncomplete('A Git filename cannot be represented as UTF-8.'); }
-}
-
-async function info(path: string) {
-  try { return await lstat(path, { bigint: true }); }
-  catch (error) { if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return undefined; throw error; }
-}
-async function index(path: string) {
-  try { return await readFile(path); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0); throw error; }
-}
 function mode(stat: NonNullable<Awaited<ReturnType<typeof info>>>): ListingEntry['mode'] {
   if (stat.isSymbolicLink()) return '120000';
   if (stat.isDirectory()) return '040000';
@@ -30,17 +15,8 @@ export async function captureListing(root: string, scope: string, includeIgnored
   signal.throwIfAborted();
   if (!relativeProjectPath(scope)) throw new InspectionIncomplete('Invalid inspection scope.');
   try {
-    const rootBefore = await info(root);
-    if (!rootBefore?.isDirectory() || rootBefore.isSymbolicLink() || await realpath(root) !== root) throw new InspectionIncomplete('The checkout root is unavailable or unsafe.');
-    const env: NodeJS.ProcessEnv = {
-      GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined, GIT_COMMON_DIR: undefined,
-      GIT_OBJECT_DIRECTORY: undefined, GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined, GIT_LITERAL_PATHSPECS: '1',
-    };
-    const run = (args: string[], input?: Buffer) => git(root, ['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', '-c', 'core.splitIndex=false', ...args], { env, signal, ...(input ? { input } : {}) });
-    const text = async (args: string[]) => (await run(args)).toString().trim();
-    env.GIT_DIR = await text(['rev-parse', '--absolute-git-dir']); env.GIT_WORK_TREE = root;
-    if (await text(['rev-parse', '--show-toplevel']) !== root) throw new InspectionIncomplete('Git points outside the selected checkout.');
-    if (await text(['config', '--bool', 'core.sparseCheckout']).catch(() => 'false') === 'true') throw new InspectionIncomplete('Workspace inspection does not support sparse checkouts.');
+    const rootBefore = await checkoutRoot(root);
+    const { run, text } = await inspectionGit(root, signal);
     const directories = new Map<string, boolean>([['', true]]);
     const ancestors = async (path: string, strict = false) => {
       let current = '';
@@ -64,24 +40,27 @@ export async function captureListing(root: string, scope: string, includeIgnored
     const ignored = () => includeIgnored ? run(['ls-files', '--others', '--ignored', '--exclude-standard', '-z', ...selectedPaths]) : Promise.resolve(Buffer.alloc(0));
     const before = await inventory(), ignoredBefore = await ignored();
     const staged = paths(await run(['ls-files', '--stage', '-z']));
-    const submodules = new Set(staged.filter(line => line.startsWith('160000 ')).map(line => line.slice(line.indexOf('\t') + 1)));
-    for (const path of submodules) if (scope.startsWith(path + '/')) submoduleContents(path);
+    const submodules = new Set(stagedSubmodules(staged, scope));
     const selected = await info(join(root, scope));
     const tracked = staged.some(line => { const path = line.slice(line.indexOf('\t') + 1); return !scope || path === scope || path.startsWith(scope + '/'); });
     let selectedIgnored = false;
     if (scope && selected && !tracked && !includeIgnored) {
       // check-ignore interprets stdin paths literally, independently of pathspecs.
-      try { selectedIgnored = (await git(root, ['check-ignore', '-z', '--stdin'], { env: { ...env, GIT_LITERAL_PATHSPECS: undefined }, signal, input: Buffer.from(scope + '\0') })).length > 0; }
+      try { selectedIgnored = (await run(['check-ignore', '-z', '--stdin'], { env: { GIT_LITERAL_PATHSPECS: undefined }, input: Buffer.from(scope + '\0') })).length > 0; }
       catch (error) { if (!(error instanceof GitError && error.code === 1)) throw error; }
     }
     const entries = new Map<string, ListingEntry>();
     let visible = !scope;
-    for (const raw of new Set([...paths(before), ...paths(ignoredBefore)])) {
+    const candidates = [...new Set([...paths(before), ...paths(ignoredBefore)])].map(raw => raw.replace(/\/$/, ''))
+      .filter(path => !scope || path === scope || path.startsWith(scope + '/'));
+    // Stat large inventories concurrently; results are consumed (and errors raised) in inventory order.
+    const stats = await settleAll(candidates, 64, path => { signal.throwIfAborted(); return info(join(root, path)); });
+    for (const [i, path] of candidates.entries()) {
       signal.throwIfAborted();
-      const path = raw.replace(/\/$/, '');
-      if (scope && path !== scope && !path.startsWith(scope + '/')) continue;
       if (!await ancestors(path)) continue; // Stale tracked descendants beneath a replaced directory.
-      const stat = await info(join(root, path));
+      const result = stats[i]!;
+      if (result.status === 'rejected') throw result.reason;
+      const stat = result.value;
       if (!stat) continue;
       mode(stat);
       const submodule = stat.isDirectory() && (submodules.has(path) || !!await info(join(root, path, '.git')));
@@ -104,9 +83,5 @@ export async function captureListing(root: string, scope: string, includeIgnored
     return { version: 1, scope, kind, entries: kind === 'directory' ? [...entries.values()] : [],
       ...(['directory', 'file'].includes(kind) ? { entry: { name: posix.basename(scope) || '(root)', mode: selectedSubmodule ? '160000' as const : mode(selected!) } } : {}),
     };
-  } catch (error) {
-    signal.throwIfAborted();
-    if (error instanceof InspectionIncomplete) throw error;
-    throw new InspectionIncomplete(`Unable to list checkout: ${error instanceof Error ? error.message : 'Git failed'}`);
-  }
+  } catch (error) { inspectionFailure(error, signal, 'list'); }
 }

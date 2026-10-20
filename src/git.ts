@@ -49,6 +49,12 @@ export async function git(directory: string, args: string[], options: { input?: 
 export const gitText = async (directory: string, args: string[], options: Parameters<typeof git>[2] = {}) => (await git(directory, args, options)).toString().trim();
 export const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 
+/** Whether core.sparseCheckout is on. git config exits 1 only for an unset key; aborts and other failures propagate. */
+export async function sparseCheckout(text: (args: string[]) => Promise<string>): Promise<boolean> {
+  try { return await text(['config', '--bool', 'core.sparseCheckout']) === 'true'; }
+  catch (error) { if (error instanceof GitError && error.code === 1) return false; throw error; }
+}
+
 export async function fileInfo(path: string, name: TransferFile): Promise<FileInfo> {
   const hash = createHash('sha256');
   for await (const bytes of createReadStream(path)) hash.update(bytes);

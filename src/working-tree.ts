@@ -1,12 +1,13 @@
 import { lstat, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { git } from './git.js';
+import { git, sparseCheckout } from './git.js';
+import { isENOENT } from './fs-util.js';
 
 // Git treats a missing index (e.g. after `rm .git/index`) as empty; match inspection capture.
 const indexBytes = async (path: string) => {
   try { return await readFile(path); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0); throw error; }
+  catch (error) { if (isENOENT(error)) return Buffer.alloc(0); throw error; }
 };
 
 /** Capture Git-visible working files without touching the real index or making a commit. */
@@ -21,7 +22,7 @@ export async function workingTree(root: string, signal: AbortSignal): Promise<st
     const index = await text(['rev-parse', '--path-format=absolute', '--git-path', 'index']);
     const original = await indexBytes(index);
     const head = await text(['rev-parse', 'HEAD']);
-    if (await text(['config', '--bool', 'core.sparseCheckout']).catch(() => 'false') === 'true') throw new Error('Publishing does not support sparse checkouts.');
+    if (await sparseCheckout(text)) throw new Error('Publishing does not support sparse checkouts.');
     const staged = await real(['ls-files', '--stage', '-z']);
     if (staged.toString().split('\0').some(line => line.startsWith('160000 '))) throw new Error('Publishing does not support submodules.');
     if ((await real(['ls-files', '--unmerged'])).length) throw new Error('Resolve merge conflicts before publishing.');
