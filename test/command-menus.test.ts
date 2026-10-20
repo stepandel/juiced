@@ -307,7 +307,7 @@ test('a memory read can ask permission without losing the open menu or consuming
     f.stdin.write('\r');
     // Permission frames use a different footer, so inspect the agent's active
     // request here. After approval the same menu instance must show the result.
-    await f.wait(() => a.approvals.size === 1); await delay(30);
+    await f.wait(() => a.approvals.size === 1); await delay(350); // Past the dialog's settle window.
     f.stdin.write('y');
     await f.wait(() => f.latest.includes('Permission-checked memory contents'));
     assert.equal(a.queries.filter(query => query.subtype === 'read_file').length, 1);

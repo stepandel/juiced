@@ -2,10 +2,14 @@ import { stripVTControlCharacters } from 'node:util';
 import { object, type ClaudeFrame } from '../agent-protocol.js';
 
 /** `tool` is the native tool name; `detail` is the summary printed under a tool call. */
-export type Entry = { id: string; kind: 'user' | 'text' | 'tool' | 'notice' | 'summary'; text: string; tool?: string; detail?: string; status?: 'running' | 'done' | 'failed' };
+/** `output` is the bounded full result shown in the Ctrl+O transcript. */
+export type Entry = { id: string; kind: 'user' | 'text' | 'tool' | 'notice' | 'summary'; text: string; tool?: string; detail?: string; output?: string; status?: 'running' | 'done' | 'failed' };
 export type Turn = { id: number; entries: Entry[] };
-export type Conversation = { history: Turn[]; live: Entry[]; printed: Entry[]; streamId: string; streamIndex: number | null; model: string; turn: number; tokens: number };
-export const emptyConversation = (): Conversation => ({ history: [], live: [], printed: [], streamId: '', streamIndex: null, model: '', turn: 0, tokens: 0 });
+/** `outputTokens` counts finished messages this turn; `streamChars` estimates the one streaming now. */
+export type Conversation = { history: Turn[]; live: Entry[]; printed: Entry[]; streamId: string; streamIndex: number | null; model: string; turn: number; tokens: number; outputTokens: number; streamChars: number };
+export const emptyConversation = (): Conversation => ({ history: [], live: [], printed: [], streamId: '', streamIndex: null, model: '', turn: 0, tokens: 0, outputTokens: 0, streamChars: 0 });
+/** Output tokens for the spinner: reported usage plus an estimate for the streaming message. */
+export const turnTokens = (state: Conversation) => state.outputTokens + Math.round(state.streamChars / 4);
 export const plain = (text: unknown) => stripVTControlCharacters(String(text ?? '')).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 const bounded = (text: string) => text.length > 512 * 1024 ? text.slice(0, 512 * 1024) + '\n[display truncated]' : text;
 const line = (value: unknown) => plain(value).replace(/\s+/g, ' ').trim();
@@ -95,7 +99,7 @@ export function duration(milliseconds: number): string {
 }
 
 export function userTurn(state: Conversation, text: string): Conversation {
-  return { ...state, live: [{ id: `user-${state.turn}`, kind: 'user', text: plain(text) }], printed: [], streamId: '', streamIndex: null };
+  return { ...state, live: [{ id: `user-${state.turn}`, kind: 'user', text: plain(text) }], printed: [], streamId: '', streamIndex: null, outputTokens: 0, streamChars: 0 };
 }
 
 /** Keep replayed output in scrollback while reconciling later native snapshots. */
@@ -120,7 +124,7 @@ export function restoreHistory(state: Conversation): Conversation {
 function toolEntry(block: ClaudeFrame, live: Entry[]): Entry {
   const previous = live.find(item => item.id === block.id);
   const detail = inputDetail(block.name, block.input) ?? previous?.detail;
-  return { id: String(block.id), kind: 'tool', tool: plain(block.name), text: toolSummary(block.name, block.input), status: previous?.status ?? 'running', ...(detail ? { detail } : {}) };
+  return { id: String(block.id), kind: 'tool', tool: plain(block.name), text: toolSummary(block.name, block.input), status: previous?.status ?? 'running', ...(detail ? { detail } : {}), ...(previous?.output ? { output: previous.output } : {}) };
 }
 
 /** Partial events and final assistant snapshots describe the same blocks. */
@@ -142,7 +146,10 @@ export function receiveFrame(state: Conversation, frame: ClaudeFrame): Conversat
   }
   if (frame.type === 'stream_event' && !frame.parent_tool_use_id) {
     const event = object(frame.event);
-    if (event.type === 'message_start') return { ...state, streamId: String(object(event.message).id ?? frame.uuid), streamIndex: null };
+    if (event.type === 'message_start') return { ...state, streamId: String(object(event.message).id ?? frame.uuid), streamIndex: null, streamChars: 0 };
+    if (event.type === 'message_delta' && typeof object(event.usage).output_tokens === 'number') {
+      return { ...state, outputTokens: state.outputTokens + Number(object(event.usage).output_tokens), streamChars: 0 };
+    }
     const id = `${state.streamId}:${event.index}`;
     if (event.type === 'content_block_start' || event.type === 'content_block_delta') streamIndex = Number(event.index);
     if (event.type === 'content_block_stop' || event.type === 'message_stop') streamIndex = null;
@@ -154,6 +161,8 @@ export function receiveFrame(state: Conversation, frame: ClaudeFrame): Conversat
     if (event.type === 'content_block_delta') {
       const delta = object(event.delta);
       if (delta.type === 'text_delta') put({ id, kind: 'text', text: bounded((live.find(item => item.id === id)?.text ?? '') + plain(delta.text)) });
+      const streamed = delta.text ?? delta.thinking ?? delta.partial_json;
+      if (typeof streamed === 'string') return { ...state, live, streamIndex, streamChars: state.streamChars + streamed.length };
     }
   }
   if (frame.type === 'assistant' && !frame.parent_tool_use_id) {
@@ -181,7 +190,10 @@ export function receiveFrame(state: Conversation, frame: ClaudeFrame): Conversat
       const block = object(raw);
       if (block.type !== 'tool_result') continue;
       const item = live.find(entry => entry.id === block.tool_use_id);
-      if (item) put({ ...item, status: block.is_error ? 'failed' : 'done', detail: toolResult(item, block.content, Boolean(block.is_error)) });
+      if (item) {
+        const output = resultText(block.content).trim();
+        put({ ...item, status: block.is_error ? 'failed' : 'done', detail: toolResult(item, block.content, Boolean(block.is_error)), ...(output ? { output: output.length > 16 * 1024 ? output.slice(0, 16 * 1024) + '\n[output truncated]' : output } : {}) });
+      }
     }
   }
   if (frame.type === 'result') {
@@ -192,7 +204,7 @@ export function receiveFrame(state: Conversation, frame: ClaudeFrame): Conversat
     if (!frame.juiced_interrupted && !frame.is_error && typeof frame.duration_ms === 'number') put({ id: 'summary', kind: 'summary', text: `${verbs[state.turn % verbs.length]} for ${duration(frame.duration_ms)}` });
     const tokens = Number(object(frame.usage).input_tokens ?? 0) + Number(object(frame.usage).output_tokens ?? 0);
     const entries = liveEntries({ ...state, live });
-    return { ...state, history: [...state.history, { id: state.history.length, entries }], live: [], printed: [], streamId: '', streamIndex: null, turn: state.turn + 1, tokens };
+    return { ...state, history: [...state.history, { id: state.history.length, entries }], live: [], printed: [], streamId: '', streamIndex: null, turn: state.turn + 1, tokens, outputTokens: 0, streamChars: 0 };
   }
   return { ...state, live, streamIndex };
 }

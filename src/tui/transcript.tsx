@@ -11,9 +11,11 @@ export function Header({ workspace, session }: { workspace: string; session: str
   </Box>;
 }
 
-// Claude Code folds finished reads and searches into one line per run of calls.
+// Claude Code folds finished reads, searches and shell commands into one line
+// per run of calls; Ctrl+O shows their full output.
 const folded: Record<string, [string, string, string]> = {
-  Read: ['Read', 'file', 'files'], Grep: ['searched for', 'pattern', 'patterns'], Glob: ['searched for', 'pattern', 'patterns'], LS: ['listed', 'directory', 'directories'],
+  Read: ['read', 'file', 'files'], Grep: ['searched for', 'pattern', 'patterns'], Glob: ['searched for', 'pattern', 'patterns'], LS: ['listed', 'directory', 'directories'],
+  Bash: ['ran', 'shell command', 'shell commands'],
 };
 type Row = Entry | { id: string; kind: 'folded'; entries: Entry[] };
 const foldable = (entry: Entry) => entry.kind === 'tool' && entry.status === 'done' && Object.hasOwn(folded, entry.tool ?? '');

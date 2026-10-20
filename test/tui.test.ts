@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { edit, cursorParts } from '../src/tui/editor.js';
-import { duration, emptyConversation, liveEntries, plain, preview, receiveFrame, restoreHistory, toolSummary, userTurn } from '../src/tui/conversation.js';
+import { duration, emptyConversation, liveEntries, plain, preview, receiveFrame, restoreHistory, toolSummary, turnTokens, userTurn } from '../src/tui/conversation.js';
+import { rememberLabel, transcriptLines, wrapLines } from '../src/tui/app.js';
 import { foldedSummary, rows } from '../src/tui/transcript.js';
 import { spans } from '../src/tui/markdown.js';
 import { availableCommands, matchingCommands } from '../src/tui/commands.js';
@@ -138,7 +139,7 @@ test('per-block assistant snapshots reconcile text after thinking and tools usin
   assert.deepEqual(state.history[0]?.entries, [
     { id: 'user-0', kind: 'user', text: 'Check the README' },
     { id: 'mixed:1', kind: 'text', text: 'Let me check the code.' },
-    { id: 'read', kind: 'tool', tool: 'Read', text: 'Read(README.md)', status: 'done', detail: 'Read 1 line' },
+    { id: 'read', kind: 'tool', tool: 'Read', text: 'Read(README.md)', status: 'done', detail: 'Read 1 line', output: 'README contents' },
     { id: 'mixed:3', kind: 'text', text: 'The README needs an update.' },
     { id: 'mixed:4', kind: 'text', text: 'Let me check the code.' },
   ]);
@@ -207,13 +208,13 @@ test('tool calls use Claude Code headers and result summaries', () => {
   assert.deepEqual(state.history[0]?.entries.at(-1), { id: 'summary', kind: 'summary', text: 'Worked for 8s' });
 });
 
-test('finished reads and searches fold into one summary line', () => {
+test('finished reads, searches and shell commands fold into one summary line', () => {
   const tool = (id: string, name: string, status: 'done' | 'failed' | 'running' = 'done') => ({ id, kind: 'tool' as const, tool: name, text: `${name}(x)`, status });
   const folded = rows([tool('a', 'Read'), tool('b', 'Read'), tool('c', 'Grep'), tool('d', 'Bash'), tool('e', 'Read', 'failed'), tool('f', 'Glob'), tool('g', 'Read', 'running')]);
-  assert.deepEqual(folded.map(row => row.kind === 'folded' ? row.entries.map(entry => entry.id).join('') : row.id), ['abc', 'd', 'e', 'f', 'g']);
+  assert.deepEqual(folded.map(row => row.kind === 'folded' ? row.entries.map(entry => entry.id).join('') : row.id), ['abcd', 'e', 'f', 'g']);
   const first = folded[0]!;
   assert.ok(first.kind === 'folded');
-  assert.deepEqual(foldedSummary(first.entries), [{ verb: 'Read', count: 2, noun: 'files' }, { verb: 'searched for', count: 1, noun: 'pattern' }]);
+  assert.deepEqual(foldedSummary(first.entries), [{ verb: 'Read', count: 2, noun: 'files' }, { verb: 'searched for', count: 1, noun: 'pattern' }, { verb: 'ran', count: 1, noun: 'shell command' }]);
 });
 
 test('inline Markdown renders emphasis and code without literal markers', () => {
@@ -222,4 +223,32 @@ test('inline Markdown renders emphasis and code without literal markers', () => 
     { text: ', ' }, { italic: true, text: 'it' }, { text: ' and ' }, { text: 'docs' }, { dim: true, text: ' (https://d.e)' },
   ]);
   assert.deepEqual(spans('snake_case_name and 2 * 3 * 4'), [{ text: 'snake_case_name and 2 * 3 * 4' }]);
+});
+
+test('the spinner counts reported output tokens and estimates the streaming message', () => {
+  let state = userTurn(emptyConversation(), 'Count');
+  const event = (value: Record<string, unknown>) => { state = receiveFrame(state, { type: 'stream_event', event: value }); };
+  event({ type: 'message_start', message: { id: 'one' } });
+  event({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'x'.repeat(40) } });
+  event({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'y'.repeat(40) } });
+  assert.equal(turnTokens(state), 20);
+  event({ type: 'message_delta', usage: { output_tokens: 31 } });
+  assert.equal(turnTokens(state), 31, 'Reported usage replaces the estimate');
+  event({ type: 'message_start', message: { id: 'two' } });
+  event({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: 'z'.repeat(8) } });
+  assert.equal(turnTokens(state), 33);
+  state = receiveFrame(state, { type: 'result' });
+  assert.equal(turnTokens(state), 0);
+});
+
+test('the detailed transcript shows complete tool output and wraps to the terminal', () => {
+  const lines = transcriptLines([
+    { id: 'u', kind: 'user', text: 'Run it' },
+    { id: 't', kind: 'tool', tool: 'Bash', text: 'Bash(seq 3)', status: 'done', detail: '1\n… +2 lines', output: '1\n2\n3' },
+    { id: 's', kind: 'summary', text: 'Worked for 1s' },
+  ]);
+  assert.deepEqual(lines, ['❯ Run it', '', '● Bash(seq 3)', '  ⎿  1', '     2', '     3', '', '✻ Worked for 1s', '']);
+  assert.deepEqual(wrapLines(['abcdef', '🍈🍈🍈'], 4), ['abcd', 'ef', '🍈🍈', '🍈']);
+  assert.equal(rememberLabel([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'session' }, { type: 'setMode', mode: 'acceptEdits', destination: 'session' }]),
+    'Yes, and don’t ask again for Bash(npm test:*) for this session and switch to accept edits for this session');
 });

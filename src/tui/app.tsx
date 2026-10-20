@@ -1,10 +1,11 @@
 import React, { useEffect, useReducer, useRef, useState } from 'react';
 import { Box, Text, Static, render, useInput, usePaste } from 'ink';
-import { object, type Approval, type ClaudeFrame, type SlashCommand } from '../agent-protocol.js';
+import stringWidth from 'string-width';
+import { object, type Approval, type ApprovalOptions, type ClaudeFrame, type SlashCommand } from '../agent-protocol.js';
 import { RemoteAgent, type AgentStatus } from '../remote-agent.js';
 import type { TerminalIO } from '../remote-terminal.js';
 import { cursorParts, edit, type Editor } from './editor.js';
-import { duration, emptyConversation, liveEntries, plain, receiveFrame, restoreHistory, toolSummary, userTurn } from './conversation.js';
+import { duration, emptyConversation, liveEntries, plain, receiveFrame, restoreHistory, toolSummary, turnTokens, userTurn, type Entry } from './conversation.js';
 import { Entries, Header } from './transcript.js';
 import { availableCommands, matchingCommands } from './commands.js';
 import { CommandMenu, type MenuPage } from './menu.js';
@@ -45,7 +46,7 @@ const modes: Record<string, [string, string]> = {
   default: ['⏸', 'manual mode on'], acceptEdits: ['⏵⏵', 'accept edits on'], plan: ['⏸', 'plan mode on'],
   auto: ['⏵⏵', 'auto mode on'], dontAsk: ['⏵⏵', 'don’t ask mode on'], bypassPermissions: ['⏵⏵', 'bypass permissions on'],
 };
-/** Shift+Tab order. Juiced never cycles into modes that skip approvals. */
+/** Shift+Tab order; sessions launched in bypass mode can also cycle back to it. */
 export const modeCycle = ['default', 'acceptEdits', 'plan'];
 export type Pending = 'ctrl-c' | 'ctrl-d' | 'esc';
 
@@ -63,6 +64,7 @@ const shortcuts = [
   ['/ for commands', 'shift + tab to cycle modes', 'ctrl + c to clear or exit'],
   ['esc to interrupt', 'double tap esc to clear input', 'ctrl + u/k/w to delete'],
   ['↑/↓ for prompt history', 'backslash (\\) + return (⏎) for newline', '/detach to leave Claude running'],
+  ['ctrl + o for detailed transcript', '', ''],
 ];
 function Shortcuts() {
   return <Box flexShrink={0} paddingX={2}>{[0, 1, 2].map(column => <Box key={column} flexDirection="column" width="33%" paddingRight={1}>
@@ -230,22 +232,58 @@ function Question({ questions, rows, answer, cancel }: { questions: Record<strin
   </>;
 }
 
-function Permission({ approval, rows, answer, cancel }: { approval: Approval; rows: number; answer(allow: boolean, answers?: Record<string, string>): void; cancel(): void }) {
-  // Juiced keeps Deny as the default choice; Enter alone never grants access.
-  const allow = useRef(false);
+const destinations: Record<string, string> = { session: ' for this session', localSettings: ' in this project', projectSettings: ' in this project', userSettings: ' in all projects' };
+/** Claude's "Yes, and don't ask again…" label for its permission suggestions. */
+export function rememberLabel(suggestions: ClaudeFrame[]): string {
+  const parts = suggestions.flatMap(raw => {
+    const suggestion = object(raw);
+    const where = destinations[String(suggestion.destination)] ?? '';
+    if (suggestion.type === 'addRules' && suggestion.behavior !== 'deny') {
+      const rules = Array.isArray(suggestion.rules) ? suggestion.rules.map(object) : [];
+      return rules.length ? [`don’t ask again for ${rules.map(rule => rule.ruleContent ? `${plain(rule.toolName)}(${plain(rule.ruleContent)})` : plain(rule.toolName)).join(', ')}${where}`] : [];
+    }
+    if (suggestion.type === 'setMode') return [`switch to ${modes[String(suggestion.mode)]?.[1].replace(/ on$/u, '') ?? plain(suggestion.mode)}${where}`];
+    if (suggestion.type === 'addDirectories' && Array.isArray(suggestion.directories)) return [`always allow access to ${suggestion.directories.map(plain).join(', ')}${where}`];
+    return [];
+  });
+  return `Yes, and ${parts.length ? parts.join(' and ') : 'don’t ask again'}`;
+}
+
+/** Keys that arrive this soon after a dialog opens were meant for the prompt. */
+const settle = 300;
+
+function Permission({ approval, rows, answer, cancel }: { approval: Approval; rows: number; answer(allow: boolean, answers?: Record<string, string>, options?: ApprovalOptions): void; cancel(): void }) {
+  const opened = useRef(Date.now());
+  // Like Claude Code, Yes is preselected. Local application into the user's
+  // checkout is a Juiced-only request and keeps No as its default.
+  // A ref, so a rapid arrow then Enter confirms the newly selected choice.
+  const index = useRef(approval.local ? approval.suggestions?.length ? 2 : 1 : 0);
   const [, refreshSelection] = useReducer((value: number) => value + 1, 0);
+  const select = (value: number) => { index.current = (value + choices.length) % choices.length; refreshSelection(); };
+  const [amending, setAmending] = useState(false);
+  const [feedback, setFeedback] = useDraft();
   const questions = Array.isArray(approval.input.questions) ? approval.input.questions.map(object) : [];
   const asking = approval.tool === 'AskUserQuestion' && questions.length > 0;
+  const choices: { label: string; run(): void }[] = [
+    { label: 'Yes', run: () => answer(true) },
+    ...(approval.suggestions?.length ? [{ label: rememberLabel(approval.suggestions), run: () => answer(true, undefined, { suggestions: approval.suggestions! }) }] : []),
+    { label: approval.local ? 'No' : 'No, and tell Claude what to do differently', run: () => answer(false) },
+  ];
+  const no = choices.length - 1;
   // Pasting text must never act as an Allow shortcut.
-  usePaste(() => {}, { isActive: !asking });
+  usePaste(() => {}, { isActive: !asking && !amending });
   useInput((input, key) => {
-    if (asking) return;
+    if (asking || amending) return;
     if (key.escape) { answer(false); return; }
     if (key.ctrl && input === 'c') { cancel(); return; }
-    if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab) { allow.current = !allow.current; refreshSelection(); }
-    else if (input === '1' || input.toLowerCase() === 'y') answer(true);
-    else if (input === '2' || input.toLowerCase() === 'n') answer(false);
-    else if (key.return) answer(allow.current);
+    if (key.upArrow || key.leftArrow || key.shift && key.tab) select(index.current - 1);
+    else if (key.downArrow || key.rightArrow) select(index.current + 1);
+    else if (key.tab && !approval.local) { select(no); setAmending(true); }
+    else if (Date.now() - opened.current < settle) return;
+    else if (/^[1-9]$/u.test(input) && Number(input) <= choices.length) choices[Number(input) - 1]!.run();
+    else if (input.toLowerCase() === 'y') choices[0]!.run();
+    else if (input.toLowerCase() === 'n') choices[no]!.run();
+    else if (key.return) choices[index.current]!.run();
   });
   if (asking) return <Rule color="yellow" indent={1}><Question questions={questions} rows={rows} answer={answer} cancel={cancel} /></Rule>;
   const view = request(approval);
@@ -256,12 +294,58 @@ function Permission({ approval, rows, answer, cancel }: { approval: Approval; ro
       {approval.description && <Text dimColor>{plain(approval.description)}</Text>}
     </Clipped>
     <Box flexShrink={0}><Text wrap="truncate-end">{view.question}</Text></Box>
-    <Box flexShrink={0}><Choices items={[{ label: 'Yes' }, { label: 'No' }]} index={allow.current ? 0 : 1} rows={2} /></Box>
-    <Box flexShrink={0}><Text dimColor wrap="truncate-end">Esc to cancel · Enter to confirm · ↑/↓ to select</Text></Box>
+    {amending
+      ? <Prompt editor={feedback} onEdit={setFeedback} placeholder="Tell Claude what to do differently" onEscape={() => setAmending(false)} onSubmit={value => answer(false, undefined, value.trim() ? { message: value.trim() } : {})} />
+      : <Box flexShrink={0}><Choices items={choices} index={index.current} rows={choices.length} /></Box>}
+    <Box flexShrink={0}><Text dimColor wrap="truncate-end">{amending ? 'Enter to decline with this message · Esc to go back' : `Esc to cancel${approval.local ? '' : ' · Tab to amend'} · Enter to confirm · ↑/↓ to select`}</Text></Box>
   </Rule>;
 }
 
-function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; argv: string[]; workspace: string; rows: number; quit(code: number, stop?: boolean): void }) {
+/** Text lines of the Ctrl+O transcript, with complete tool output. */
+export function transcriptLines(entries: Entry[]): string[] {
+  return entries.flatMap(entry => {
+    const indent = (text: string, first: string, rest = ' '.repeat(first.length)) => text.split('\n').map((line, i) => (i ? rest : first) + line);
+    const body = entry.kind === 'user' ? indent(entry.text, '❯ ')
+      : entry.kind === 'text' ? indent(entry.text, '● ')
+      : entry.kind === 'tool' ? [`● ${entry.text}`, ...indent(entry.output ?? entry.detail ?? (entry.status === 'running' ? 'Running…' : '(No content)'), '  ⎿  ', '     ')]
+      : entry.kind === 'summary' ? [`✻ ${entry.text}`] : indent(entry.text, '  ⎿  ', '     ');
+    return [...body, ''];
+  });
+}
+
+/** Split lines to the terminal width so scrolling moves by screen rows. */
+export function wrapLines(lines: string[], width: number): string[] {
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  return lines.flatMap(line => {
+    const rows: string[] = [];
+    let row = '', used = 0;
+    for (const { segment } of segmenter.segment(line)) {
+      const size = stringWidth(segment);
+      if (used + size > width && row) { rows.push(row); row = ''; used = 0; }
+      row += segment; used += size;
+    }
+    return [...rows, row];
+  });
+}
+
+function Transcript({ entries, rows, columns, close }: { entries: Entry[]; rows: number; columns: number; close(): void }) {
+  const lines = wrapLines(transcriptLines(entries), Math.max(10, columns - 1));
+  const height = Math.max(1, rows - 4);
+  const [offset, setOffset] = useState(0);
+  const limit = Math.max(0, lines.length - height);
+  useInput((input, key) => {
+    if (key.escape || key.ctrl && ['o', 'c'].includes(input) || input === 'q') { close(); return; }
+    const step = key.upArrow || input === 'k' ? 1 : key.downArrow || input === 'j' ? -1 : key.pageUp ? height : key.pageDown ? -height : key.home || input === 'g' ? limit : key.end || input === 'G' ? -limit : 0;
+    if (step) setOffset(value => Math.max(0, Math.min(limit, value + step)));
+  });
+  const start = Math.max(0, lines.length - height - Math.min(offset, limit));
+  return <Box flexDirection="column" flexShrink={0}>
+    <Rule color="green"><Text dimColor wrap="truncate-end">Showing detailed transcript · ↑/↓ PgUp/PgDn to scroll · Esc or Ctrl+O to close</Text></Rule>
+    {lines.slice(start, start + height).map((line, i) => <Text key={start + i} wrap="truncate-end">{line || ' '}</Text>)}
+  </Box>;
+}
+
+function Juiced({ agent, argv, workspace, rows, columns, quit }: { agent: RemoteAgent; argv: string[]; workspace: string; rows: number; columns: number; quit(code: number, stop?: boolean): void }) {
   const [conversation, setConversation] = useState(emptyConversation);
   const [editor, setEditor] = useDraft();
   const [status, setStatus] = useState<AgentStatus>(agent.status);
@@ -272,6 +356,7 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
   const [notice, setNotice] = useState('');
   const [closing, setClosing] = useState(false);
   const [help, setHelp] = useState(false);
+  const [transcript, setTranscript] = useState(false);
   const [, repaint] = useReducer((value: number) => value + 1, 0);
   const [pending, setPending] = useState<Pending>();
   const pendingTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -305,7 +390,8 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
   else turn.current ??= { since: Date.now(), verb: spinnerVerbs[Math.floor(Math.random() * spinnerVerbs.length)]! };
   const cancel = () => { if (['working', 'interrupting'].includes(agent.status)) action(agent.interrupt()); };
   useInput((input, key) => {
-    if (approvals.length || menuOpen.current) return;
+    if (approvals.length || menuOpen.current || transcript) return;
+    if (key.ctrl && input === 'o') { setHelp(false); setTranscript(true); return; }
     if (key.ctrl && input === 'c') {
       setHelp(false);
       if (['working', 'interrupting'].includes(agent.status)) cancel();
@@ -326,10 +412,12 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
   const cycleMode = () => {
     if (agent.status !== 'ready') { setNotice('Wait for Claude to finish before changing the permission mode.'); return; }
     const current = String(agent.info.current_permission_mode ?? 'default');
-    const mode = modeCycle[(modeCycle.indexOf(current) + 1) % modeCycle.length]!;
+    const cycle = agent.info.launch_permission_mode === 'bypassPermissions' ? [...modeCycle, 'bypassPermissions'] : modeCycle;
+    const mode = cycle[(cycle.indexOf(current) + 1) % cycle.length]!;
     setNotice('');
+    // Like Claude Code, Shift+Tab changes this session only; /permissions saves a default.
     // The mode lives on the agent; repaint once Claude acknowledges it.
-    action(agent.configure({ subtype: 'set_permission_mode', mode }).finally(repaint));
+    action(agent.configure({ subtype: 'set_permission_mode', mode }, { persist: false }).finally(repaint));
   };
   const submit = (text: string) => {
     if (menuOpen.current) return;
@@ -367,7 +455,7 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
   const active = approvals[0];
   const live = liveEntries(conversation);
   const history = [...conversation.history.flatMap(item => item.entries), ...conversation.live].filter(entry => entry.kind === 'user').map(entry => entry.text);
-  const tokens = Math.round(live.filter(entry => entry.kind === 'text').reduce((sum, entry) => sum + entry.text.length, 0) / 4);
+  const tokens = turnTokens(conversation);
   const spinner = closing ? 'Disconnecting' : status === 'connecting' ? 'Connecting to Claude' : status === 'configuring' ? 'Updating Claude' : status === 'interrupting' ? 'Interrupting' : status === 'working' ? turn.current?.verb : undefined;
   // Ink can only erase rows still in the viewport. An overflowing live frame
   // pushes its first lines into scrollback again on every option change.
@@ -378,12 +466,12 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
     <Static items={[{ id: 'header', entries: [] }, ...conversation.history.map(turn => ({ id: String(turn.id), entries: turn.entries }))]}>{item => item.id === 'header'
       ? <Header key="header" workspace={workspace} session={agent.session.id} />
       : <Entries key={item.id} entries={item.entries} />}</Static>
-    <Box flexDirection="column" maxHeight={height} overflow="hidden">
+    {transcript && !active && !menu ? <Transcript entries={[...conversation.history.flatMap(item => item.entries), ...conversation.live]} rows={rows} columns={columns} close={() => setTranscript(false)} /> : <Box flexDirection="column" maxHeight={height} overflow="hidden">
       <Clipped tail><Entries entries={live.slice(-12)} /></Clipped>
       <Box flexDirection="column" flexShrink={0} maxHeight={height} overflow="hidden">
         {spinner && !active && <Box marginBottom={1} flexShrink={0} height={1}><Spinner label={spinner} since={status === 'working' ? turn.current?.since : undefined} tokens={tokens} /></Box>}
         {notice && <Box flexShrink={0} maxHeight={2} overflow="hidden"><Box width={5} flexShrink={0}><Text dimColor>  ⎿ </Text></Box><Text color="yellow">{notice}</Text></Box>}
-        {active && <Permission key={active.id} approval={active} rows={rows} cancel={cancel} answer={(allow, answers) => action(agent.answer(active.id, allow, answers))} />}
+        {active && <Permission key={active.id} approval={active} rows={rows} cancel={cancel} answer={(allow, answers, options) => action(agent.answer(active.id, allow, answers, options))} />}
         {menu && <Box flexDirection="column" display={active ? 'none' : 'flex'}><CommandMenu load={menu.load} rows={rows} active={!active} cancel={() => { menuOpen.current = false; setMenu(undefined); }} done={result => {
             menuOpen.current = false; setMenu(undefined);
             if ('message' in result) setNotice(plain(result.message));
@@ -394,7 +482,7 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
           {help ? <Shortcuts /> : <Footer mode={String(agent.info.current_permission_mode ?? 'default')} pending={pending} busy={busy} empty={!editor.current.text} model={conversation.model} />}
         </>}
       </Box>
-    </Box>
+    </Box>}
   </Box>;
 }
 
@@ -405,7 +493,7 @@ export async function runLocalTui(agent: RemoteAgent, argv: string[], workspace:
     code = Math.max(code, nextCode);
     quitting ??= agent.close(stop).catch(error => { code = 1; io.stderr.write(`juiced: ${plain((error as Error).message)}\n`); }).finally(() => instance.unmount());
   };
-  const ui = () => <Juiced agent={agent} argv={argv} workspace={workspace} rows={io.stdout.rows || 24} quit={quit} />;
+  const ui = () => <Juiced agent={agent} argv={argv} workspace={workspace} rows={io.stdout.rows || 24} columns={io.stdout.columns || 80} quit={quit} />;
   const instance = render(ui(), { stdin: io.stdin as NodeJS.ReadStream, stdout: io.stdout as NodeJS.WriteStream, stderr: io.stderr as NodeJS.WriteStream, exitOnCtrlC: false, interactive: true });
   // Update the row budget before Ink's synchronous resize repaint, which would
   // otherwise paint one frame using the old height in the smaller terminal.

@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { stripVTControlCharacters } from 'node:util';
 import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
+import type { Approval, ApprovalOptions } from '../src/agent-protocol.js';
 import { runLocalTui } from '../src/tui/app.js';
 import type { TerminalInput, TerminalOutput } from '../src/remote-terminal.js';
 
@@ -185,11 +186,11 @@ test('the real TUI edits and displays input while the network is stalled, withou
   assert.equal(stdin.isRaw, false);
 });
 
-test('permission UI defaults to deny, ignores pasted approval shortcuts and preserves the local draft', { timeout: 5000 }, async () => {
+test('permission UI preselects Yes, ignores early and pasted keys, offers remembered grants and feedback, and preserves the draft', { timeout: 5000 }, async () => {
   class PreviewAgent extends RemoteAgent {
-    answers: boolean[] = [];
+    answers: { allow: boolean; options?: ApprovalOptions }[] = [];
     override async start() { this.status = 'ready'; this.emit('status', this.status); }
-    override async answer(id: string, allow: boolean) { this.answers.push(allow); this.approvals.delete(id); this.emit('approvals'); }
+    override async answer(id: string, allow: boolean, _?: Record<string, string>, options?: ApprovalOptions) { this.answers.push({ allow, ...(options ? { options } : {}) }); this.approvals.delete(id); this.emit('approvals'); }
     override async close() { this.status = 'closed'; this.emit('status', this.status); }
   }
   const agent = new PreviewAgent({} as AgentSession);
@@ -203,34 +204,46 @@ test('permission UI defaults to deny, ignores pasted approval shortcuts and pres
   const lifetime = new AbortController();
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
   const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error('UI did not update'); await delay(5); } };
+  const ask = async (id: string, extra: Partial<Approval> = {}) => {
+    const offset = output.length;
+    agent.approvals.set(id, { id, tool: 'Bash', input: { command: 'printf OK' }, description: '', ...extra });
+    agent.emit('approvals');
+    await wait(() => stripVTControlCharacters(output.slice(offset)).includes(extra.local ? 'in your local checkout?' : 'Bash command'));
+    return offset;
+  };
   try {
     await wait(() => agent.status === 'ready');
     stdin.write('my draft'); await delay(40);
-    agent.approvals.set('first', { id: 'first', tool: 'Bash', input: { command: 'printf OK' }, description: '' });
-    agent.emit('approvals');
-    await wait(() => output.includes('Bash command'));
-    stdin.write('\x1b[200~y\x1b[201~'); await delay(40);
+    await ask('first');
+    stdin.write('\r'); stdin.write('1'); await delay(40);
+    assert.deepEqual(agent.answers, [], 'Keys typed for the prompt as the dialog opens must not answer it');
+    stdin.write('\x1b[200~y\x1b[201~'); await delay(320);
     assert.deepEqual(agent.answers, [], 'Pasting y must not approve a tool');
     stdin.write('\r'); await wait(() => agent.answers.length === 1);
-    assert.equal(agent.answers[0], false);
+    assert.deepEqual(agent.answers[0], { allow: true }, 'Yes is preselected');
     await delay(40);
     assert.ok(stripVTControlCharacters(output).includes('my draft'));
-    const offset = output.length;
-    agent.approvals.set('second', { id: 'second', tool: 'Bash', input: { command: 'printf OK' }, description: '' });
-    agent.emit('approvals');
-    await wait(() => output.slice(offset).includes('Bash command'));
-    await delay(40); // Let the newly mounted permission attach its input handler.
-    stdin.write('\x1b[C'); stdin.write('\r');
+
+    const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'printf:*' }], behavior: 'allow', destination: 'localSettings' }];
+    const offset = await ask('second', { suggestions });
+    assert.ok(stripVTControlCharacters(output.slice(offset)).includes('2. Yes, and don’t ask again for Bash(printf:*) in this project'));
+    await delay(320);
+    stdin.write('\x1b[B'); stdin.write('\r');
     await wait(() => agent.answers.length === 2);
-    assert.equal(agent.answers[1], true, 'A rapid arrow then Enter must confirm the selected choice');
-    const localOffset = output.length;
-    agent.approvals.set('local-publication', { id: 'local-publication', local: true, tool: 'Publish snapshot', input: { files: 2, paths: ['README.md', 'src/app.ts'] }, description: 'Apply remote edits locally' });
-    agent.emit('approvals');
-    await wait(() => stripVTControlCharacters(output.slice(localOffset)).includes('in your local checkout?'));
+    assert.deepEqual(agent.answers[1], { allow: true, options: { suggestions } }, 'A rapid arrow then Enter confirms the remembered grant');
+
+    await ask('third');
+    await delay(40); stdin.write('\t'); await wait(() => output.includes('Tell Claude what to do differently'));
+    await delay(40); stdin.write('use echo instead'); await delay(40); stdin.write('\r');
+    await wait(() => agent.answers.length === 3);
+    assert.deepEqual(agent.answers[2], { allow: false, options: { message: 'use echo instead' } });
+
+    await ask('local-publication', { local: true, tool: 'Publish snapshot', input: { files: 2, paths: ['README.md', 'src/app.ts'] }, description: 'Apply remote edits locally' });
+    await delay(320);
     stdin.write('\x1b[200~y\x1b[201~'); await delay(40);
-    assert.equal(agent.answers.length, 2, 'Pasted text cannot approve a local publication');
-    stdin.write('\r'); await wait(() => agent.answers.length === 3);
-    assert.equal(agent.answers[2], false, 'Local publication defaults to Deny');
+    assert.equal(agent.answers.length, 3, 'Pasted text cannot approve a local publication');
+    stdin.write('\r'); await wait(() => agent.answers.length === 4);
+    assert.deepEqual(agent.answers[3], { allow: false }, 'Local publication defaults to No');
   } finally { lifetime.abort(); await running; }
   assert.equal(stdin.isRaw, false);
 });
@@ -275,7 +288,7 @@ test('long conversations and permission previews stay inside the terminal while 
     await delay(80);
     stdin.write('\x1b[C'); await delay(40);
     stdin.write('\x1b[D'); await delay(40);
-    stdin.write('\x1b[C'); stdin.write('\r');
+    stdin.write('\x1b[C'); stdin.write('\x1b[D'); stdin.write('\r');
     await wait(() => agent.answers.length === 1);
     assert.deepEqual(agent.answers, [true]);
 
@@ -365,6 +378,12 @@ test('Claude Code prompt keys: history, shortcuts, mode cycling, double Esc and 
     stdin.write('\x1b[Z'); await wait(() => latest.includes('manual mode on'));
     assert.deepEqual(agent.modes, ['acceptEdits', 'plan', 'default']);
     assert.deepEqual(agent.submitted, ['first prompt', 'second prompt']);
+
+    stdin.write('draft'); await wait(() => prompt() === 'draft');
+    stdin.write('\x0f'); await wait(() => latest.includes('Showing detailed transcript') && latest.includes('Answer 2') && latest.includes('❯ first prompt'));
+    stdin.write('x'); await delay(30);
+    stdin.write('\x1b'); await wait(() => prompt() === 'draft');
+    stdin.write('\x15'); await wait(() => prompt()?.startsWith('Ask Claude') === true);
 
     stdin.write('\x03'); await wait(() => latest.includes('Press Ctrl-C again to exit'));
     await delay(30);

@@ -87,7 +87,7 @@ export async function commandMenu(agent: RemoteAgent, name: string, argument = '
   if (Object.hasOwn(unavailable, name)) return { title: `/${name}`, description: unavailable[name]!, items: [], footer: 'Unavailable in headless Claude' };
 
   if (name === 'help') return {
-    title: 'Commands and shortcuts', description: '↑/↓ select · type to filter · Enter opens a command · Alt+Enter newline in prompts · Esc back or interrupt · Shift+Tab permission mode · Ctrl+C twice to exit',
+    title: 'Commands and shortcuts', description: '↑/↓ select · type to filter · Enter opens a command · Alt+Enter newline in prompts · Esc back or interrupt · Shift+Tab permission mode · Ctrl+O transcript · Ctrl+C twice to exit',
     items: [{ id: 'keyboard', label: 'Keyboard shortcuts', description: 'Menu navigation and prompt editing run locally. A remote request runs only on opening a data view or confirming an action.' },
       ...[...new Map([...agent.commands, ...menuCommands, { name: 'model', description: 'Choose a model', argumentHint: '' }].map(command => [command.name, command])).values()].map(command => ({
         id: command.name, label: `/${command.name} ${command.argumentHint}`, description: command.description,

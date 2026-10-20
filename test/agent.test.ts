@@ -179,6 +179,8 @@ test('only acknowledged menu choices are saved, including false and default valu
   await f.agent.configure({ subtype: 'set_permission_mode', mode: 'acceptEdits' });
   await f.agent.configure({ subtype: 'apply_flag_settings', settings: { effortLevel: 'high', outputStyle: 'Learning', fastMode: false } });
   await f.agent.configure({ subtype: 'set_permission_mode', mode: 'default' });
+  await f.agent.configure({ subtype: 'set_permission_mode', mode: 'plan' }, { persist: false });
+  assert.equal(f.agent.info.current_permission_mode, 'plan', 'Shift+Tab changes the running session without saving a default');
   await f.agent.configure({ subtype: 'rename_session', title: 'Only this conversation' });
   assert.deepEqual(f.commands.filter(command => command.type === 'save-settings').map(command => command.settings), [
     { model: 'sonnet' }, { permissionMode: 'acceptEdits' }, { effortLevel: 'high', outputStyle: 'Learning', fastMode: false }, { permissionMode: 'default' },
@@ -338,6 +340,16 @@ test('one process handles initialization, multiple prompts, approval answers and
   await f.agent.answer('permission-2', true, { 'Which?': 'First' });
   assert.deepEqual(object(f.frames.at(-1)?.response).response, { behavior: 'allow', updatedInput: { questions: [], answers: { 'Which?': 'First' } } });
   await assert.rejects(f.agent.answer('permission-2', true), /no longer active/);
+  const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'localSettings' }];
+  f.output({ type: 'control_request', request_id: 'permission-3', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'npm test' }, permission_suggestions: suggestions } });
+  await until(() => f.agent.approvals.size === 1);
+  assert.deepEqual(f.agent.approvals.get('permission-3')?.suggestions, suggestions);
+  await f.agent.answer('permission-3', true, undefined, { suggestions });
+  assert.deepEqual(object(f.frames.at(-1)?.response).response, { behavior: 'allow', updatedInput: { command: 'npm test' }, updatedPermissions: suggestions });
+  f.output({ type: 'control_request', request_id: 'permission-4', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'rm -rf build' } } });
+  await until(() => f.agent.approvals.size === 1);
+  await f.agent.answer('permission-4', false, undefined, { message: 'Keep the build directory' });
+  assert.deepEqual(object(f.frames.at(-1)?.response).response, { behavior: 'deny', message: 'The user declined this request and said: Keep the build directory' });
   await f.agent.interrupt();
   assert.equal(object(f.frames.at(-1)?.request).subtype, 'interrupt');
   f.output({ type: 'result', is_error: false, result: 'Interrupted' });
