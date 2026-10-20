@@ -282,9 +282,11 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       if (command.frame.type === 'control_response') await record({ type: 'approval-answer', id: String(object(command.frame.response).request_id) });
       if (command.frame.type === 'user') {
         const text = Buffer.from(String(object(command.frame.message).content));
+        const events: AgentJournalEvent[] = [];
         for (let offset = 0; offset < text.length; offset += 12 * 1024)
-          await record({ type: 'user', id: command.id, data: text.subarray(offset, offset + 12 * 1024).toString('base64'), final: offset + 12 * 1024 >= text.length });
-        await record({ type: 'state', state: 'working' });
+          events.push({ type: 'user', id: command.id, data: text.subarray(offset, offset + 12 * 1024).toString('base64'), final: offset + 12 * 1024 >= text.length });
+        // One ordered append and fsync for the whole prompt and its state change.
+        for (const entry of await journal.events([...events, { type: 'state', state: 'working' }])) if (sink) publish(entry);
       }
       const raw = Buffer.from(text);
       for (let offset = 0; offset < raw.length; offset += MAX_INPUT_BYTES)
