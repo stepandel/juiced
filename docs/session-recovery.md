@@ -17,7 +17,7 @@ answer a pending permission request.
 Supplying Claude arguments starts a fresh bound session so launch settings and
 initial prompts take effect; reattachment retains its saved launch configuration.
 
-Use `juiced --session ses_<id> claude` from any tab in the same project and
+Use `juiced claude --session ses_<id>` from any tab in the same project and
 workspace to reopen a specific session using the ID displayed in its header.
 This option bypasses the terminal binding, as do explicit Claude
 session-selection flags, disabled native persistence, and native passthrough.
@@ -132,7 +132,7 @@ loss. Hosted sleep/wake verification still requires a matching runtime deploymen
 
 For hosted latency diagnosis, run `JUICED_DEBUG=1 juiced claude` in the original
 terminal tab after building and deploying matching sources, or use
-`JUICED_DEBUG=1 juiced --session ID claude` for a specific session. Diagnostic
+`JUICED_DEBUG=1 juiced claude --session ID` for a specific session. Diagnostic
 records include view read time, time to the first stream event, replay first-chunk/completion time and
 chunk/entry counts, and existing command acknowledgment timings. These records
 contain timing and sequence metadata rather than transcript contents. Elapsed

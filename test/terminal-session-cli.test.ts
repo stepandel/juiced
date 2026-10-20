@@ -57,10 +57,12 @@ test('CLI reconnects the same tab, starts fresh on --new, and bypasses bindings 
   ], 'Resolve once before using the ID for authentication and subsequent Session commands');
   const again = await run(); assert.equal(again.id, first.id); assert.match(again.stderr, /Reconnecting/);
   const other = await run(['claude'], 'tab-b'); assert.notEqual(other.id, first.id);
-  const explicit = await run(['--session', other.id, 'claude']); assert.equal(explicit.id, other.id);
+  const explicit = await run(['claude', '--session', other.id]); assert.equal(explicit.id, other.id);
+  assert.deepEqual(explicit.argv, [], 'The Juiced session option must not reach the native Claude process');
   assert.equal((await run()).id, first.id, 'Explicit recovery must preserve this tab’s binding');
   assert.equal((await run(['claude'], 'tab-b')).id, other.id);
-  await assert.rejects(run(['--session', other.id, 'claude', '-p', 'prompt']), /requires an interactive terminal/);
+  await assert.rejects(run(['claude', '--session', other.id, '-p', 'prompt']), /requires an interactive terminal/);
+  await assert.rejects(run(['--session', other.id, 'claude']), /Run juiced claude --session ID/);
   const native = await run(['claude', '--resume', 'native-id']); assert.deepEqual(native.argv, ['--resume', 'native-id']);
   assert.notEqual(native.id, first.id); assert.equal((await run()).id, first.id);
 

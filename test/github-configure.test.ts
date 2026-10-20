@@ -41,7 +41,7 @@ test('github-configure is app-wide, reserves its command name, and rejects token
   }
   for (const args of [
     ['--workspace', 'chosen', 'claude', 'github-configure'], ['--resume', 'claude', 'github-configure'],
-    ['--session', `ses_${'1'.repeat(32)}`, 'claude', 'github-configure'],
+    ['claude', '--session', `ses_${'1'.repeat(32)}`, 'github-configure'],
     ['claude', 'github-configure', 'fixture-token'], ['claude', 'github-configure', '--token', 'fixture-token'],
     ['claude', 'github-configure', '--stdin', '--stdin'],
   ]) assert.throws(() => parseArguments(args, {}));

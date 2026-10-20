@@ -26,28 +26,54 @@ test('a leading --new starts fresh without forwarding the Juiced option to Claud
   assert.deepEqual(parseArguments(['claude', '--', '--new'], {}), {
     command: 'claude', action: 'run', workspace: undefined, argv: ['--new'],
   });
-  assert.throws(() => parseArguments(['--session', `ses_${'1'.repeat(32)}`, 'claude', '--new'], {}), /cannot be combined/);
+  assert.throws(() => parseArguments(['claude', '--new', '--new'], {}), /only once/);
 });
 
 test('removed global --resume fails with guidance while explicit session selection remains available', () => {
-  const id = `ses_${'1'.repeat(32)}`;
   for (const args of [['--resume', 'claude'], ['--workspace', 'chosen', '--resume', 'claude'], ['--resume', 'claude', '--new'], ['--resume=latest', 'claude']]) {
-    assert.throws(() => parseArguments(args, {}), /--resume has been removed.*original terminal tab.*--session ID claude/);
+    assert.throws(() => parseArguments(args, {}), /--resume has been removed.*original terminal tab.*juiced claude --session ID/);
   }
-  assert.deepEqual(parseArguments(['--workspace', 'chosen', '--session', id, 'claude'], {}), {
-    command: 'claude', action: 'run', workspace: 'chosen', argv: [], session: id,
-  });
-  for (const command of ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek']) {
-    assert.throws(() => parseArguments(['--session', id, 'claude', command], {}), /interactive/);
-  }
-  for (const args of [['--session'], ['--session', 'invalid', 'claude']]) {
-    assert.throws(() => parseArguments(args, {}), /Invalid Juiced session ID/);
-  }
-  assert.throws(() => parseArguments(['--session', id, 'env', 'unset', 'MODEL'], {}), /interactive/);
   assert.deepEqual(parseArguments(['claude', '--resume', 'native-id'], {}), {
     command: 'claude', action: 'run', workspace: undefined, argv: ['--resume', 'native-id'],
   });
   assert.doesNotMatch(HELP, /--resume/);
+});
+
+test('session selection follows claude and is consumed before Claude arguments', () => {
+  const id = `ses_${'1'.repeat(32)}`;
+  assert.deepEqual(parseArguments(['claude', '--session', id], {}), {
+    command: 'claude', action: 'run', workspace: undefined, argv: [], session: id,
+  });
+  assert.deepEqual(parseArguments(['--workspace', 'chosen', 'claude', '--session', id], {}), {
+    command: 'claude', action: 'run', workspace: 'chosen', argv: [], session: id,
+  });
+  assert.deepEqual(parseArguments(['claude', `--session=${id}`, '--model', 'sonnet'], {}), {
+    command: 'claude', action: 'run', workspace: undefined, argv: ['--model', 'sonnet'], session: id,
+  });
+  assert.deepEqual(parseArguments(['claude', '--session', id, '--', 'login'], {}), {
+    command: 'claude', action: 'run', workspace: undefined, argv: ['login'], session: id,
+  });
+  assert.deepEqual(parseArguments(['claude', '--', '--session', id], {}), {
+    command: 'claude', action: 'run', workspace: undefined, argv: ['--session', id],
+  });
+  assert.deepEqual(parseArguments(['claude', '--session-id', 'native-id'], {}), {
+    command: 'claude', action: 'run', workspace: undefined, argv: ['--session-id', 'native-id'],
+  });
+  for (const args of [['--session', id, 'claude'], ['--workspace', 'chosen', '--session', id, 'claude'], [`--session=${id}`, 'claude']]) {
+    assert.throws(() => parseArguments(args, {}), /Run juiced claude --session ID/);
+  }
+  for (const flags of [['--new', '--session', id], ['--session', id, '--new']]) {
+    assert.throws(() => parseArguments(['claude', ...flags], {}), /cannot be combined/);
+  }
+  assert.throws(() => parseArguments(['claude', '--session', id, '--session', id], {}), /only once/);
+  for (const command of ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek']) {
+    assert.throws(() => parseArguments(['claude', '--session', id, command], {}), /interactive/);
+  }
+  for (const args of [['claude', '--session'], ['claude', '--session', 'invalid'], ['claude', '--session=']]) {
+    assert.throws(() => parseArguments(args, {}), /Invalid Juiced session ID/);
+  }
+  assert.match(HELP, /juiced \[--workspace SLUG\] claude --session ID/);
+  assert.doesNotMatch(HELP, /juiced --session/);
 });
 
 test('supports global help and version and rejects unknown harnesses', () => {

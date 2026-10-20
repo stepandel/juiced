@@ -134,5 +134,5 @@ export async function configureGitHub(api: AppEnvironment, stdin: boolean, io: I
   io.stderr.write('[3/3] Saving GH_TOKEN as an app secret and waiting for Cantelop…\n');
   const update = await api.set('GH_TOKEN', token, { secret: true, signal });
   await api.wait(update.revision, { signal });
-  io.stderr.write(`\nGitHub configured for ${login}.\n\nTo continue your existing conversation with the new credential:\n  1. If Claude is still running, use /exit in that conversation.\n  2. From the same terminal tab, project, and workspace, run: juiced claude\n\nThis reloads credentials and preserves your conversation and history.\nIf the original tab is closed, run juiced --session ID claude with the ID from its header.\nIf you have not started a conversation yet, run juiced claude normally.\n`);
+  io.stderr.write(`\nGitHub configured for ${login}.\n\nTo continue your existing conversation with the new credential:\n  1. If Claude is still running, use /exit in that conversation.\n  2. From the same terminal tab, project, and workspace, run: juiced claude\n\nThis reloads credentials and preserves your conversation and history.\nIf the original tab is closed, run juiced claude --session ID with the ID from its header.\nIf you have not started a conversation yet, run juiced claude normally.\n`);
 }

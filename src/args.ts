@@ -16,7 +16,6 @@ export type Arguments =
 
 export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.env): Arguments {
   let workspace = env.JUICED_WORKSPACE;
-  let session: string | undefined;
   let index = 0;
   while (index < args.length) {
     const arg = args[index]!;
@@ -27,16 +26,14 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
       workspace = arg.slice('--workspace='.length);
       index++;
     } else if (arg === '--resume' || arg.startsWith('--resume=')) {
-      throw new Error('--resume has been removed. Run juiced claude in the original terminal tab, or juiced --session ID claude to select a session.');
-    } else if (arg === '--session') { session = args[++index] ?? ''; index++; }
-    else break;
+      throw new Error('--resume has been removed. Run juiced claude in the original terminal tab, or juiced claude --session ID to select a session.');
+    } else if (arg === '--session' || arg.startsWith('--session=')) {
+      throw new Error('Session selection follows the command. Run juiced claude --session ID.');
+    } else break;
   }
   if (workspace !== undefined && !/^[a-z0-9][a-z0-9-]{0,62}$/.test(workspace)) throw new Error('Workspace must be 1–63 lowercase letters, numbers, or hyphens');
   const command = args[index];
   const argv = args.slice(index + 1);
-  if (session !== undefined && !/^ses_[a-f0-9]{32}$/.test(session)) throw new Error('Invalid Juiced session ID');
-  if (session !== undefined && (command !== 'claude' || ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek'].includes(argv[0] ?? ''))) throw new Error('--session applies to interactive juiced claude sessions.');
-  const connection = { ...(session ? { session } : {}) };
   if (command === 'env') {
     const [action, name, ...flags] = argv;
     if (argv.length === 1 && ['--help', '-h'].includes(action!)) return { command: 'help', workspace: undefined, argv: [] };
@@ -47,17 +44,33 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
     return { command: 'env', action: action as 'set' | 'unset', name, secret: !flags.includes('--plain'), workspace: undefined, argv: [] };
   }
   if (command === 'claude') {
+    let session: string | undefined, newSession = false, launchIndex = 0;
+    while (launchIndex < argv.length) {
+      const flag = argv[launchIndex]!;
+      if (flag === '--new') {
+        if (newSession) throw new Error('Pass --new only once.');
+        newSession = true; launchIndex++;
+      } else if (flag === '--session' || flag.startsWith('--session=')) {
+        if (session !== undefined) throw new Error('Pass --session only once.');
+        session = flag === '--session' ? argv[++launchIndex] ?? '' : flag.slice('--session='.length);
+        launchIndex++;
+        if (!/^ses_[a-f0-9]{32}$/.test(session)) throw new Error('Invalid Juiced session ID');
+      } else break;
+    }
+    if (launchIndex > 0) {
+      if (newSession && session) throw new Error('--new cannot be combined with --session.');
+      const literal = argv[launchIndex] === '--';
+      const remaining = argv.slice(launchIndex + (literal ? 1 : 0));
+      if (session && !literal && ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek'].includes(remaining[0] ?? '')) throw new Error('--session applies to interactive juiced claude sessions.');
+      return { command, action: 'run', workspace, argv: remaining, ...(newSession ? { newSession: true } : {}), ...(session ? { session } : {}) };
+    }
     if (argv[0] === 'github-configure') {
       if (index > 0) throw new Error('GitHub configuration is app-wide; omit --workspace.');
       if (argv.length === 2 && ['--help', '-h'].includes(argv[1]!)) return { command: 'help', workspace: undefined, argv: ['github-configure'] };
       if (argv.length !== 1 && !(argv.length === 2 && argv[1] === '--stdin')) throw new Error('Usage: juiced claude github-configure [--stdin]');
       return { command, action: 'github-configure', workspace: undefined, stdin: argv[1] === '--stdin', argv: [] };
     }
-    if (argv[0] === '--new') {
-      if (session) throw new Error('--new cannot be combined with --session.');
-      return { command, action: 'run', workspace, newSession: true, argv: argv.slice(argv[1] === '--' ? 2 : 1) };
-    }
-    if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1), ...connection };
+    if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1) };
     if (argv[0] === 'ls' || argv[0] === 'peek') {
       const action = argv[0];
       const usage = `Usage: juiced claude ${action} [--include-ignored]${action === 'peek' ? ' [--changes-only]' : ''} [PATH]`;
@@ -100,7 +113,7 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
       if (argv.length !== 1) throw new Error('Usage: juiced claude fast-forward');
       return { command, action: 'fast-forward', workspace, argv: [] };
     }
-    return { command, action: 'run', workspace, argv, ...connection };
+    return { command, action: 'run', workspace, argv };
   }
   if (command === 'login') throw new Error('juiced login has moved. Run juiced claude login.');
   if (command === 'delete') throw new Error('Run juiced claude delete [--yes] to delete the workspace for this directory.');
@@ -116,6 +129,7 @@ Usage:
   juiced env unset NAME [--plain]
   juiced claude github-configure [--stdin]
   juiced [--workspace SLUG] claude [Claude arguments...]
+  juiced [--workspace SLUG] claude --session ID [Claude arguments...]
   juiced [--workspace SLUG] claude login
   juiced [--workspace SLUG] claude sync --to-workspace [--include-uncommitted]
   juiced [--workspace SLUG] claude sync --from-workspace
@@ -136,16 +150,20 @@ Examples:
   juiced claude login
   juiced claude
   juiced claude --new
+  juiced claude --session ses_<id>
   juiced claude --model sonnet
   juiced --workspace my-project claude
   echo "Explain this project" | juiced claude -p
 
 Options before the command:
-  --session ID      Reattach to a specific Juiced session
   --workspace SLUG  Override the workspace derived from the current directory
                    (JUICED_WORKSPACE also overrides automatic selection)
   -h, --help        Show this help
   -v, --version     Show version
+
+Options immediately after claude, before Claude arguments:
+  --session ID      Reattach to a specific Juiced session
+  --new             Start fresh in this terminal tab
 
 Interactive sessions use local prompt editing and streamed remote responses.
 Enter sends, Alt+Enter adds a line, Esc interrupts, and /exit quits.
@@ -154,7 +172,7 @@ use native CLI passthrough.
 Interactive launches in the same terminal tab, project, and workspace reconnect
 to their previous Juiced session. Use juiced claude --new before other Claude
 arguments to start fresh. Explicit session flags and native passthrough bypass
-the terminal binding. Use juiced --session ID claude to reopen a specific session
+the terminal binding. Use juiced claude --session ID to reopen a specific session
 from another tab; its ID is displayed in the session header.
 Supplying Claude arguments starts a fresh bound session so prompts and flags apply.
 /detach leaves remote work running. Sleep and network interruptions reconnect
