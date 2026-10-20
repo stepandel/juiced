@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -45,6 +46,19 @@ export async function atomicJSON(path: string, value: unknown) {
   try { await file.writeFile(JSON.stringify(value)); await file.sync(); }
   finally { await file.close(); }
   await rename(path + '.next', path);
+}
+
+/** GNU cp is several times faster than fs.cp on large checkouts and keeps mtimes, so Git's stat cache stays useful. */
+async function copyTree(source: string, destination: string, signal: AbortSignal) {
+  // The runtime image is Debian; other platforms (local tests) keep the portable copy.
+  if (process.platform !== 'linux') return cp(source, destination, { recursive: true, verbatimSymlinks: true });
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn('cp', ['-a', '--reflink=auto', '-T', '--', source, destination], { signal, stdio: ['ignore', 'ignore', 'pipe'] });
+    let diagnostic = '';
+    child.stderr.on('data', (chunk: Buffer) => { diagnostic = (diagnostic + chunk.toString()).slice(-4000); });
+    child.once('error', reject);
+    child.once('close', code => code === 0 ? resolve() : reject(new Error(`Copying the remote checkout failed: ${diagnostic.trim() || `cp exited with code ${code}`}`)));
+  });
 }
 
 function validateManifest(value: UploadManifest) {
@@ -184,7 +198,7 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
           if (binding && !await cleanRepository(paths.target)) throw new Error('The remote checkout has uncommitted changes. Commit or resolve them before syncing to it.');
           const candidate = join(transfer!, 'candidate');
           await rm(candidate, { recursive: true, force: true });
-          if (binding) await cp(paths.target, candidate, { recursive: true, verbatimSymlinks: true });
+          if (binding) await copyTree(paths.target, candidate, signal);
           else { await mkdir(candidate); await git(candidate, ['init', `--object-format=${manifest.objectFormat}`], { signal }); }
           // A copied core.worktree setting must never redirect staging operations
           // into the live checkout.
