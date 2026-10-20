@@ -29,7 +29,8 @@ async function transcriptExists(workspace: string, id: string) {
 }
 
 /** Keep native menus and approvals while making process lifetime and output server-owned. */
-export function createDurableAgent(context: SessionHarnessContext, factory: () => ReturnType<typeof createTerminal>, workspace = process.cwd(), options: { idleTimeoutMs?: number; runTimeoutMs?: number } = {}) {
+export function createDurableAgent(context: SessionHarnessContext, factory: () => ReturnType<typeof createTerminal>, workspace = process.cwd(),
+  options: { idleTimeoutMs?: number; runTimeoutMs?: number; handoffRetryMs?: number; handoffRetryMaxMs?: number } = {}) {
   const journal = new AgentJournal(workspace, context.session.id);
   let loading: Promise<void> | undefined;
   let terminal: ReturnType<typeof createTerminal> | undefined;
@@ -78,25 +79,30 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
     // Drain from disk rather than dropping notifications while an acknowledgment
     // is pending. Only one bounded window of journal entries lives in memory.
     publication ??= (async () => {
-      type Handoff = { sequence: number; done: boolean; failed: boolean; settled: Promise<void> };
+      type Handoff = { sequence: number; done: boolean; failed: boolean; error?: unknown; settled: Promise<void> };
       const track = (sequence: number, work: Promise<void>): Handoff => {
         const item: Handoff = { sequence, done: false, failed: false, settled: Promise.resolve() };
-        item.settled = work.then(() => { item.done = true; }, () => { item.failed = true; }).then(wakePublication);
+        item.settled = work.then(() => { item.done = true; }, error => { item.failed = true; item.error = error; }).then(wakePublication);
         return item;
       };
       const pending: Handoff[] = [];
       let projection: Handoff | undefined;
       let after = publicationAfter!;
       let viewed = after;
+      const initialRetry = options.handoffRetryMs ?? 250, maxRetry = options.handoffRetryMaxMs ?? 5000;
+      let retry = initialRetry;
       const acknowledged = () => {
-        while (pending[0]?.done) publicationAfter = pending.shift()!.sequence;
-        if (projection?.done) { viewed = projection.sequence; projection = undefined; }
+        let progressed = false;
+        while (pending[0]?.done) { publicationAfter = pending.shift()!.sequence; progressed = true; }
+        if (projection?.done) { viewed = projection.sequence; projection = undefined; progressed = true; }
+        if (progressed) retry = initialRetry;
       };
       while (sink && !outputSignal.aborted) {
         const version = publicationVersion;
         try {
           acknowledged();
-          if (pending.some(item => item.failed) || projection?.failed) throw new Error('Agent output handoff failed');
+          const failed = pending.find(item => item.failed) ?? (projection?.failed ? projection : undefined);
+          if (failed) throw failed.error ?? new Error('Agent output handoff failed');
           while (pending.length < PUBLICATION_WINDOW && after < publicationThrough) {
             const page = await journal.page(after, publicationThrough);
             for (const entry of page.entries) {
@@ -113,13 +119,19 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
           // acknowledgment. The version check prevents a lost wake during reads.
           if (version === publicationVersion) await new Promise<void>(resolve => { publicationWake = resolve; });
         }
-        catch {
+        catch (error) {
           await Promise.all(pending.map(item => item.settled).concat(projection ? [projection.settled] : []));
           acknowledged();
           pending.length = 0; projection = undefined;
           after = publicationAfter!; viewed = Math.min(viewed, after);
           if (outputSignal.aborted) break;
-          await delay(1000, undefined, { signal: outputSignal }).catch(() => {});
+          // Journal the first failure of each streak so a reattached client can see why output stalled.
+          if (retry === initialRetry) {
+            const message = error instanceof Error ? error.message : String(error);
+            await bytes('stderr', Buffer.from(`juiced: agent output delivery failed (${message}); retrying.\n`)).catch(() => {});
+          }
+          await delay(retry, undefined, { signal: outputSignal }).catch(() => {});
+          retry = Math.min(maxRetry, retry * 2);
         }
       }
     })().finally(() => {

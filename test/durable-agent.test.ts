@@ -104,7 +104,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
       cancel() { finish(); return true; },
     } as unknown as ReturnType<typeof createTerminal>;
   };
-  const service = createDurableAgent(context, factory, root, { idleTimeoutMs });
+  const service = createDurableAgent(context, factory, root, { idleTimeoutMs, handoffRetryMs: 5, handoffRetryMaxMs: 20 });
   let activity = Promise.resolve();
   const view = { async commit(state: unknown) { views.push(Number(object(state).agentSequence)); viewState = state; viewCursor = stored.at(-1)?.cursor; await viewHook?.(); } };
   const intake = { ...context, output, view, activity: { queue(work: (context: unknown) => Promise<void>, options: { timeoutMs: number }) {
@@ -307,6 +307,10 @@ test('a failed handoff retries from its acknowledged prefix without duplicating 
   const sequence = first.data.sequence;
   await until(() => f.stored.filter(event => event.data.type === 'agent-output' && event.data.sequence === sequence).length === 2);
   assert.equal(f.received.filter(frame => frame.type === 'assistant' && object(frame.message).id === 'retry-handoff').length, 1);
+  const diagnostics = () => f.stored.filter(event => event.data.type === 'agent-output' && event.data.event.type === 'bytes' && event.data.event.channel === 'stderr' &&
+    Buffer.from(event.data.event.data, 'base64').toString().includes('Lost collector acknowledgment'));
+  await until(() => diagnostics().length > 0);
+  assert.equal(diagnostics().length, 1, 'The handoff error must be journaled once per failure streak');
 });
 
 test('a disconnected client recovers large history with one streamed replay and deduplicates output', { timeout: 20_000 }, async t => {
@@ -391,6 +395,17 @@ test('connection retries continue beyond three attempts and remain cancellable',
   const started = f.agent.start();
   await until(() => reconnects >= 4); assert.equal(f.stops, 0);
   f.offline(false); await started; assert.equal(f.agent.status, 'ready');
+  // Closing during a backoff wait must abort the retry loop promptly instead of waiting out the delay.
+  f.offline(true);
+  const cancelled = new RemoteAgent(f.session); let retries = 0;
+  cancelled.on('reconnecting', () => retries++);
+  const pending = cancelled.start(); void pending.catch(() => {});
+  await until(() => retries >= 2);
+  const closing = performance.now();
+  await cancelled.close(false);
+  await assert.rejects(pending);
+  assert.ok(performance.now() - closing < 400, 'Closing must interrupt the pending backoff delay');
+  assert.equal(retries, 2); assert.equal(f.stops, 0);
 });
 
 test('input receipts reject conflicting payloads and stale native process epochs', async t => {
