@@ -28,7 +28,7 @@ export class ClaudeDecoder {
   }
 }
 
-export type Approval = { id: string; tool: string; input: ClaudeFrame; description: string };
+export type Approval = { id: string; tool: string; input: ClaudeFrame; description: string; local?: boolean };
 export type SlashCommand = { name: string; description: string; argumentHint: string };
 export type ModelOption = { value: string; displayName: string; description: string; supportedEffortLevels?: string[]; supportsFastMode?: boolean; resolvedModel?: string };
 

@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { open, mkdtemp, rm } from 'node:fs/promises';
+import { open, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionEventCursor, SessionRef, WorkspaceRef } from '@cantelop/sdk';
 import { readRemoteConfiguration } from './git-remotes.js';
 import { ancestor, cleanRepository, createUpload, fileInfo, git, gitText, type Repository } from './git.js';
-import { MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, type GitCommand, type GitResult, type GitStatus, type ExportManifest } from './git-protocol.js';
+import { MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, validTransferId, validateExportManifest, type GitCommand, type GitResult, type GitStatus, type ExportManifest, type FileInfo } from './git-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
 import type { selectProject } from './project.js';
 
@@ -121,12 +121,12 @@ export class GitWorkspaceClient {
     } finally { await upload.close(); }
   }
 
-  private async download(id: string, path: string, manifest: ExportManifest) {
+  private async download(id: string, path: string, info: FileInfo, selected: 'bundle' | 'snapshot' = 'bundle') {
     const file = await open(path, 'w+', 0o600);
     let offset = 0; let cursor: SessionEventCursor | undefined; let complete = false; let failures = 0;
     const controller = new AbortController();
     const signal = AbortSignal.any([this.signal, controller.signal]);
-    const requested = this.call({ action: 'download', id, offset: 0 }).catch(error => { controller.abort(error); throw error; });
+    const requested = this.call({ action: 'download', id, offset: 0, ...(selected === 'snapshot' ? { file: selected } : {}) }).catch(error => { controller.abort(error); throw error; });
     void requested.catch(() => {});
     try {
       while (!complete) {
@@ -134,13 +134,13 @@ export class GitWorkspaceClient {
           for await (const event of this.session.stream({ ...(cursor ? { after: cursor } : {}), signal })) {
             const data = event.data;
             if (data.type === 'git-error' && data.id === id) throw new Error(`Remote Git download failed: ${data.message}`);
-            if (data.type === 'git-chunk' && data.id === id) {
+            if (data.type === 'git-chunk' && data.id === id && (data.file ?? 'bundle') === selected) {
               const bytes = Buffer.from(data.data, 'base64');
-              if (data.offset !== offset || offset + bytes.length > manifest.file.size) throw new Error('The remote Git download is out of order');
+              if (data.offset !== offset || offset + bytes.length > info.size) throw new Error('The remote Git download is out of order');
               await file.writeFile(bytes); offset += bytes.length;
             }
-            if (data.type === 'git-end' && data.id === id) {
-              if (offset !== manifest.file.size || data.size !== offset || data.sha256 !== manifest.file.sha256) throw new Error('The remote Git download is incomplete');
+            if (data.type === 'git-end' && data.id === id && (data.file ?? 'bundle') === selected) {
+              if (offset !== info.size || data.size !== offset || data.sha256 !== info.sha256) throw new Error('The remote Git download is incomplete');
               complete = true;
             }
             cursor = event.cursor;
@@ -156,26 +156,41 @@ export class GitWorkspaceClient {
       }
       await requested;
     } finally { await file.close(); }
-    const actual = await fileInfo(path, 'bundle');
-    if (actual.size !== manifest.file.size || actual.sha256 !== manifest.file.sha256) throw new Error('Git bundle checksum verification failed');
+    const actual = await fileInfo(path, selected);
+    if (actual.size !== info.size || actual.sha256 !== info.sha256) throw new Error('Git download checksum verification failed');
   }
 
-  async receive(): Promise<{ head: string; sourceBranch: string | null; ref: string }> {
-    const id = randomUUID();
+  async receive(prepared?: { id: string; manifest: ExportManifest }): Promise<{ head: string; sourceBranch: string | null; ref: string; patch?: Buffer }> {
+    const id = prepared?.id ?? randomUUID();
+    if (!validTransferId(id)) throw new Error('Invalid Git transfer identity');
     const directory = await mkdtemp(join(tmpdir(), 'juiced-import-'));
     try {
-      const result = await this.call({ action: 'export', id, known: this.repository.head });
-      const manifest = result.manifest;
-      if (!manifest || !validOid(manifest.head) || manifest.file.size > MAX_TRANSFER_BYTES) throw new Error('Invalid Git export manifest');
+      const manifest = prepared?.manifest ?? (await this.call({ action: 'export', id, known: this.repository.head })).manifest;
+      if (!manifest) throw new Error('Missing Git export manifest');
+      validateExportManifest(manifest);
       const bundle = join(directory, 'bundle');
-      await this.download(id, bundle, manifest);
+      await this.download(id, bundle, manifest.file);
       await git(this.repository.root, ['bundle', 'verify', bundle], { signal: this.signal });
       const prefix = `refs/juiced/exports/${id}`;
       const refs = (await gitText(this.repository.root, ['bundle', 'list-heads', bundle])).split('\n');
       if (!refs.includes(`${manifest.head} ${prefix}/head`)) throw new Error('The imported bundle does not match its declared HEAD');
       const archive = `refs/juiced/imports/${this.project.workspace}/${id}`;
       // Keep an immutable import ref even when remote branches have been rewritten.
-      await git(this.repository.root, ['fetch', '--atomic', '--no-tags', bundle, `${prefix}/head:${archive}/head`, `${prefix}/branches/*:${archive}/branches/*`], { signal: this.signal });
+      const extra = manifest.snapshot ? [`${prefix}/baseline:${archive}/baseline`, `${prefix}/snapshot:${archive}/snapshot`] : [];
+      await git(this.repository.root, ['fetch', '--atomic', '--no-tags', bundle, `${prefix}/head:${archive}/head`, `${prefix}/branches/*:${archive}/branches/*`, ...extra], { signal: this.signal });
+      let patch: Buffer | undefined;
+      if (manifest.snapshot) {
+        if (await gitText(this.repository.root, ['rev-parse', `${archive}/baseline^{tree}`]) !== manifest.snapshot.baseTree ||
+            await gitText(this.repository.root, ['rev-parse', `${archive}/snapshot^{tree}`]) !== manifest.snapshot.tree) throw new Error('The snapshot bundle does not contain its declared trees');
+        const path = join(directory, 'snapshot');
+        await this.download(id, path, manifest.snapshot.file, 'snapshot');
+        patch = await readFile(path);
+        const env = { GIT_INDEX_FILE: join(directory, 'verification-index') };
+        const verify = (args: string[], input?: Buffer) => git(this.repository.root, args, { env, signal: this.signal, ...(input ? { input } : {}) });
+        await verify(['read-tree', manifest.snapshot.baseTree]);
+        if (patch.length) await verify(['apply', '--cached', '--binary', '--whitespace=nowarn', '-'], patch);
+        if ((await verify(['write-tree'])).toString().trim() !== manifest.snapshot.tree) throw new Error('The snapshot patch does not match the imported trees');
+      }
       const ref = `refs/remotes/juiced/${this.project.workspace}/HEAD`;
       const updates = [`update ${ref} ${manifest.head}`];
       for (const line of refs) {
@@ -183,8 +198,8 @@ export class GitWorkspaceClient {
         if (name?.startsWith(`${prefix}/branches/`) && validOid(oid)) updates.push(`update refs/remotes/juiced/${this.project.workspace}/${name.slice(`${prefix}/branches/`.length)} ${oid}`);
       }
       await git(this.repository.root, ['update-ref', '--stdin'], { input: updates.join('\n') + '\n', signal: this.signal });
-      await this.call({ action: 'cleanup', id });
-      return { head: manifest.head, sourceBranch: manifest.sourceBranch, ref };
+      if (!prepared) await this.call({ action: 'cleanup', id });
+      return { head: manifest.head, sourceBranch: manifest.sourceBranch, ref, ...(patch ? { patch } : {}) };
     } finally { await rm(directory, { recursive: true, force: true }); }
   }
 

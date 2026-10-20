@@ -13,6 +13,8 @@ import { inspectRemote } from './inspection.js';
 import { INSPECTION_TIMEOUT_MS, validateInspectionCommand } from '../inspection-protocol.js';
 import { saveSettings } from './settings.js';
 import { createDurableAgent } from './durable-agent.js';
+import { createPublishBridge } from './publish.js';
+import { validOid } from '../git-protocol.js';
 
 type Work = { signal: AbortSignal; output: SessionOutput<TerminalEvent> };
 type Start = Extract<TerminalCommand, { type: 'start' }>;
@@ -27,6 +29,7 @@ function validateStart(command: Start): void {
   dimensions(command.columns, command.rows);
   if (typeof command.tty !== 'boolean' || !Array.isArray(command.argv) ||
       (command.durable !== undefined && typeof command.durable !== 'boolean') ||
+      (command.localPublish !== undefined && (!command.durable || !command.git || !validOid(command.localPublish))) ||
       (command.directoryName !== undefined && !validProjectName(command.directoryName)) ||
       (command.git !== undefined && (!command.directoryName || !/^[a-f0-9]{64}$/.test(command.git.binding) || !relativeProjectPath(command.git.relativeDirectory))) ||
       command.argv.some(arg => typeof arg !== 'string' || arg.includes('\0')) ||
@@ -48,6 +51,7 @@ export function createTerminal(
   let preparing: Promise<void> | undefined;
   let prepared: (() => void) | undefined;
   let prepareFailed: ((error: unknown) => void) | undefined;
+  let publisher: Awaited<ReturnType<typeof createPublishBridge>> | undefined;
 
   async function input(command: TerminalCommand): Promise<TerminalReply> {
     // Startup can wait for shared checkout ownership and database credentials.
@@ -57,6 +61,10 @@ export function createTerminal(
       throw new Error('The remote terminal is not running');
     }
     switch (command.type) {
+      case 'publish-status': case 'publish-claim': case 'publish-result':
+        if (!publisher) throw new Error('The local publication bridge is unavailable.');
+        await publisher.input(command);
+        break;
       case 'input':
         await write(child.stdin, decodeInput(command.data));
         break;
@@ -138,11 +146,16 @@ export function createTerminal(
       env.GIT_CONFIG_VALUE_1 = '!gh auth git-credential';
     }
     const binary = options.binary ?? context.env.CLAUDE_PATH ?? '/usr/local/bin/claude';
+    let argv = command.argv;
+    if (command.localPublish && command.git && command.directoryName) {
+      publisher = await createPublishBridge(context, { workspace, directoryName: command.directoryName, binding: command.git.binding, known: command.localPublish, send: event => work.output.send(event) });
+      argv = [...argv, '--mcp-config', publisher.configuration];
+    }
     tty = command.tty;
     const running = tty
-      ? spawn(options.python ?? 'python3', ['-u', '-c', PTY_HELPER, String(command.columns), String(command.rows), binary, ...command.argv],
+      ? spawn(options.python ?? 'python3', ['-u', '-c', PTY_HELPER, String(command.columns), String(command.rows), binary, ...argv],
           { cwd: workingDirectory, env, detached: true, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] })
-      : spawn(binary, command.argv, { cwd: workingDirectory, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      : spawn(binary, argv, { cwd: workingDirectory, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     child = running;
     prepared?.();
     control = running.stdio[3] as Writable | undefined;
@@ -236,7 +249,7 @@ export function createTerminal(
         }
         return await runTerminal(command, { ...work, signal: AbortSignal.any([work.signal, controller.signal]) });
       } catch (error) { prepareFailed?.(error); throw error; }
-      finally { await lease?.release(); }
+      finally { await publisher?.close(); publisher = undefined; await lease?.release(); }
     },
     input,
     cancel() {
@@ -274,6 +287,11 @@ export async function receiveTerminal(context: SessionContext<TerminalCommand, T
   }
   if (command.type === 'save-settings' && agent.active) {
     context.reply(await agent.input(command));
+    return;
+  }
+  if (command.type === 'publish-status' || command.type === 'publish-claim' || command.type === 'publish-result') {
+    try { context.reply(await agent.input(command)); }
+    catch (error) { context.reply({ ok: false, error: error instanceof Error ? error.message : 'Local publication failed' }); }
     return;
   }
   if (command.type === 'inspect') {

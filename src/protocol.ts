@@ -2,18 +2,21 @@ import type { GitCommand, GitEvent, GitResult, StaleLease } from './git-protocol
 import type { InspectionCommand, InspectionEvent } from './inspection-protocol.js';
 import type { SavedSettings } from './settings.js';
 import type { ClaudeFrame } from './agent-protocol.js';
+import type { Publication, PublishCommand } from './publish-protocol.js';
 
 export type AgentJournalEvent =
   | { type: 'bytes'; channel: 'stdout' | 'stderr'; data: string }
   | { type: 'user'; id: string; data: string; final: boolean }
   | { type: 'approval-answer'; id: string }
+  | { type: 'local-publish'; publication: Publication }
+  | { type: 'local-publish-done'; id: string }
   | { type: 'reset'; epoch: string; interrupted: boolean }
   | { type: 'state'; state: 'ready' | 'working' | 'sleeping' | 'interrupted' };
 export type AgentJournalEntry = { sequence: number; event: AgentJournalEvent };
 export type AgentConnection = { epoch: string; initialized?: ClaudeFrame };
 
 export type TerminalCommand =
-  | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string; directoryName?: string; git?: { binding: string; relativeDirectory: string }; durable?: boolean }
+  | { type: 'start'; argv: string[]; tty: boolean; columns: number; rows: number; term: string; directoryName?: string; git?: { binding: string; relativeDirectory: string }; durable?: boolean; localPublish?: string }
   | { type: 'agent-input'; id: string; epoch: string; frame: ClaudeFrame }
   | { type: 'agent-replay'; after: number; stream?: string }
   | { type: 'input'; data: string }
@@ -23,6 +26,7 @@ export type TerminalCommand =
   | { type: 'heartbeat' }
   | { type: 'save-settings'; settings: SavedSettings }
   | GitCommand
+  | PublishCommand
   | InspectionCommand;
 
 export type TerminalEvent =
@@ -33,6 +37,8 @@ export type TerminalEvent =
   | { type: 'output'; channel: 'stdout' | 'stderr'; data: string }
   | { type: 'exit'; code: number }
   | { type: 'error'; message: string }
+  | { type: 'local-publish'; publication: Publication }
+  | { type: 'local-publish-done'; id: string }
   | GitEvent
   | InspectionEvent;
 

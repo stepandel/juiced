@@ -198,6 +198,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       if (stopping) await running;
       if (!running) {
         if (!journal.configuration) await journal.configure(command);
+        else if (command.localPublish && !journal.configuration.localPublish) await journal.configure({ ...journal.configuration, localPublish: command.localPublish });
         command = journal.configuration!;
         if (!journal.conversation) await journal.setConversation(randomUUID());
         const resume = await transcriptExists(workspace, journal.conversation);
@@ -226,6 +227,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
                 if (event.channel === 'stdout') await stdout(raw);
                 else await bytes('stderr', raw);
               } else if (event.type === 'ready') { await record({ type: 'state', state: 'ready' }); armIdle(); }
+              else if (event.type === 'local-publish' || event.type === 'local-publish-done') await record(event);
               else if (event.type === 'error') await bytes('stderr', Buffer.from(event.message + '\n'));
             } } });
           } catch (error) {

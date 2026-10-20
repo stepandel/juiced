@@ -5,6 +5,8 @@ import type { SessionEvent, SessionEventCursor, SessionRef } from '@cantelop/sdk
 import { MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, type Approval, type ClaudeFrame, type ModelOption, type SlashCommand } from './agent-protocol.js';
 import type { SavedSettings } from './settings.js';
+import { validateExportManifest, validTransferId } from './git-protocol.js';
+import type { Publication, PublishResult } from './publish-protocol.js';
 
 export type AgentSession = Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'> & Partial<Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'view'>>;
 export type AgentStatus = 'connecting' | 'ready' | 'working' | 'configuring' | 'interrupting' | 'closed' | 'failed';
@@ -60,8 +62,13 @@ export class RemoteAgent extends EventEmitter {
   private unsupportedQueries = new Set<string>();
   private settingsSnapshot: { value: ClaudeFrame; expires: number } | undefined;
   private settingsRevision = 0;
+  private publicationClient = randomUUID();
+  private publications = new Map<string, Publication>();
+  private finishedPublications = new Set<string>();
+  private publicationWork = new Set<Promise<unknown>>();
+  private publicationControllers = new Map<string, AbortController>();
 
-  constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; stopTimeoutMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string } } = {}) { super(); }
+  constructor(readonly session: AgentSession, private options: { controlTimeoutMs?: number; stopTimeoutMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string }; localPublish?: { head: string; apply(publication: Publication, signal: AbortSignal): Promise<PublishResult> } } = {}) { super(); }
 
   private debug(event: string, detail: object = {}) {
     if (process.env.JUICED_DEBUG) console.error(JSON.stringify({ session: this.session.id, event, ...detail }));
@@ -91,7 +98,7 @@ export class RemoteAgent extends EventEmitter {
       else if (argv[i]!.startsWith('--model=')) requestedModel = argv[i]!.slice('--model='.length);
     }
     try {
-      this.startCommand = { type: 'start', durable: true, argv: headlessArguments(argv), tty: false, columns: 120, rows: 36, term: 'dumb', ...(this.options.directoryName ? { directoryName: this.options.directoryName } : {}), ...(this.options.git ? { git: this.options.git } : {}) };
+      this.startCommand = { type: 'start', durable: true, argv: headlessArguments(argv), tty: false, columns: 120, rows: 36, term: 'dumb', ...(this.options.directoryName ? { directoryName: this.options.directoryName } : {}), ...(this.options.git ? { git: this.options.git } : {}), ...(this.options.localPublish ? { localPublish: this.options.localPublish.head } : {}) };
       const reply = await this.request(this.startCommand);
       if (reply?.ok !== true) throw new Error('Cantelop could not start Claude');
       this.durable = Boolean(reply.agent);
@@ -328,12 +335,59 @@ export class RemoteAgent extends EventEmitter {
   async answer(id: string, allow: boolean, answers?: Record<string, string>): Promise<void> {
     const approval = this.approvals.get(id);
     if (!approval) throw new Error('This permission request is no longer active');
+    if (approval.local) {
+      const work = this.answerPublication(id, allow);
+      this.publicationWork.add(work);
+      try { await work; } finally { this.publicationWork.delete(work); }
+      return;
+    }
     const bytes = this.encode({ type: 'control_response', response: { subtype: 'success', request_id: id, response: allow
       ? { behavior: 'allow', updatedInput: answers ? { ...approval.input, answers } : approval.input }
       : { behavior: 'deny', message: 'The user declined this request.' } } });
     this.approvals.delete(id);
     this.emit('approvals');
     await this.sendBytes(bytes);
+  }
+
+  private offerPublication(publication: Publication) {
+    if (!this.options.localPublish || this.publications.has(publication.id) || this.finishedPublications.has(publication.id) || publication.expiresAt <= Date.now()) return;
+    if (!validTransferId(publication.id) || !['commits', 'snapshot'].includes(publication.kind) || typeof publication.summary !== 'string' || publication.summary.length > 2000 ||
+        !Number.isSafeInteger(publication.expiresAt) || !Number.isSafeInteger(publication.fileCount) || publication.fileCount < 0 || !Array.isArray(publication.paths) || publication.paths.length > 20 || publication.paths.some(path => typeof path !== 'string' || path.length > 200)) throw new Error('Invalid publication offer');
+    validateExportManifest(publication.manifest);
+    this.publications.set(publication.id, publication);
+    // Replayed offers must still be pending in the live runtime. A journal
+    // entry from a completed or lost native process never authorizes a write.
+    const work = this.request({ type: 'publish-status', id: publication.id }).then(() => {
+      if (this.finishedPublications.has(publication.id) || publication.expiresAt <= Date.now() || this.controller.signal.aborted) return;
+      const snapshot = publication.manifest.snapshot;
+      this.approvals.set(publication.id, { id: publication.id, local: true, tool: publication.kind === 'commits' ? 'Publish commits' : 'Publish snapshot', description: publication.summary,
+        input: { commit: publication.manifest.head, ...(snapshot ? { baseline: snapshot.baseHead, baselineTree: snapshot.baseTree, snapshotTree: snapshot.tree } : {}), files: publication.fileCount, paths: publication.paths, ...(publication.fileCount > publication.paths.length ? { preview: 'First 20 paths shown' } : {}) } });
+      this.emit('approvals');
+    }).catch(() => { this.publications.delete(publication.id); });
+    this.publicationWork.add(work);
+    void work.finally(() => this.publicationWork.delete(work));
+  }
+
+  private async answerPublication(id: string, allow: boolean) {
+    const publication = this.publications.get(id);
+    if (!publication || this.finishedPublications.has(id)) throw new Error('This publication is no longer active.');
+    this.finishedPublications.add(id);
+    this.approvals.delete(id); this.emit('approvals');
+    const controller = new AbortController();
+    this.publicationControllers.set(id, controller);
+    try {
+      await this.request({ type: 'publish-claim', id, client: this.publicationClient });
+      let result: PublishResult = { status: 'declined', message: 'The user declined local application. Local files were not changed.' };
+      if (allow) {
+        try {
+          const signal = AbortSignal.any([this.controller.signal, controller.signal, AbortSignal.timeout(Math.max(1, publication.expiresAt - Date.now()))]);
+          signal.throwIfAborted();
+          result = await this.options.localPublish!.apply(publication, signal);
+        } catch (error) { result = { status: 'conflict', message: error instanceof Error ? error.message : 'Local application failed. Check the local checkout before retrying.' }; }
+      }
+      this.emit('frame', { type: 'juiced_publish', id, message: result.message, failed: !['applied', 'already-applied'].includes(result.status) });
+      await this.request({ type: 'publish-result', id, client: this.publicationClient, result });
+    } finally { this.publications.delete(id); this.publicationControllers.delete(id); }
   }
 
   async interrupt(): Promise<void> {
@@ -415,7 +469,14 @@ export class RemoteAgent extends EventEmitter {
       else this.userChunks.set(event.id, chunks);
     } else if (event.type === 'approval-answer') {
       this.approvals.delete(event.id); this.emit('approvals');
+    } else if (event.type === 'local-publish') {
+      this.offerPublication(event.publication);
+    } else if (event.type === 'local-publish-done') {
+      this.publicationControllers.get(event.id)?.abort(new Error('The remote publication ended. Check the local checkout.'));
+      this.finishedPublications.add(event.id); this.publications.delete(event.id);
+      this.approvals.delete(event.id); this.emit('approvals');
     } else if (event.type === 'reset') {
+      for (const [id, controller] of this.publicationControllers) { this.finishedPublications.add(id); controller.abort(new Error('The remote Claude process changed.')); }
       this.invalidateSettings();
       this.unsupportedQueries.clear();
       this.decoder = new ClaudeDecoder(); this.approvals.clear(); this.emit('approvals');
@@ -564,6 +625,7 @@ export class RemoteAgent extends EventEmitter {
         if (this.started && stop) await Promise.race([this.session.stop(), delay(this.options.stopTimeoutMs ?? 10_000, undefined, { signal: timeout.signal, ref: false }).then(() => { throw new Error('Cantelop session cleanup timed out'); })]);
       } finally { timeout.abort(); }
       await this.reader?.catch(() => {});
+      await Promise.allSettled(this.publicationWork);
       this.setStatus('closed');
     })();
   }
