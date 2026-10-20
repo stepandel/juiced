@@ -350,6 +350,10 @@ test('one process handles initialization, multiple prompts, approval answers and
   await until(() => f.agent.approvals.size === 1);
   await f.agent.answer('permission-4', false, undefined, { message: 'Keep the build directory' });
   assert.deepEqual(object(f.frames.at(-1)?.response).response, { behavior: 'deny', message: 'The user declined this request and said: Keep the build directory' });
+  f.output({ type: 'system', subtype: 'status', status: null, permissionMode: 'plan' });
+  await until(() => f.agent.info.current_permission_mode === 'plan');
+  f.output({ type: 'system', subtype: 'status', status: null, permissionMode: 'default' });
+  await until(() => f.agent.info.current_permission_mode === 'default');
   await f.agent.interrupt();
   assert.equal(object(f.frames.at(-1)?.request).subtype, 'interrupt');
   f.output({ type: 'result', is_error: false, result: 'Interrupted' });

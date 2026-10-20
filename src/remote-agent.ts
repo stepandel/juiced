@@ -419,6 +419,8 @@ export class RemoteAgent extends EventEmitter {
         this.info.launch_permission_mode ??= frame.permissionMode;
       }
     }
+    // Claude reports its own mode changes, such as leaving plan mode, in status frames.
+    if (frame.type === 'system' && frame.subtype === 'status' && typeof frame.permissionMode === 'string') this.info.current_permission_mode = frame.permissionMode;
     if (frame.type === 'system' && typeof frame.task_id === 'string') {
       if (frame.subtype === 'task_started') this.tasks.set(frame.task_id, { ...frame, status: 'running' });
       else if (frame.subtype === 'task_notification') this.tasks.set(frame.task_id, { ...this.tasks.get(frame.task_id), ...frame });

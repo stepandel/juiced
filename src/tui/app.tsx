@@ -7,6 +7,7 @@ import type { TerminalIO } from '../remote-terminal.js';
 import { cursorParts, edit, type Editor } from './editor.js';
 import { duration, emptyConversation, liveEntries, plain, receiveFrame, restoreHistory, toolSummary, turnTokens, userTurn, type Entry } from './conversation.js';
 import { Entries, Header } from './transcript.js';
+import { markdownRows, StyledRow, type Row, type Span } from './markdown.js';
 import { availableCommands, matchingCommands } from './commands.js';
 import { CommandMenu, type MenuPage } from './menu.js';
 import { commandMenu, menuCommand } from './command-menus.js';
@@ -46,8 +47,10 @@ const modes: Record<string, [string, string]> = {
   default: ['⏸', 'manual mode on'], acceptEdits: ['⏵⏵', 'accept edits on'], plan: ['⏸', 'plan mode on'],
   auto: ['⏵⏵', 'auto mode on'], dontAsk: ['⏵⏵', 'don’t ask mode on'], bypassPermissions: ['⏵⏵', 'bypass permissions on'],
 };
-/** Shift+Tab order; sessions launched in bypass mode can also cycle back to it. */
-export const modeCycle = ['default', 'acceptEdits', 'plan'];
+/** Claude Code's Shift+Tab order; sessions launched in bypass mode can also cycle back to it. */
+export const modeCycle = ['default', 'acceptEdits', 'plan', 'auto'];
+/** Auto mode depends on the account, which Claude reports only by refusing it. */
+const optional = new Set(['auto']);
 export type Pending = 'ctrl-c' | 'ctrl-d' | 'esc';
 
 function Footer({ mode, pending, busy, empty, model }: { mode: string; pending?: Pending | undefined; busy: boolean; empty: boolean; model: string }) {
@@ -301,30 +304,43 @@ function Permission({ approval, rows, answer, cancel }: { approval: Approval; ro
   </Rule>;
 }
 
-/** Text lines of the Ctrl+O transcript, with complete tool output. */
-export function transcriptLines(entries: Entry[]): string[] {
+/** Rows of the Ctrl+O transcript: every entry, with complete tool output. */
+export function transcriptLines(entries: Entry[]): Row[] {
+  const lead = (rows: Row[], first: Span, rest = ' '.repeat(first.text.length)) => rows.map((row, i) => [i ? { text: rest } : first, ...row]);
+  const plainRows = (text: string, style: Omit<Span, 'text'> = {}) => text.split('\n').map(line => [{ ...style, text: line }]);
+  const result = (text: string, style: Omit<Span, 'text'> = {}) => lead(plainRows(text, style), { text: '  ⎿  ', dim: true }, '     ');
   return entries.flatMap(entry => {
-    const indent = (text: string, first: string, rest = ' '.repeat(first.length)) => text.split('\n').map((line, i) => (i ? rest : first) + line);
-    const body = entry.kind === 'user' ? indent(entry.text, '❯ ')
-      : entry.kind === 'text' ? indent(entry.text, '● ')
-      : entry.kind === 'tool' ? [`● ${entry.text}`, ...indent(entry.output ?? entry.detail ?? (entry.status === 'running' ? 'Running…' : '(No content)'), '  ⎿  ', '     ')]
-      : entry.kind === 'summary' ? [`✻ ${entry.text}`] : indent(entry.text, '  ⎿  ', '     ');
-    return [...body, ''];
+    const open = entry.text.indexOf('(');
+    const body = entry.kind === 'user' ? lead(plainRows(entry.text), { text: '❯ ', color: 'green' })
+      : entry.kind === 'text' ? lead(markdownRows(entry.text), { text: '● ' })
+      : entry.kind === 'tool' ? [
+        [{ text: '● ', ...(entry.status === 'failed' ? { color: 'yellow' } : entry.status === 'done' ? { color: 'green' } : { dim: true }) }, { text: open > 0 ? entry.text.slice(0, open) : entry.text, bold: true }, { text: open > 0 ? entry.text.slice(open) : '' }],
+        ...result(entry.output ?? entry.detail ?? (entry.status === 'running' ? 'Running…' : '(No content)'), entry.status === 'failed' ? { color: 'yellow' } : {}),
+      ]
+      : entry.kind === 'summary' ? [[{ text: `✻ ${entry.text}`, dim: true }]] : result(entry.text, { color: 'yellow' });
+    return [...body, []];
   });
 }
 
-/** Split lines to the terminal width so scrolling moves by screen rows. */
-export function wrapLines(lines: string[], width: number): string[] {
+/** Split styled rows to the terminal width so scrolling moves by screen rows. */
+export function wrapLines(rows: Row[], width: number): Row[] {
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-  return lines.flatMap(line => {
-    const rows: string[] = [];
-    let row = '', used = 0;
-    for (const { segment } of segmenter.segment(line)) {
-      const size = stringWidth(segment);
-      if (used + size > width && row) { rows.push(row); row = ''; used = 0; }
-      row += segment; used += size;
+  return rows.flatMap(row => {
+    const lines: Row[] = [];
+    let line: Row = [], used = 0;
+    for (const span of row) {
+      let text = '';
+      for (const { segment } of segmenter.segment(span.text)) {
+        const size = stringWidth(segment);
+        if (used + size > width && used) {
+          if (text) line.push({ ...span, text });
+          lines.push(line); line = []; used = 0; text = '';
+        }
+        text += segment; used += size;
+      }
+      if (text) line.push({ ...span, text });
     }
-    return [...rows, row];
+    return [...lines, line];
   });
 }
 
@@ -341,7 +357,7 @@ function Transcript({ entries, rows, columns, close }: { entries: Entry[]; rows:
   const start = Math.max(0, lines.length - height - Math.min(offset, limit));
   return <Box flexDirection="column" flexShrink={0}>
     <Rule color="green"><Text dimColor wrap="truncate-end">Showing detailed transcript · ↑/↓ PgUp/PgDn to scroll · Esc or Ctrl+O to close</Text></Rule>
-    {lines.slice(start, start + height).map((line, i) => <Text key={start + i} wrap="truncate-end">{line || ' '}</Text>)}
+    {lines.slice(start, start + height).map((line, i) => <StyledRow key={start + i} row={line} />)}
   </Box>;
 }
 
@@ -357,6 +373,7 @@ function Juiced({ agent, argv, workspace, rows, columns, quit }: { agent: Remote
   const [closing, setClosing] = useState(false);
   const [help, setHelp] = useState(false);
   const [transcript, setTranscript] = useState(false);
+  const refused = useRef(new Set<string>());
   const [, repaint] = useReducer((value: number) => value + 1, 0);
   const [pending, setPending] = useState<Pending>();
   const pendingTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -412,12 +429,17 @@ function Juiced({ agent, argv, workspace, rows, columns, quit }: { agent: Remote
   const cycleMode = () => {
     if (agent.status !== 'ready') { setNotice('Wait for Claude to finish before changing the permission mode.'); return; }
     const current = String(agent.info.current_permission_mode ?? 'default');
-    const cycle = agent.info.launch_permission_mode === 'bypassPermissions' ? [...modeCycle, 'bypassPermissions'] : modeCycle;
-    const mode = cycle[(cycle.indexOf(current) + 1) % cycle.length]!;
-    setNotice('');
+    const cycle = [...modeCycle, ...agent.info.launch_permission_mode === 'bypassPermissions' ? ['bypassPermissions'] : []].filter(mode => mode === current || !refused.current.has(mode));
+    const after = (mode: string) => cycle[(cycle.indexOf(mode) + 1) % cycle.length]!;
     // Like Claude Code, Shift+Tab changes this session only; /permissions saves a default.
+    const apply = (mode: string): Promise<unknown> => agent.configure({ subtype: 'set_permission_mode', mode }, { persist: false }).catch(error => {
+      if (!optional.has(mode) || after(mode) === current) throw error;
+      refused.current.add(mode);
+      return apply(after(mode));
+    });
+    setNotice('');
     // The mode lives on the agent; repaint once Claude acknowledges it.
-    action(agent.configure({ subtype: 'set_permission_mode', mode }, { persist: false }).finally(repaint));
+    action(apply(after(current)).finally(repaint));
   };
   const submit = (text: string) => {
     if (menuOpen.current) return;

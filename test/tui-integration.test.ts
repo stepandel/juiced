@@ -327,13 +327,19 @@ test('Claude Code prompt keys: history, shortcuts, mode cycling, double Esc and 
   class KeyAgent extends RemoteAgent {
     submitted: string[] = [];
     modes: string[] = [];
+    refuseAuto = false;
     override async start() { this.info.current_permission_mode = 'default'; this.status = 'ready'; this.emit('status', this.status); }
     override async submit(text: string) {
       this.submitted.push(text);
       this.emit('frame', { type: 'result', result: `Answer ${this.submitted.length}`, duration_ms: 1000 });
     }
-    override async configure(request: Parameters<RemoteAgent['configure']>[0]) {
+    override async configure(request: Parameters<RemoteAgent['configure']>[0], options?: Parameters<RemoteAgent['configure']>[1]) {
       this.status = 'configuring'; this.emit('status', this.status);
+      if (options?.persist !== false) throw new Error('Shift+Tab must not save a workspace default');
+      if (request.subtype === 'set_permission_mode' && request.mode === 'auto' && this.refuseAuto) {
+        this.modes.push('auto refused'); this.status = 'ready'; this.emit('status', this.status);
+        throw new Error('Cannot set permission mode: auto mode is not available');
+      }
       if (request.subtype === 'set_permission_mode') { this.modes.push(request.mode); this.info.current_permission_mode = request.mode; }
       this.status = 'ready'; this.emit('status', this.status);
       return {};
@@ -375,8 +381,12 @@ test('Claude Code prompt keys: history, shortcuts, mode cycling, double Esc and 
 
     stdin.write('\x1b[Z'); await wait(() => latest.includes('accept edits on (shift+tab to cycle)'));
     stdin.write('\x1b[Z'); await wait(() => latest.includes('plan mode on'));
+    stdin.write('\x1b[Z'); await wait(() => latest.includes('auto mode on'));
     stdin.write('\x1b[Z'); await wait(() => latest.includes('manual mode on'));
-    assert.deepEqual(agent.modes, ['acceptEdits', 'plan', 'default']);
+    agent.refuseAuto = true;
+    for (const mode of ['accept edits on', 'plan mode on', 'manual mode on', 'accept edits on', 'plan mode on', 'manual mode on']) { stdin.write('\x1b[Z'); await wait(() => latest.includes(mode)); }
+    assert.deepEqual(agent.modes, ['acceptEdits', 'plan', 'auto', 'default', 'acceptEdits', 'plan', 'auto refused', 'default', 'acceptEdits', 'plan', 'default'], 'A refused auto mode is skipped silently and not retried');
+    assert.equal(latest.includes('not available'), false);
     assert.deepEqual(agent.submitted, ['first prompt', 'second prompt']);
 
     stdin.write('draft'); await wait(() => prompt() === 'draft');

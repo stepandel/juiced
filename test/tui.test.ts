@@ -247,8 +247,14 @@ test('the detailed transcript shows complete tool output and wraps to the termin
     { id: 't', kind: 'tool', tool: 'Bash', text: 'Bash(seq 3)', status: 'done', detail: '1\n… +2 lines', output: '1\n2\n3' },
     { id: 's', kind: 'summary', text: 'Worked for 1s' },
   ]);
-  assert.deepEqual(lines, ['❯ Run it', '', '● Bash(seq 3)', '  ⎿  1', '     2', '     3', '', '✻ Worked for 1s', '']);
-  assert.deepEqual(wrapLines(['abcdef', '🍈🍈🍈'], 4), ['abcd', 'ef', '🍈🍈', '🍈']);
+  const text = (rows: { text: string }[][]) => rows.map(row => row.map(span => span.text).join(''));
+  assert.deepEqual(text(lines), ['❯ Run it', '', '● Bash(seq 3)', '  ⎿  1', '     2', '     3', '', '✻ Worked for 1s', '']);
+  assert.deepEqual(lines[2]![1], { text: 'Bash', bold: true });
+  const markdown = transcriptLines([{ id: 'm', kind: 'text', text: '# Plan\nUse **bold** `code`' }]);
+  assert.deepEqual(text(markdown), ['● Plan', '  Use bold code', '']);
+  assert.ok(markdown[1]!.some(span => span.text === 'bold' && span.bold) && markdown[1]!.some(span => span.text === 'code' && span.code), 'The transcript renders Markdown');
+  const wrapped = wrapLines([[{ text: 'ab' }, { text: 'cdef', bold: true }], [{ text: '🍈🍈🍈' }]], 4);
+  assert.deepEqual(wrapped, [[{ text: 'ab' }, { text: 'cd', bold: true }], [{ text: 'ef', bold: true }], [{ text: '🍈🍈' }], [{ text: '🍈' }]]);
   assert.equal(rememberLabel([{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test:*' }], behavior: 'allow', destination: 'session' }, { type: 'setMode', mode: 'acceptEdits', destination: 'session' }]),
     'Yes, and don’t ask again for Bash(npm test:*) for this session and switch to accept edits for this session');
 });

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 
-type Span = { text: string; bold?: boolean; italic?: boolean; strikethrough?: boolean; code?: boolean; dim?: boolean };
+export type Span = { text: string; bold?: boolean; italic?: boolean; strikethrough?: boolean; code?: boolean; dim?: boolean; color?: string };
 
 // Inline Markdown in the order Claude Code's renderer resolves it: code spans
 // first, so markers inside backticks stay literal.
@@ -27,26 +27,33 @@ export function spans(text: string, style: Omit<Span, 'text'> = {}): Span[] {
   return result;
 }
 
-function Line({ parts, color }: { parts: Span[]; color?: string }) {
-  return <Text {...(color ? { color } : {})}>{parts.map((part, i) => <Text key={i} bold={part.bold ?? false} italic={part.italic ?? false} strikethrough={part.strikethrough ?? false} dimColor={part.dim ?? false} {...(part.code ? { color: 'cyan' } : {})}>{part.text}</Text>)}</Text>;
+export type Row = Span[];
+
+/** Assistant text as styled rows: rendered emphasis, no fences or heading markers. */
+export function markdownRows(text: string): Row[] {
+  const rows: Row[] = [];
+  let fence: string | undefined;
+  for (const raw of text.split('\n')) {
+    const marker = /^\s*(```+|~~~+)/u.exec(raw)?.[1];
+    if (marker && (!fence || marker.startsWith(fence))) { fence = fence ? undefined : marker; continue; }
+    if (fence) { rows.push([{ text: raw, code: true }]); continue; }
+    const heading = /^(#{1,6})\s+(.*?)\s*#*$/u.exec(raw);
+    if (heading) { rows.push(spans(heading[2]!, { bold: true, ...(heading[1]!.length === 1 ? { italic: true } : {}) })); continue; }
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/u.test(raw)) { rows.push([{ text: '─'.repeat(40), dim: true }]); continue; }
+    const quote = /^\s*>\s?(.*)$/u.exec(raw);
+    if (quote) { rows.push([{ text: '▎ ', dim: true }, ...spans(quote[1]!, { dim: true, italic: true })]); continue; }
+    const item = /^(\s*)[-*+]\s+(.*)$/u.exec(raw);
+    if (item) { rows.push([{ text: `${item[1]}- ` }, ...spans(item[2]!)]); continue; }
+    rows.push(spans(raw));
+  }
+  return rows;
 }
 
-/** Assistant text as Claude Code prints it: rendered emphasis, no fences or heading markers. */
+export function StyledRow({ row }: { row: Row }) {
+  if (!row.some(part => part.text)) return <Text> </Text>;
+  return <Text>{row.map((part, i) => <Text key={i} bold={part.bold ?? false} italic={part.italic ?? false} strikethrough={part.strikethrough ?? false} dimColor={part.dim ?? false} {...(part.code ? { color: 'cyan' } : part.color ? { color: part.color } : {})}>{part.text}</Text>)}</Text>;
+}
+
 export function Markdown({ text }: { text: string }) {
-  const rows: React.ReactNode[] = [];
-  let fence: string | undefined;
-  text.split('\n').forEach((raw, i) => {
-    const marker = /^\s*(```+|~~~+)/u.exec(raw)?.[1];
-    if (marker && (!fence || marker.startsWith(fence))) { fence = fence ? undefined : marker; return; }
-    if (fence) { rows.push(<Text key={i} color="cyan">{raw || ' '}</Text>); return; }
-    const heading = /^(#{1,6})\s+(.*?)\s*#*$/u.exec(raw);
-    if (heading) { rows.push(<Line key={i} parts={spans(heading[2]!, { bold: true, italic: heading[1]!.length === 1 })} />); return; }
-    if (/^\s*([-*_])(\s*\1){2,}\s*$/u.test(raw)) { rows.push(<Text key={i} dimColor>{'─'.repeat(40)}</Text>); return; }
-    const quote = /^\s*>\s?(.*)$/u.exec(raw);
-    if (quote) { rows.push(<Text key={i} dimColor italic>▎ {quote[1]}</Text>); return; }
-    const item = /^(\s*)[-*+]\s+(.*)$/u.exec(raw);
-    if (item) { rows.push(<Line key={i} parts={[{ text: `${item[1]}- ` }, ...spans(item[2]!)]} />); return; }
-    rows.push(raw ? <Line key={i} parts={spans(raw)} /> : <Text key={i}> </Text>);
-  });
-  return <Box flexDirection="column">{rows}</Box>;
+  return <Box flexDirection="column">{markdownRows(text).map((row, i) => <StyledRow key={i} row={row} />)}</Box>;
 }
