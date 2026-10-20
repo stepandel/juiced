@@ -1,5 +1,5 @@
 /** Self-contained Node program passed to Claude's stdio MCP launcher. */
-export const PUBLISH_MCP_SOURCE = String.raw`
+const PUBLISH_MCP_SOURCE = String.raw`
 import { connect } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
 const tools = [

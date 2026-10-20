@@ -1,5 +1,5 @@
 export type Editor = { text: string; cursor: number };
-export type EditorKey = { leftArrow?: boolean; rightArrow?: boolean; upArrow?: boolean; downArrow?: boolean; home?: boolean; end?: boolean; backspace?: boolean; delete?: boolean; ctrl?: boolean; meta?: boolean; shift?: boolean; return?: boolean; escape?: boolean; tab?: boolean };
+type EditorKey = { leftArrow?: boolean; rightArrow?: boolean; upArrow?: boolean; downArrow?: boolean; home?: boolean; end?: boolean; backspace?: boolean; delete?: boolean; ctrl?: boolean; meta?: boolean; shift?: boolean; return?: boolean; escape?: boolean; tab?: boolean };
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const positions = (text: string) => [...Array.from(segmenter.segment(text), part => part.index), text.length];
 

@@ -2,8 +2,8 @@ import stringWidth from 'string-width';
 import { InspectionIncomplete, type InspectionListing, type ListingEntry, type InspectionSnapshot, type TreeEntry } from './inspection-protocol.js';
 
 type Status = 'matching' | 'different' | 'local only' | 'remote only' | 'excluded';
-export type InspectionRow = { name: string; local?: TreeEntry | undefined; remote?: TreeEntry | undefined; localIgnored: boolean; remoteIgnored: boolean; localSubmodule: boolean; remoteSubmodule: boolean; status: Status };
-export type InspectionComparison = { local: InspectionSnapshot; remote: InspectionSnapshot; rows: InspectionRow[] };
+type InspectionRow = { name: string; local?: TreeEntry | undefined; remote?: TreeEntry | undefined; localIgnored: boolean; remoteIgnored: boolean; localSubmodule: boolean; remoteSubmodule: boolean; status: Status };
+type InspectionComparison = { local: InspectionSnapshot; remote: InspectionSnapshot; rows: InspectionRow[] };
 export function compareInspection(local: InspectionSnapshot, remote: InspectionSnapshot): InspectionComparison {
   if (local.scope !== remote.scope || local.objectFormat !== remote.objectFormat) throw new InspectionIncomplete('The workspace snapshots have incompatible scopes or Git object formats.');
   const oneEntry = local.kind === 'file' || remote.kind === 'file' || local.kind === 'ignored' || remote.kind === 'ignored';
@@ -24,7 +24,7 @@ export function compareInspection(local: InspectionSnapshot, remote: InspectionS
 }
 
 // Printable Unicode stays readable; control characters cannot alter the terminal.
-export function inspectionText(value: string) { return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, char => `\\u${char.codePointAt(0)!.toString(16).padStart(4, '0')}`); }
+function inspectionText(value: string) { return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, char => `\\u${char.codePointAt(0)!.toString(16).padStart(4, '0')}`); }
 const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const ESCAPE = /(\\u[\da-f]{4})/, ESCAPES = new RegExp(ESCAPE, 'g');
 // Paths and names break anywhere: every grapheme is kept and no column can overflow.

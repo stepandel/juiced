@@ -37,6 +37,7 @@
     "string-width": "^8.3.0"
   },
   "devDependencies": {
+    "@libsql/client": "^0.17.4",
     "@types/node": "^22.0.0",
     "@types/react": "^19.3.0",
     "esbuild": "^0.25.0",

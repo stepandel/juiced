@@ -158,7 +158,11 @@ test('cleans up an ambiguously failed start and times out a terminal that never 
   session.stream = async function* (options) {
     await new Promise((_, reject) => options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true }));
   };
-  await assert.rejects(runRemoteTerminal(session, [], io, { startupTimeoutMs: 20 }), /Timed out/);
+  // The startup timer is unref'd (a real terminal keeps the process alive), so hold the loop open.
+  const keepAlive = setInterval(() => {}, 1000);
+  try {
+    await assert.rejects(runRemoteTerminal(session, [], io, { startupTimeoutMs: 20 }), /Timed out/);
+  } finally { clearInterval(keepAlive); }
   assert.equal(stops, 2);
 });
 

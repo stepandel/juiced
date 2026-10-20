@@ -11,7 +11,7 @@ import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.j
 
 type Workspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'inspect' | 'session' | 'selector'>;
 type InspectionApp = { workspace(selector: WorkspaceSelector): Workspace };
-export type InspectionOptions = { workspace?: string | undefined; path: string; includeIgnored: boolean } & (
+type InspectionOptions = { workspace?: string | undefined; path: string; includeIgnored: boolean } & (
   | { action: 'ls' }
   | { action: 'peek'; changesOnly: boolean }
 );
@@ -28,7 +28,7 @@ async function checkoutContext<T>(side: 'Local' | 'Remote', work: Promise<T>): P
 export function remoteSnapshot(workspace: InspectionWorkspace, command: Inspect, signal: AbortSignal): Promise<InspectionSnapshot> {
   return remoteInventory(workspace, command, signal, validateInspectionSnapshot);
 }
-export function remoteListing(workspace: InspectionWorkspace, command: Inspect, signal: AbortSignal): Promise<InspectionListing> {
+function remoteListing(workspace: InspectionWorkspace, command: Inspect, signal: AbortSignal): Promise<InspectionListing> {
   return remoteInventory(workspace, { ...command, mode: 'listing' }, signal, validateInspectionListing);
 }
 

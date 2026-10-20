@@ -48,10 +48,10 @@ const modes: Record<string, [string, string]> = {
   auto: ['⏵⏵', 'auto mode on'], dontAsk: ['⏵⏵', 'don’t ask mode on'], bypassPermissions: ['⏵⏵', 'bypass permissions on'],
 };
 /** Claude Code's Shift+Tab order; sessions launched in bypass mode can also cycle back to it. */
-export const modeCycle = ['default', 'acceptEdits', 'plan', 'auto'];
+const modeCycle = ['default', 'acceptEdits', 'plan', 'auto'];
 /** Auto mode depends on the account, which Claude reports only by refusing it. */
 const optional = new Set(['auto']);
-export type Pending = 'ctrl-c' | 'ctrl-d' | 'esc';
+type Pending = 'ctrl-c' | 'ctrl-d' | 'esc';
 
 function Footer({ mode, pending, busy, empty, model }: { mode: string; pending?: Pending | undefined; busy: boolean; empty: boolean; model: string }) {
   const [symbol, label] = modes[mode] ?? ['⏵⏵', `${mode} mode on`];
