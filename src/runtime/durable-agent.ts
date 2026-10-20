@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionContext, SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
 import { ClaudeDecoder, object, type ClaudeFrame } from '../agent-protocol.js';
 import { MAX_AGENT_INPUT_BYTES, MAX_INPUT_BYTES, OUTPUT_CHUNK_BYTES, type AgentJournalEvent, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
+import { isENOENT } from '../fs-util.js';
 import { selectsClaudeSession } from '../terminal-session.js';
 import { AgentJournal } from './agent-journal.js';
 import { CHECKOUT_LEASES_TABLE } from './project-state.js';
@@ -21,7 +22,7 @@ async function transcriptExists(workspace: string, id: string) {
   const root = join(workspace, '.claude', 'projects');
   let entries;
   try { entries = await readdir(root, { withFileTypes: true }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+  catch (error) { if (isENOENT(error)) return false; throw error; }
   for (const entry of entries) if (entry.isDirectory()) {
     try { if ((await stat(join(root, entry.name, `${id}.jsonl`))).size) return true; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import type { SessionActivationContext, SessionContext, SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
 import { decodeInput, dimensions, OUTPUT_CHUNK_BYTES, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
+import { isENOENT } from '../fs-util.js';
 import { PTY_HELPER } from './pty.js';
 import { validProjectName } from '../project-name.js';
 import { relativeProjectPath } from '../git.js';
@@ -206,7 +207,7 @@ export function createTerminal(
     } catch (error) {
       terminate();
       if (!signal.aborted) {
-        const message = (error as NodeJS.ErrnoException).code === 'ENOENT'
+        const message = isENOENT(error)
           ? 'The remote image is missing Claude or Python. Rebuild and deploy the Juiced runtime.'
           : 'The remote terminal failed.';
         await work.output.send({ type: 'error', message }).catch(() => {});
