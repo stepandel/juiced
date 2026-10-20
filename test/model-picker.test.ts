@@ -6,6 +6,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
 import { runLocalTui } from '../src/tui/app.js';
 import type { TerminalInput, TerminalOutput } from '../src/remote-terminal.js';
+import { until } from './fixtures/wait.js';
 
 class ModelAgent extends RemoteAgent {
   override models = [
@@ -49,7 +50,7 @@ function fixture(agent = new ModelAgent({} as AgentSession)) {
   stdout.isTTY = true; stdout.columns = 90; stdout.rows = 24;
   const lifetime = new AbortController();
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
-  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${latest}`); await delay(5); } };
+  const wait = (check: () => boolean) => until(check, { attempts: 200, message: () => `UI did not update: ${latest}` });
   const command = async (text: string) => {
     stdin.write(text); await wait(() => latest.includes(text)); stdin.write('\r');
   };
@@ -76,6 +77,8 @@ test('the model command opens a real picker, switches after acknowledgment, and 
     f.agent.changes[0]!.resolve();
     await f.wait(() => f.latest.includes('Model changed to Sonnet'));
     assert.ok(f.latest.includes('sonnet') && !f.latest.includes('Switching model'));
+    // No rendered state marks when the closed picker hands input back to the prompt; a frame
+    // predicate here lets the next /model keystrokes race that handoff.
     await delay(40);
 
     await f.command('/model');
@@ -93,13 +96,14 @@ test('the model command opens a real picker, switches after acknowledgment, and 
     await f.wait(() => f.latest.includes('Unavailable for this account'));
     assert.ok(f.latest.includes('Choose model'));
     assert.equal(f.agent.model, 'sonnet', 'A rejected change must preserve the previous model');
-    f.stdout.columns = 50; f.stdout.rows = 16; f.stdout.emit('resize'); await delay(80);
+    f.stdout.columns = 50; f.stdout.rows = 16; f.stdout.emit('resize'); await delay(80); // Include the 50 ms reflow reprint in the overflow check.
     for (let i = 0; i < 7; i++) f.stdin.write('\x1b[B');
     await f.wait(() => f.latest.includes('Custom 6'));
     for (const frame of f.frames) assert.ok(frame.text.trimEnd().split('\n').length < frame.rows, `Model picker overflowed: ${frame.text}`);
     f.stdin.write('\x1b'); await f.wait(() => !f.latest.includes('Choose model'));
 
-    f.stdout.columns = 90; f.stdout.rows = 24; f.stdout.emit('resize'); await delay(40);
+    const rendered = f.frames.length;
+    f.stdout.columns = 90; f.stdout.rows = 24; f.stdout.emit('resize'); await f.wait(() => f.frames.length > rendered);
     await f.command('/model provider.custom-model');
     await f.wait(() => f.agent.changes.length === 3);
     assert.equal(f.agent.changes[2]?.value, 'provider.custom-model');

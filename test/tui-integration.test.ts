@@ -7,6 +7,7 @@ import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
 import type { Approval, ApprovalOptions } from '../src/agent-protocol.js';
 import { runLocalTui } from '../src/tui/app.js';
 import type { TerminalInput, TerminalOutput } from '../src/remote-terminal.js';
+import { until } from './fixtures/wait.js';
 
 test('reattaching prints saved turns and the entire unfinished turn into scrollback', { timeout: 5000 }, async () => {
   class ReattachedAgent extends RemoteAgent {
@@ -35,12 +36,13 @@ test('reattaching prints saved turns and the entire unfinished turn into scrollb
   stdout.isTTY = true; stdout.columns = 60; stdout.rows = 16;
   const lifetime = new AbortController();
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
-  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${writes.join('')}`); await delay(5); } };
+  const wait = (check: () => boolean) => until(check, { attempts: 200, message: () => `UI did not update: ${writes.join('')}` });
   try {
     await wait(() => writes.join('').includes('Create file'));
-    await delay(60);
+    const markers = ['SAVED_PROMPT_0', 'SAVED_ANSWER_0', 'SAVED_PROMPT_1', 'SAVED_ANSWER_1', 'UNFINISHED_PROMPT', ...Array.from({ length: 24 }, (_, i) => `SAVED_PROGRESS_${i}:`)];
+    await wait(() => markers.every(marker => writes.join('').includes(marker))).catch(() => {});
     const restored = writes.join('');
-    for (const marker of ['SAVED_PROMPT_0', 'SAVED_ANSWER_0', 'SAVED_PROMPT_1', 'SAVED_ANSWER_1', 'UNFINISHED_PROMPT', ...Array.from({ length: 24 }, (_, i) => `SAVED_PROGRESS_${i}:`)]) {
+    for (const marker of markers) {
       assert.ok(restored.includes(marker), `Missing saved history: ${marker}`);
     }
     assert.deepEqual(agent.submitted, [], 'Displaying history must not send a prompt');
@@ -49,6 +51,7 @@ test('reattaching prints saved turns and the entire unfinished turn into scrollb
     let offset = writes.length;
     agent.emit('reconnecting'); agent.emit('reconnected');
     stdout.rows = 18; stdout.emit('resize');
+    // Negative check: outlast the 50 ms reflow timer in src/tui/app.tsx before asserting nothing reprinted.
     await delay(80);
     assert.equal(writes.slice(offset).join('').includes('SAVED_PROGRESS_0:'), false, 'Repaints must not print the history again');
 
@@ -56,7 +59,7 @@ test('reattaching prints saved turns and the entire unfinished turn into scrollb
     offset = writes.length;
     for (const columns of [55, 50]) { stdout.columns = columns; stdout.emit('resize'); }
     await wait(() => writes.slice(offset).join('').includes('SAVED_ANSWER_1'));
-    await delay(80);
+    await delay(80); // Outlast another reflow timer so a second clear would be observed.
     const reflowed = writes.slice(offset).join('');
     assert.equal(reflowed.split('<CLEARED>').length, 2, 'Resizing clears the screen once after the width settles');
     assert.equal(reflowed.split('<CLEARED>')[1]!.split('SAVED_PROMPT_0').length, 2, 'Saved turns print exactly once after the clear');
@@ -103,7 +106,7 @@ test('slash commands preview, filter, navigate, complete and submit locally', { 
   stdout.isTTY = true; stdout.columns = 100; stdout.rows = 24;
   const lifetime = new AbortController();
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
-  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${latest}`); await delay(5); } };
+  const wait = (check: () => boolean) => until(check, { attempts: 200, message: () => `UI did not update: ${latest}` });
   try {
     await wait(() => agent.status === 'ready');
     stdin.write('/');
@@ -141,7 +144,7 @@ test('slash commands preview, filter, navigate, complete and submit locally', { 
     for (let i = 0; i < 12; i++) stdin.write('\x1b[B');
     await wait(() => latest.includes('❯ /project:command-12'));
     stdout.columns = 50; stdout.rows = 16; stdout.emit('resize');
-    await delay(80);
+    await delay(80); // Include frames from the 50 ms reflow reprint in the overflow check below.
     assert.ok(latest.includes('/project:command-12'), 'The selected row remains visible on resize');
     for (const frame of frames) assert.ok(frame.text.trimEnd().split('\n').length < frame.rows, `Command menu overflowed: ${frame.text}`);
 
@@ -179,18 +182,15 @@ test('the real TUI edits and displays input while the network is stalled, withou
   const lifetime = new AbortController();
   const running = runLocalTui(new RemoteAgent(session), [], 'default', { stdin, stdout, stderr }, lifetime.signal);
   try {
-    for (let i = 0; !requests && i < 100; i++) await delay(5);
+    await until(() => requests > 0, { attempts: 100 }).catch(() => {});
     stdin.write('LOCAL_EDIT_🍈');
-    const start = performance.now();
-    while (!output.includes('LOCAL_EDIT_🍈') && performance.now() - start < 500) await delay(5);
+    await until(() => output.includes('LOCAL_EDIT_🍈'), 500).catch(() => {});
     assert.ok(output.includes('LOCAL_EDIT_🍈'), 'The draft should render before any remote response');
     assert.equal(dispatches, 0);
     stdin.write('\x1b[D'); stdin.write('\x7f');
-    await delay(60);
-    assert.ok(stripVTControlCharacters(output).includes('LOCAL_EDIT🍈'), `Left and backspace should edit locally: ${stripVTControlCharacters(output).slice(-3000)}`);
+    await until(() => stripVTControlCharacters(output).includes('LOCAL_EDIT🍈'), { attempts: 200, message: () => `Left and backspace should edit locally: ${stripVTControlCharacters(output).slice(-3000)}` });
     stdin.write('\x1b[200~\npasted second line\n\x1b[201~');
-    await delay(50);
-    assert.ok(stripVTControlCharacters(output).includes('pasted second line'));
+    await until(() => stripVTControlCharacters(output).includes('pasted second line'), { attempts: 200 });
     assert.equal(dispatches, 0, 'Pasted newlines must not submit a prompt');
   } finally { lifetime.abort(); await running; }
   assert.equal(stops, 0, 'Losing the local terminal must leave remote work running');
@@ -214,7 +214,7 @@ test('permission UI preselects Yes, ignores early and pasted keys, offers rememb
   stdout.isTTY = true; stdout.columns = 100; stdout.rows = 30;
   const lifetime = new AbortController();
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
-  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error('UI did not update'); await delay(5); } };
+  const wait = (check: () => boolean) => until(check, { attempts: 200, message: 'UI did not update' });
   const ask = async (id: string, extra: Partial<Approval> = {}) => {
     const offset = output.length;
     agent.approvals.set(id, { id, tool: 'Bash', input: { command: 'printf OK' }, description: '', ...extra });
@@ -224,34 +224,34 @@ test('permission UI preselects Yes, ignores early and pasted keys, offers rememb
   };
   try {
     await wait(() => agent.status === 'ready');
-    stdin.write('my draft'); await delay(40);
+    stdin.write('my draft'); await wait(() => stripVTControlCharacters(output).includes('my draft'));
     await ask('first');
-    stdin.write('\r'); stdin.write('1'); await delay(40);
+    stdin.write('\r'); stdin.write('1'); await delay(40); // Negative check: no event marks ignored keys.
     assert.deepEqual(agent.answers, [], 'Keys typed for the prompt as the dialog opens must not answer it');
+    // 320 ms outlasts the dialog's 300 ms settle window (src/tui/app.tsx), so Enter below is accepted.
     stdin.write('\x1b[200~y\x1b[201~'); await delay(320);
     assert.deepEqual(agent.answers, [], 'Pasting y must not approve a tool');
     stdin.write('\r'); await wait(() => agent.answers.length === 1);
     assert.deepEqual(agent.answers[0], { allow: true }, 'Yes is preselected');
-    await delay(40);
     assert.ok(stripVTControlCharacters(output).includes('my draft'));
 
     const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'printf:*' }], behavior: 'allow', destination: 'localSettings' }];
     const offset = await ask('second', { suggestions });
     assert.ok(stripVTControlCharacters(output.slice(offset)).includes('2. Yes, and don’t ask again for Bash(printf:*) in this project'));
-    await delay(320);
+    await delay(320); // Settle window.
     stdin.write('\x1b[B'); stdin.write('\r');
     await wait(() => agent.answers.length === 2);
     assert.deepEqual(agent.answers[1], { allow: true, options: { suggestions } }, 'A rapid arrow then Enter confirms the remembered grant');
 
     await ask('third');
     await delay(40); stdin.write('\t'); await wait(() => output.includes('Tell Claude what to do differently'));
-    await delay(40); stdin.write('use echo instead'); await delay(40); stdin.write('\r');
+    await delay(40); stdin.write('use echo instead'); await wait(() => stripVTControlCharacters(output).includes('use echo instead')); stdin.write('\r');
     await wait(() => agent.answers.length === 3);
     assert.deepEqual(agent.answers[2], { allow: false, options: { message: 'use echo instead' } });
 
     await ask('local-publication', { local: true, tool: 'Publish snapshot', input: { files: 2, paths: ['README.md', 'src/app.ts'] }, description: 'Apply remote edits locally' });
-    await delay(320);
-    stdin.write('\x1b[200~y\x1b[201~'); await delay(40);
+    await delay(320); // Settle window.
+    stdin.write('\x1b[200~y\x1b[201~'); await delay(40); // Negative check.
     assert.equal(agent.answers.length, 3, 'Pasted text cannot approve a local publication');
     stdin.write('\r'); await wait(() => agent.answers.length === 4);
     assert.deepEqual(agent.answers[3], { allow: false }, 'Local publication defaults to No');
@@ -284,7 +284,7 @@ test('questions ignore early selections and approval feedback remains interrupti
   stdout.isTTY = true; stdout.columns = 100; stdout.rows = 30;
   const lifetime = new AbortController();
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
-  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${latest}`); await delay(5); } };
+  const wait = (check: () => boolean) => until(check, { attempts: 200, message: () => `UI did not update: ${latest}` });
   try {
     await wait(() => agent.status === 'working');
     agent.approvals.set('question', { id: 'question', tool: 'AskUserQuestion', input: { questions: [{ question: 'Choose a target', options: [{ label: 'Staging' }, { label: 'Production' }] }] }, description: '' });
@@ -295,7 +295,7 @@ test('questions ignore early selections and approval feedback remains interrupti
     await delay(40);
     assert.deepEqual(agent.answers, [], 'Prompt keys arriving with a question must not select an answer');
     stdin.write('\x03'); await wait(() => agent.interrupts === 1);
-    await delay(320);
+    await delay(320); // Settle window.
     stdin.write('\r'); await wait(() => agent.answers.length === 1);
     assert.deepEqual(agent.answers, [{ allow: true, answers: { 'Choose a target': 'Staging' } }]);
 
@@ -304,7 +304,7 @@ test('questions ignore early selections and approval feedback remains interrupti
     await wait(() => latest.includes('Bash command'));
     await delay(40); stdin.write('\t');
     await wait(() => latest.includes('Tell Claude what to do differently'));
-    await delay(40); stdin.write('Keep this draft'); await delay(40); stdin.write('\x03');
+    await delay(40); stdin.write('Keep this draft'); await wait(() => latest.includes('Keep this draft')); stdin.write('\x03');
     await wait(() => agent.interrupts === 2);
     assert.equal(agent.answers.length, 1, 'Interrupting from feedback must not answer the approval');
   } finally { lifetime.abort(); await running; }
@@ -336,10 +336,10 @@ test('long conversations and permission previews stay inside the terminal while 
   stdout.isTTY = true; stdout.columns = 60; stdout.rows = 24;
   const lifetime = new AbortController();
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
-  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error('UI did not update'); await delay(5); } };
+  const wait = (check: () => boolean) => until(check, { attempts: 200, message: 'UI did not update' });
   try {
     await wait(() => agent.status === 'ready');
-    stdin.write('ORIGINAL_PROMPT'); await delay(40); stdin.write('\r');
+    stdin.write('ORIGINAL_PROMPT'); await wait(() => writes.join('').includes('ORIGINAL_PROMPT')); stdin.write('\r');
     await wait(() => agent.status === 'working');
     for (let i = 0; i < 10; i++) agent.emit('frame', { type: 'assistant', message: { id: `message-${i}`, content: [{ type: 'text', text: `Response ${i}: ${'wrapped text '.repeat(12)}` }] } });
     agent.approvals.set('permission', { id: 'permission', tool: 'Bash', input: { command: Array.from({ length: 30 }, (_, i) => `echo line ${i}`).join('\n') }, description: 'Check the command before allowing it.' });
@@ -348,7 +348,7 @@ test('long conversations and permission previews stay inside the terminal while 
     await delay(40);
     for (const key of ['\x1b[C', '\x1b[D', '\x1b[C', '\x1b[D']) { stdin.write(key); await delay(40); }
     stdout.columns = 42; stdout.rows = 16; stdout.emit('resize');
-    await delay(80);
+    await delay(80); // Outlast the 50 ms reflow timer.
     stdin.write('\x1b[C'); await delay(40);
     stdin.write('\x1b[D'); await delay(40);
     stdin.write('\x1b[C'); stdin.write('\x1b[D'); stdin.write('\r');
@@ -358,7 +358,7 @@ test('long conversations and permission previews stay inside the terminal while 
     agent.approvals.set('question', { id: 'question', tool: 'AskUserQuestion', input: { questions: [{ question: 'Which option?', options: Array.from({ length: 20 }, (_, i) => ({ label: `Option ${i + 1}`, description: 'A detailed option description that wraps onto multiple rows.' })) }] }, description: '' });
     agent.emit('approvals');
     await wait(() => frames.at(-1)?.text.includes('Which option?') ?? false);
-    await delay(320); stdin.write('2'); await delay(40); stdin.write('\r');
+    await delay(320); /* Settle window. */ stdin.write('2'); await delay(40); stdin.write('\r');
     await wait(() => agent.answers.length === 2);
     assert.deepEqual(agent.questionAnswers, { 'Which option?': 'Option 2' });
 
@@ -420,7 +420,7 @@ test('Claude Code prompt keys: history, shortcuts, mode cycling, double Esc and 
   const lifetime = new AbortController();
   let exited = false;
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal).then(code => { exited = true; return code; });
-  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${latest}`); await delay(5); } };
+  const wait = (check: () => boolean) => until(check, { attempts: 200, message: () => `UI did not update: ${latest}` });
   const prompt = () => /❯ (.*)\n─/u.exec(latest)?.[1]?.trimEnd();
   try {
     await wait(() => latest.includes('manual mode on · ? for shortcuts'));

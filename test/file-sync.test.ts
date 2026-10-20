@@ -3,17 +3,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
-import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import type { WorkspaceSync, WorkspaceSyncOptions, WorkspaceSyncStatus } from '@cantelop/sdk';
 import { syncFiles } from '../src/file-sync.js';
 import { git } from '../src/git.js';
 import { selectProject } from '../src/project.js';
+import { until as poll } from './fixtures/wait.js';
 
-async function until(check: () => boolean) {
-  for (let i = 0; i < 400; i++) { if (check()) return; await delay(5); }
-  throw new Error('File sync did not reach the expected state');
-}
+const until = (check: () => boolean) => poll(check, { attempts: 400, message: 'File sync did not reach the expected state' });
 
 async function fixture(t: test.TestContext) {
   const local = await mkdtemp(join(tmpdir(), 'juiced-file-sync-'));

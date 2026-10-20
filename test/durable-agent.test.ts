@@ -16,11 +16,7 @@ import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/proto
 import { prepareAgentSession } from '../src/session-state.js';
 import { commandMenu } from '../src/tui/command-menus.js';
 import type { Publication } from '../src/publish-protocol.js';
-
-async function until(check: () => boolean, ms = 10_000) {
-  const end = Date.now() + ms;
-  while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
-}
+import { until } from './fixtures/wait.js';
 
 async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 'test', agentOptions: ConstructorParameters<typeof RemoteAgent>[1] = {}) {
   const root = await mkdtemp('/tmp/juiced-durable-');
@@ -215,7 +211,7 @@ test('local publication requires its own explicit approval and denial never call
   await assert.rejects(f.agent.answer(allowed.id, true), /no longer active/);
   f.expireStream();
   await until(() => f.replays.length > 1);
-  await delay(50);
+  await delay(50); // Negative check: give the replayed offer time to (wrongly) reach the writer.
   assert.equal(writes, 1, 'Replaying a completed publication must never apply it again');
   assert.equal(f.agent.approvals.size, 0);
 });
@@ -235,7 +231,7 @@ test('reattachment restores a live publication offer and ignores historical or e
     await reattached.answer(pending.id, false);
     const old = publication(); await f.publish(old, false);
     const expired = { ...publication(), expiresAt: Date.now() - 1000 }; await f.publish(expired);
-    await delay(50);
+    await delay(50); // Negative check: stale offers must never surface.
     assert.equal(reattached.approvals.size, 0);
     assert.equal(writes, 0);
   } finally { await reattached.close(false); }
@@ -254,7 +250,7 @@ test('slow output acknowledgments use a bounded pipeline without skipping journa
   for (let index = 0; index < 40; index++) await f.frame({ type: 'assistant', message: { id: `pipelined-${index}`, content: [{ type: 'text', text: `${index}` }] } });
   const published = () => f.stored.filter(event => event.data.type === 'agent-output' && event.data.sequence > boundary);
   await until(() => published().length >= 12);
-  await delay(20);
+  await delay(20); // Negative check: no 13th output may be sent while acknowledgments are blocked.
   assert.equal(published().length, 12, 'Outstanding output must stay bounded while acknowledgments are blocked');
   assert.equal(f.views.at(-1), boundary + 12, 'The view must join the same handoff and stop at its last enqueued event');
   release();
@@ -284,7 +280,9 @@ test('a stalled view acknowledgment does not block live output or accumulate vie
   let release = () => {};
   t.after(() => release());
   const f = await fixture(t); await f.agent.start();
-  await delay(20);
+  const history = await f.service.replay(0); assert.ok(history.ok && history.replay);
+  const latest = history.replay.latest;
+  await until(() => f.views.at(-1) === latest);
   const before = f.views.length;
   const blocked = new Promise<void>(resolve => { release = resolve; });
   f.onView(() => blocked);
