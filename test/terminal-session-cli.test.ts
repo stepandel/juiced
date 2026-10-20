@@ -22,14 +22,16 @@ test('CLI reconnects the same tab, starts fresh on --new, and bypasses bindings 
   t.after(async () => { await rm(root, { recursive: true, force: true }); await rm(output, { recursive: true, force: true }); });
   await build({ entryPoints: [join(projectRoot, 'src/cli.ts')], bundle: true, platform: 'node', target: 'node22', format: 'esm', packages: 'external',
     plugins: [{ name: 'capture-terminal-selection', setup(builder) {
-      builder.onLoad({ filter: /\/src\/tui\/app\.tsx$/ }, () => ({ contents: `export async function runLocalTui(agent, argv) { process.stdout.write(JSON.stringify({ id: agent.session.id, argv }) + '\\n'); return 0; }`, loader: 'js' }));
+      builder.onLoad({ filter: /\/src\/tui\/app\.tsx$/ }, () => ({ contents: `export async function runLocalTui(agent, argv) { process.stdout.write(JSON.stringify({ id: agent.session.id, argv, operations: globalThis.fixtureOperations }) + '\\n'); return 0; }`, loader: 'js' }));
     } }, createCantelopCompilerPlugin({ definition: join(projectRoot, 'src/cantelop.ts') })], outfile: join(output, 'cli.mjs') });
   const bootstrap = join(output, 'run.mjs');
   await writeFile(bootstrap, `
     process.stdin.isTTY = process.stdout.isTTY = true;
+    globalThis.fixtureOperations = [];
     globalThis.fetch = async (input, init) => {
       const request = new Request(input, init);
       const body = await request.json();
+      globalThis.fixtureOperations.push({ type: body.command.type, workspace: body.workspace });
       if (body.command.type === 'auth') return Response.json({ protocolVersion: 2, id: body.id, reply: { type: 'status', authenticated: true } });
       if (body.command.type === 'workspace.resolve') return Response.json({
         id: process.env.TEST_WORKSPACE_ID, app_id: 'app_' + 'a'.repeat(32), slug: body.workspace.slug,
@@ -45,9 +47,13 @@ test('CLI reconnects the same tab, starts fresh on --new, and bypasses bindings 
       env: { ...process.env, TERM_SESSION_ID: tab, TMUX: '', TMUX_PANE: '', STY: '', WINDOW: '', JUICED_WORKSPACE: 'chosen',
         CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-token', CANTELOP_EDGE_URL: 'https://fixture.invalid', TEST_WORKSPACE_ID: workspaceId },
     });
-    return { ...JSON.parse(stdout) as { id: string; argv: string[] }, stderr };
+    return { ...JSON.parse(stdout) as { id: string; argv: string[]; operations: Array<{ type: string; workspace: { id?: string; slug?: string } }> }, stderr };
   };
   const first = await run(); assert.match(first.id, /^ses_[a-f0-9]{32}$/u);
+  assert.deepEqual(first.operations, [
+    { type: 'workspace.resolve', workspace: { slug: 'chosen' } },
+    { type: 'auth', workspace: { id: `wsp_${'1'.repeat(32)}` } },
+  ], 'Resolve once before using the ID for authentication and subsequent Session commands');
   const again = await run(); assert.equal(again.id, first.id); assert.match(again.stderr, /Reconnecting/);
   const other = await run(['claude'], 'tab-b'); assert.notEqual(other.id, first.id);
   const explicit = await run(['--session', other.id, 'claude']); assert.equal(explicit.id, other.id);

@@ -14,7 +14,7 @@ import type { TerminalCommand, TerminalEvent } from '../src/protocol.js';
 import { createTerminal } from '../src/runtime/terminal.js';
 
 // Exercise the real CLI, SDK transport, and runtime with a local platform fixture.
-// Any sync request fails: only authentication and terminal operations are served.
+// Any sync request fails: only workspace binding, authentication and terminal operations are served.
 test('non-Git launches keep local and remote files separate across sessions and exit', { timeout: 20_000 }, async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'juiced-isolation-')));
   const projectRoot = fileURLToPath(new URL('../', import.meta.url));
@@ -32,10 +32,18 @@ test('non-Git launches keep local and remote files separate across sessions and 
       routes.push(request.url!);
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString()) as AppCommandEnvelope<TerminalCommand>;
-      const operation = body.command, session = body.session!.id;
+      const operation = body.command;
       assert.equal(request.url, `/commands/${operation.type}`);
       assert.equal(request.headers.authorization, 'Bearer fixture-token');
       const reply = (value: object) => { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ protocolVersion: 2, id: body.id, ...value })); };
+      if (operation.type === 'workspace.resolve') {
+        assert.deepEqual(body.workspace, { slug: 'isolation' });
+        reply({ id: `wsp_${'3'.repeat(32)}`, app_id: `app_${'4'.repeat(32)}`, slug: 'isolation', hostname: 'fixture.cantelop.dev', created_at: '2026-10-19T00:00:00Z', updated_at: '2026-10-19T00:00:00Z' });
+        return;
+      }
+      assert.deepEqual(body.workspace, { id: `wsp_${'3'.repeat(32)}` });
+      assert.ok(body.session);
+      const session = body.session.id;
       if (operation.type === 'auth') { reply({ reply: { type: 'status', authenticated: true } }); return; }
       if (operation.type === 'stop') { terminals.get(session)?.cancel(); reply({}); return; }
       if (operation.type === 'request') {
@@ -98,6 +106,7 @@ test('non-Git launches keep local and remote files separate across sessions and 
   assert.deepEqual(await readdir(local), ['README.md']);
   assert.equal(await readFile(join(local, 'README.md'), 'utf8'), 'later local edit');
   assert.equal(await readFile(join(remote, 'project', 'agent.txt'), 'utf8'), 'remote only');
-  assert.equal(routes.some(route => /sync|workspace.resolve/.test(route)), false);
+  assert.equal(routes.some(route => /sync/.test(route)), false);
+  assert.equal(routes.filter(route => route === '/commands/workspace.resolve').length, 2, 'Each CLI launch resolves only once; every session operation uses the ID');
   assert.deepEqual(failures, []);
 });

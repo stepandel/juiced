@@ -438,18 +438,24 @@ export class RemoteAgent extends EventEmitter {
       let replayId: string | undefined;
       let unseen: AgentJournalEntry | undefined;
       let events: AsyncIterator<SessionEvent<TerminalEvent>> | undefined;
+      let replayStarted = 0, replayChunks = 0, replayEntries = 0;
+      const connectedAt = performance.now();
+      let firstEvent = true, caught = false;
       const subscription = new AbortController();
       try {
         const view = await this.session.view?.({ signal: this.controller.signal }).catch(error => {
           if (['session_view_not_found', 'session_not_found', 'resource_not_found'].includes(String((error as { code?: string }).code))) return undefined;
           throw error;
         });
+        this.debug('agent.view', { elapsedMs: performance.now() - connectedAt, sequence: Number(object(view?.state).agentSequence) || 0 });
         // A read watchdog also recovers half-open connections after laptop sleep.
         // View and stream reads do not activate compute or extend a work lease.
         watchdog = AbortSignal.timeout(30_000);
         const signal = AbortSignal.any([this.controller.signal, watchdog, subscription.signal]);
         const replay = () => {
           const id = replayId = randomUUID();
+          replayStarted = performance.now(); replayChunks = 0; replayEntries = 0;
+          this.debug('agent.replay.start', { after: this.sequence });
           const command: TerminalCommand = { type: 'agent-replay', after: this.sequence, stream: id };
           // Read the same subscription throughout recovery. One command streams all
           // pages; its acceptance never blocks consuming output or durable handoffs.
@@ -458,6 +464,7 @@ export class RemoteAgent extends EventEmitter {
           });
         };
         const caughtUp = () => {
+          if (!caught) { this.debug('agent.caught-up', { elapsedMs: performance.now() - connectedAt, sequence: this.sequence }); caught = true; }
           if (failures) this.emit('reconnected');
           failures = 0;
           this.caughtUp?.(); this.caughtUp = undefined;
@@ -472,16 +479,20 @@ export class RemoteAgent extends EventEmitter {
         recover = false;
         for (let next = await first; !next.done; next = await events.next()) {
           const event = next.value;
+          if (firstEvent) { this.debug('agent.stream.first-event', { elapsedMs: performance.now() - connectedAt }); firstEvent = false; }
           if (event.data.type === 'agent-output') {
             if (event.data.sequence > this.sequence + 1) {
               if (!unseen || event.data.sequence > unseen.sequence) unseen = event.data;
               if (!replayId) replay();
             } else this.journalEntry(event.data);
           } else if (event.data.type === 'agent-replay' && event.data.id === replayId) {
+            if (!replayChunks) this.debug('agent.replay.first-chunk', { elapsedMs: performance.now() - replayStarted });
+            replayChunks++; replayEntries += event.data.entries.length;
             for (const entry of event.data.entries) this.journalEntry(entry);
           } else if (event.data.type === 'agent-replay-end' && event.data.id === replayId) {
             if (event.data.error) throw new RemoteProcessError(event.data.error);
             if (this.sequence < event.data.latest) throw new Error('The agent history stream is incomplete');
+            this.debug('agent.replay.complete', { elapsedMs: performance.now() - replayStarted, chunks: replayChunks, entries: replayEntries });
             replayId = undefined;
             if (unseen && unseen.sequence === this.sequence + 1) this.journalEntry(unseen);
             if (unseen && unseen.sequence > this.sequence) replay();

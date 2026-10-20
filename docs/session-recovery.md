@@ -55,20 +55,29 @@ Each logical session owns an append-only journal under
 complete native JSON observations, displayed user messages, process boundaries,
 input receipts, and turn state. User messages and native output are separate
 record types, so input cannot splice a partially read native JSON frame.
-Text deltas are coalesced for at most 250 ms before being committed. Completed
+The first text delta after a message/block boundary is committed immediately.
+Following text deltas are coalesced for at most 25 ms before being committed. Completed
 observations are committed before publication. Neither the journal nor its
 paginated replay truncates response text or drops old turns.
 
-Appends handle short writes and fsync before acknowledgment. Creation syncs the
+Appends handle short writes and fsync before acknowledgment. A native output
+batch shares one fsync across its bounded journal records. Creation syncs the
 directory chain. Replacement scans records, rebuilds a byte-offset index, and
 discards an incomplete final append. A malformed complete record fails instead
 of silently skipping history. Replay replies stay below the platform's 64 KiB
 reply limit and read records by file offset rather than keeping transcripts in
 memory. Journals currently remain until workspace deletion.
 
-SSE notifications carry journal sequence numbers and may coalesce under output
-backpressure. The runtime commits a small Cantelop view with the published
-sequence. Reattachment subscribes at that boundary and dispatches one replay
+Live SSE output drains from the journal with at most twelve events awaiting
+collector acknowledgment. A stalled collector leaves the backlog on disk;
+it does not drop intermediate notifications or retain the transcript in memory.
+One coalesced view handoff follows its enqueued event sequence independently,
+so its acknowledgment cannot block new output from filling available slots.
+Failed output handoffs retry from the acknowledged prefix; clients deduplicate
+by journal sequence. The CLI resolves the workspace once and uses its ID for
+subsequent session commands, avoiding a slug lookup on every submission.
+
+Reattachment subscribes at the view boundary and dispatches one replay
 command. The runtime streams a fixed journal snapshot in bounded pages over the
 same subscription, pipelining up to twelve pages per durable handoff batch. This
 avoids a separate command round trip for every 48 KiB of history. Replay IDs
@@ -110,7 +119,8 @@ in the same TUI, but not a CLI restart.
 `test/durable-agent.test.ts` exercises output beyond the transport replay window,
 streamed history, interrupted transfers, interleaved live output, duplicate and
 ambiguous input acknowledgments, expired cursors, reattachment with pending
-approvals, idle native resumption, partial append
+approvals, immediate leading deltas, short text batches, bounded output under
+stalled acknowledgments, failed handoff retries, idle native resumption, partial append
 repair, and recovery of uncertain input after runtime replacement.
 `test/runtime-protocol.test.ts` additionally runs durable commands through the
 actual SDK activity handler and a real native JSON subprocess, including a
@@ -118,3 +128,17 @@ streamed replay larger than the SDK output buffer while native work stays alive.
 Renderer tests
 verify local editing while connectivity is stalled and detachment on terminal
 loss. Hosted sleep/wake verification still requires a matching runtime deployment.
+
+For hosted latency diagnosis, run `JUICED_DEBUG=1 juiced --resume claude` after
+building and deploying matching sources. Diagnostic records include view read
+time, time to the first stream event, replay first-chunk/completion time and
+chunk/entry counts, and existing command acknowledgment timings. These records
+contain timing and sequence metadata rather than transcript contents. Elapsed
+durations use the client clock; they do not isolate network RTT or backend time.
+Compare fresh output and command acknowledgment separately from history replay.
+
+An eight-sample local comparison against `0dc9c14` measured median leading-delta
+delivery at 258 ms before these changes and 10 ms afterward; subsequent batched
+deltas measured 259 ms and 33 ms. The fixture measures the native output callback
+through journal fsync to a `RemoteAgent` frame with immediate mocked collector
+acknowledgments. It excludes the public network and is not a hosted latency SLA.

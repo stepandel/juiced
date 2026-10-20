@@ -12,6 +12,8 @@ type Context = SessionContext<TerminalCommand, TerminalEvent, TerminalReply>;
 type Start = Extract<TerminalCommand, { type: 'start' }>;
 const RUN_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 const IDLE_TIMEOUT_MS = 120_000;
+const TEXT_BATCH_MS = 25;
+const PUBLICATION_WINDOW = 12;
 
 async function transcriptExists(workspace: string, id: string) {
   const root = join(workspace, '.claude', 'projects');
@@ -38,6 +40,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
   let decoder = new ClaudeDecoder();
   let buffered: ClaudeFrame[] = [];
   let bufferedBytes = 0;
+  let firstDelta = true;
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   let flushing = Promise.resolve();
   const controls = new Map<string, string>();
@@ -45,7 +48,10 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
   let view: Context['view'] | undefined;
   let outputSignal: AbortSignal = context.signal;
   let publication: Promise<void> | undefined;
-  let newest: AgentJournalEntry | undefined;
+  let publicationAfter: number | undefined;
+  let publicationThrough = 0;
+  let publicationVersion = 0;
+  let publicationWake: (() => void) | undefined;
   let stopping = false;
 
   const load = () => loading ??= (async () => {
@@ -57,31 +63,81 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
   })();
 
   function publish(entry: AgentJournalEntry) {
-    // The journal carries every byte. Notifications can coalesce during a stalled handoff.
-    newest = entry;
+    publicationAfter ??= entry.sequence - 1;
+    publicationThrough = entry.sequence;
+    wakePublication();
+    startPublication();
+  }
+  function wakePublication() {
+    publicationVersion++;
+    publicationWake?.();
+    publicationWake = undefined;
+  }
+  function startPublication() {
+    // Drain from disk rather than dropping notifications while an acknowledgment
+    // is pending. Only one bounded window of journal entries lives in memory.
     publication ??= (async () => {
-      while (newest && sink && !outputSignal.aborted) {
-        const next: AgentJournalEntry = newest;
+      type Handoff = { sequence: number; done: boolean; failed: boolean; settled: Promise<void> };
+      const track = (sequence: number, work: Promise<void>): Handoff => {
+        const item: Handoff = { sequence, done: false, failed: false, settled: Promise.resolve() };
+        item.settled = work.then(() => { item.done = true; }, () => { item.failed = true; }).then(wakePublication);
+        return item;
+      };
+      const pending: Handoff[] = [];
+      let projection: Handoff | undefined;
+      let after = publicationAfter!;
+      let viewed = after;
+      const acknowledged = () => {
+        while (pending[0]?.done) publicationAfter = pending.shift()!.sequence;
+        if (projection?.done) { viewed = projection.sequence; projection = undefined; }
+      };
+      while (sink && !outputSignal.aborted) {
+        const version = publicationVersion;
         try {
-          await sink.send({ type: 'agent-output', ...next });
-          await view?.commit({ agentSequence: next.sequence });
+          acknowledged();
+          if (pending.some(item => item.failed) || projection?.failed) throw new Error('Agent output handoff failed');
+          while (pending.length < PUBLICATION_WINDOW && after < publicationThrough) {
+            const page = await journal.page(after, publicationThrough);
+            for (const entry of page.entries) {
+              pending.push(track(entry.sequence, sink.send({ type: 'agent-output', ...entry })));
+              after = entry.sequence;
+              if (pending.length === PUBLICATION_WINDOW) break;
+            }
+          }
+          // A single coalesced view follows its enqueued events. Waiting for it
+          // never prevents another output event from filling an available slot.
+          if (!projection && view && after > viewed) projection = track(after, view.commit({ agentSequence: after }));
+          if (!pending.length && !projection && after === publicationThrough) break;
+          // New appends can fill a partially occupied window before its first
+          // acknowledgment. The version check prevents a lost wake during reads.
+          if (version === publicationVersion) await new Promise<void>(resolve => { publicationWake = resolve; });
         }
         catch {
+          await Promise.all(pending.map(item => item.settled).concat(projection ? [projection.settled] : []));
+          acknowledged();
+          pending.length = 0; projection = undefined;
+          after = publicationAfter!; viewed = Math.min(viewed, after);
           if (outputSignal.aborted) break;
           await delay(1000, undefined, { signal: outputSignal }).catch(() => {});
-          continue;
         }
-        if (newest === next) newest = undefined;
       }
-    })().finally(() => { publication = undefined; });
+    })().finally(() => {
+      publication = undefined;
+      publicationWake = undefined;
+      // A journal append can complete between the last loop check and finally.
+      if (sink && !outputSignal.aborted && publicationAfter! < publicationThrough) startPublication();
+    });
   }
   async function record(event: AgentJournalEvent) {
     const entry = await journal.event(event);
     if (sink) publish(entry);
   }
   async function bytes(channel: 'stdout' | 'stderr', bytes: Buffer) {
+    const events: AgentJournalEvent[] = [];
     for (let offset = 0; offset < bytes.length; offset += 12 * 1024)
-      await record({ type: 'bytes', channel, data: bytes.subarray(offset, offset + 12 * 1024).toString('base64') });
+      events.push({ type: 'bytes', channel, data: bytes.subarray(offset, offset + 12 * 1024).toString('base64') });
+    // One fsync per native output batch, including all of its bounded records.
+    for (const entry of await journal.events(events)) if (sink) publish(entry);
   }
   function cancelIdle() { if (idle) clearTimeout(idle); idle = undefined; }
   function armIdle() {
@@ -120,13 +176,16 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
 
   async function stdout(raw: Buffer) {
     const frames = decoder.push(raw);
+    if (!frames.length) return;
     buffered.push(...frames); bufferedBytes += raw.length;
     const deltaOnly = frames.every(frame => frame.type === 'stream_event' && object(frame.event).type === 'content_block_delta');
-    if (!deltaOnly || bufferedBytes >= 48 * 1024) await flushObserved();
+    const leading = firstDelta;
+    firstDelta = !deltaOnly;
+    if (!deltaOnly || leading || bufferedBytes >= 48 * 1024) await flushObserved();
     else flushTimer ??= setTimeout(() => {
       flushTimer = undefined;
       void flushObserved().catch(() => terminal?.cancel());
-    }, 250);
+    }, TEXT_BATCH_MS);
   }
 
   return {
@@ -151,7 +210,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
           await db.execute({ sql: 'DELETE FROM juiced_checkout_leases WHERE project = ? AND session = ?', args: [command.directoryName, context.session.id] });
         }
         const interrupted = journal.state === 'working';
-        epoch = randomUUID(); initialized = undefined; decoder = new ClaudeDecoder(); controls.clear(); stopping = false;
+        epoch = randomUUID(); initialized = undefined; decoder = new ClaudeDecoder(); firstDelta = true; controls.clear(); stopping = false;
         await journal.event({ type: 'reset', epoch, interrupted });
         terminal = factory();
         let complete!: () => void;

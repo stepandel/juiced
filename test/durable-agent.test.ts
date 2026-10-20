@@ -35,10 +35,14 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   let viewState: unknown;
   let activityTimeout = 0;
   let replayHook: ((event: Extract<TerminalEvent, { type: 'agent-replay' }>) => Promise<void>) | undefined;
+  let outputHook: ((event: Extract<TerminalEvent, { type: 'agent-output' }>) => Promise<void>) | undefined;
+  let viewHook: (() => Promise<void>) | undefined;
+  const views: number[] = [];
   const output = { async send(data: TerminalEvent) {
     stored.push({ data, sessionId, messageId: `msg_${'1'.repeat(32)}`, createdAt: new Date(), cursor: { streamId: 'a'.repeat(32), sequence: stored.length + 1 } });
     events.emit('event');
     if (data.type === 'agent-replay') await replayHook?.(data);
+    if (data.type === 'agent-output') await outputHook?.(data);
   } };
   const raw = async (value: Buffer) => currentOutput.send({ type: 'output', channel: 'stdout', data: value.toString('base64') });
   const frame = async (value: ClaudeFrame) => raw(Buffer.from(JSON.stringify(value) + '\n'));
@@ -80,7 +84,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   };
   const service = createDurableAgent(context, factory, root, { idleTimeoutMs });
   let activity = Promise.resolve();
-  const view = { async commit(state: unknown) { viewState = state; viewCursor = stored.at(-1)?.cursor; } };
+  const view = { async commit(state: unknown) { views.push(Number(object(state).agentSequence)); viewState = state; viewCursor = stored.at(-1)?.cursor; await viewHook?.(); } };
   const intake = { ...context, output, view, activity: { queue(work: (context: unknown) => Promise<void>, options: { timeoutMs: number }) {
     activityTimeout = options.timeoutMs;
     activity = activity.then(() => work({ output, signal: lifetime.signal, view }));
@@ -132,8 +136,10 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   const received: ClaudeFrame[] = [];
   agent.on('frame', value => received.push(value));
   t.after(async () => { await agent.close(false); lifetime.abort(); await activity; await Promise.allSettled(replayWork); await service.dispose(); await rm(root, { recursive: true, force: true }); });
-  return { root, agent, session, service, frame, raw, prompts, launches, requests, requestIds, replays, stored, received,
+  return { root, agent, session, service, frame, raw, prompts, launches, requests, requestIds, replays, stored, received, views,
     onReplay(hook: typeof replayHook) { replayHook = hook; },
+    onOutput(hook: typeof outputHook) { outputHook = hook; },
+    onView(hook: typeof viewHook) { viewHook = hook; },
     get stops() { return stops; }, get initializations() { return initializations; }, get activityTimeout() { return activityTimeout; },
     offline(value: boolean) { clientOffline = value; events.emit('event'); },
     pauseStream(value: boolean) { streamPaused = value; events.emit('event'); },
@@ -141,6 +147,89 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
     expireStream() { expired = true; events.emit('event'); },
   };
 }
+
+test('the first text delta is durable immediately and following deltas flush within a short batch', async t => {
+  const f = await fixture(t); await f.agent.start();
+  const delta = (text: string) => ({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } } });
+  const started = performance.now();
+  await f.frame(delta('leading-delta'));
+  const replay = await f.service.replay(0);
+  assert.ok(replay.ok && replay.replay);
+  assert.ok(JSON.stringify(replay.replay).includes(Buffer.from(JSON.stringify(delta('leading-delta')) + '\n').toString('base64')), 'The first delta must be committed before stdout returns');
+  const leadingMs = performance.now() - started;
+  const next = performance.now();
+  await f.frame(delta('batched-delta'));
+  await until(() => JSON.stringify(f.received).includes('batched-delta'), 200);
+  t.diagnostic(`Local journal/publication: leading ${leadingMs.toFixed(1)} ms, batched ${(performance.now() - next).toFixed(1)} ms`);
+});
+
+test('slow output acknowledgments use a bounded pipeline without skipping journal entries or replaying', async t => {
+  let release = () => {};
+  t.after(() => release());
+  const f = await fixture(t); await f.agent.start();
+  const history = await f.service.replay(0); assert.ok(history.ok && history.replay);
+  const boundary = history.replay.latest;
+  await until(() => f.stored.some(event => event.data.type === 'agent-output' && event.data.sequence === boundary));
+  const replayCount = f.replays.length;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  f.onOutput(async event => { if (event.sequence > boundary) await blocked; });
+  for (let index = 0; index < 40; index++) await f.frame({ type: 'assistant', message: { id: `pipelined-${index}`, content: [{ type: 'text', text: `${index}` }] } });
+  const published = () => f.stored.filter(event => event.data.type === 'agent-output' && event.data.sequence > boundary);
+  await until(() => published().length >= 12);
+  await delay(20);
+  assert.equal(published().length, 12, 'Outstanding output must stay bounded while acknowledgments are blocked');
+  assert.equal(f.views.at(-1), boundary + 12, 'The view must join the same handoff and stop at its last enqueued event');
+  release();
+  await until(() => f.received.filter(frame => frame.type === 'assistant' && String(object(frame.message).id).startsWith('pipelined-')).length === 40);
+  assert.deepEqual(published().map(event => event.data.type === 'agent-output' ? event.data.sequence : 0), Array.from({ length: 40 }, (_, index) => boundary + index + 1));
+  assert.equal(f.replays.length, replayCount);
+});
+
+test('batched journal appends keep consecutive sequences across concurrent writes and replacement', async t => {
+  const root = await mkdtemp('/tmp/juiced-journal-batch-');
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const journal = new AgentJournal(root, 'batch'); await journal.open();
+  const batch = journal.events(Array.from({ length: 8 }, (_, index) => ({ type: 'bytes' as const, channel: 'stdout' as const, data: Buffer.from(`${index}`).toString('base64') })));
+  const single = journal.event({ type: 'state', state: 'ready' });
+  assert.deepEqual((await batch).map(entry => entry.sequence), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.equal((await single).sequence, 9);
+  await journal.close();
+  const restored = new AgentJournal(root, 'batch'); await restored.open();
+  try {
+    assert.equal(restored.latest, 9);
+    assert.equal(restored.state, 'ready');
+    assert.deepEqual((await restored.page(0)).entries.map(entry => entry.sequence), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  } finally { await restored.close(); }
+});
+
+test('a stalled view acknowledgment does not block live output or accumulate view writes', async t => {
+  let release = () => {};
+  t.after(() => release());
+  const f = await fixture(t); await f.agent.start();
+  await delay(20);
+  const before = f.views.length;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  f.onView(() => blocked);
+  for (let index = 0; index < 30; index++) await f.frame({ type: 'assistant', message: { id: `view-stalled-${index}`, content: [{ type: 'text', text: `${index}` }] } });
+  await until(() => f.received.filter(frame => frame.type === 'assistant' && String(object(frame.message).id).startsWith('view-stalled-')).length === 30);
+  assert.equal(f.views.length - before, 1, 'Only one view handoff may remain outstanding');
+  release();
+});
+
+test('a failed handoff retries from its acknowledged prefix without duplicating displayed frames', async t => {
+  const f = await fixture(t); await f.agent.start();
+  let failed = false;
+  f.onOutput(async event => {
+    if (!failed && event.event.type === 'bytes' && Buffer.from(event.event.data, 'base64').toString().includes('retry-handoff')) { failed = true; throw new Error('Lost collector acknowledgment'); }
+  });
+  await f.frame({ type: 'assistant', message: { id: 'retry-handoff', content: [{ type: 'text', text: 'Once' }] } });
+  await until(() => failed);
+  const first = f.stored.find(event => event.data.type === 'agent-output' && event.data.event.type === 'bytes' && Buffer.from(event.data.event.data, 'base64').toString().includes('retry-handoff'));
+  assert.ok(first && first.data.type === 'agent-output');
+  const sequence = first.data.sequence;
+  await until(() => f.stored.filter(event => event.data.type === 'agent-output' && event.data.sequence === sequence).length === 2);
+  assert.equal(f.received.filter(frame => frame.type === 'assistant' && object(frame.message).id === 'retry-handoff').length, 1);
+});
 
 test('a disconnected client recovers large history with one streamed replay and deduplicates output', { timeout: 20_000 }, async t => {
   const f = await fixture(t);

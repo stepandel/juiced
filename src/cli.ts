@@ -48,8 +48,9 @@ try {
     await syncFiles(claudeApp.workspace({ slug: project.workspace }), project, args.watch, controller.signal);
   } else if (args.command === 'claude') {
     const project = await selectProject(process.cwd(), args.workspace);
-    const workspace = claudeApp.workspace({ slug: project.workspace });
     if (process.stderr.isTTY) process.stderr.write(`Connecting to Cantelop workspace ${project.workspace}…\n`);
+    const resolved = await claudeApp.workspace({ slug: project.workspace }).resolve();
+    const workspace = claudeApp.workspace({ id: resolved.id });
     const introspection = args.action === 'run' && args.argv.length === 1 &&
       ['--help', '-h', '--version', '-v'].includes(args.argv[0]!);
     const maintenance = args.action === 'sync' || args.action === 'fast-forward';
@@ -80,7 +81,7 @@ try {
           // Reattaching keeps the saved launch configuration. New Claude
           // arguments must start a new session so prompts and flags take effect.
           ...(args.action === 'run' && (args.newSession || terminal && args.argv.length > 0) ? { fresh: true } : {}),
-          ...(terminal ? { terminal: { identity: terminal, workspaceId: (await workspace.resolve()).id } } : {}),
+          ...(terminal ? { terminal: { identity: terminal, workspaceId: resolved.id } } : {}),
         }) : undefined;
         if (repository && !selected?.resumed) {
           if (process.stderr.isTTY) process.stderr.write(`Preparing Git workspace ${project.remoteDirectory}…\n`);

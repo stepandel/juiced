@@ -65,10 +65,12 @@ export class AgentJournal {
     } else throw new Error('Invalid agent journal record');
   }
 
-  private append(record: () => Record): Promise<void> {
+  private append(record: () => Record | Record[]): Promise<void> {
     const next = this.pending.then(async () => {
       const value = record();
-      const bytes = Buffer.from(JSON.stringify(value) + '\n');
+      const records = Array.isArray(value) ? value : [value];
+      const lines = records.map(record => Buffer.from(JSON.stringify(record) + '\n'));
+      const bytes = Buffer.concat(lines);
       // Handle short writes before acknowledging persistence.
       for (let offset = 0; offset < bytes.length;) {
         const result = await this.file.write(bytes, offset, bytes.length - offset);
@@ -76,7 +78,11 @@ export class AgentJournal {
         offset += result.bytesWritten;
       }
       await this.file.sync();
-      this.observe(value, this.size, bytes.length);
+      let offset = this.size;
+      records.forEach((record, index) => {
+        this.observe(record, offset, lines[index]!.length);
+        offset += lines[index]!.length;
+      });
       this.size += bytes.length;
     });
     this.pending = next;
@@ -91,9 +97,17 @@ export class AgentJournal {
     await this.append(() => ({ kind: 'input', id, hash, epoch, delivered }));
   }
   async event(event: AgentJournalEvent): Promise<AgentJournalEntry> {
-    let entry!: AgentJournalEntry;
-    await this.append(() => ({ kind: 'event', entry: entry = { sequence: this.latest + 1, event } }));
-    return entry;
+    return (await this.events([event]))[0]!;
+  }
+
+  async events(events: AgentJournalEvent[]): Promise<AgentJournalEntry[]> {
+    if (!events.length) return [];
+    let entries!: AgentJournalEntry[];
+    await this.append(() => {
+      entries = events.map((event, index) => ({ sequence: this.latest + index + 1, event }));
+      return entries.map(entry => ({ kind: 'event', entry }));
+    });
+    return entries;
   }
 
   async page(after: number, through?: number) {
