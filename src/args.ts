@@ -5,7 +5,7 @@ export type Arguments =
   | { command: 'help' | 'version'; workspace: string | undefined; argv: string[] }
   | ({ command: 'claude'; workspace: string | undefined; argv: string[]; session?: string } & (
     | { action: 'run'; newSession?: boolean }
-    | { action: 'login' | 'fast-forward' }
+    | { action: 'login' | 'fast-forward' | 'sessions' }
     | { action: 'github-configure'; stdin: boolean }
     | { action: 'delete'; yes: boolean }
     | { action: 'ls'; path: string; includeIgnored: boolean }
@@ -61,7 +61,7 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
       if (newSession && session) throw new Error('--new cannot be combined with --session.');
       const literal = argv[launchIndex] === '--';
       const remaining = argv.slice(launchIndex + (literal ? 1 : 0));
-      if (session && !literal && ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek'].includes(remaining[0] ?? '')) throw new Error('--session applies to interactive juiced claude sessions.');
+      if (session && !literal && ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek', 'sessions'].includes(remaining[0] ?? '')) throw new Error('--session applies to interactive juiced claude sessions.');
       return { command, action: 'run', workspace, argv: remaining, ...(newSession ? { newSession: true } : {}), ...(session ? { session } : {}) };
     }
     if (argv[0] === 'github-configure') {
@@ -71,6 +71,11 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
       return { command, action: 'github-configure', workspace: undefined, stdin: argv[1] === '--stdin', argv: [] };
     }
     if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1) };
+    if (argv[0] === 'sessions') {
+      if (argv.length === 2 && ['--help', '-h'].includes(argv[1]!)) return { command: 'help', workspace, argv: [] };
+      if (argv.length !== 1) throw new Error('Usage: juiced claude sessions');
+      return { command, action: 'sessions', workspace, argv: [] };
+    }
     if (argv[0] === 'ls' || argv[0] === 'peek') {
       const action = argv[0];
       const usage = `Usage: juiced claude ${action} [--include-ignored]${action === 'peek' ? ' [--changes-only]' : ''} [PATH]`;
@@ -130,6 +135,7 @@ Usage:
   juiced claude github-configure [--stdin]
   juiced [--workspace SLUG] claude [Claude arguments...]
   juiced [--workspace SLUG] claude --session ID [Claude arguments...]
+  juiced [--workspace SLUG] claude sessions
   juiced [--workspace SLUG] claude login
   juiced [--workspace SLUG] claude sync --to-workspace [--include-uncommitted]
   juiced [--workspace SLUG] claude sync --from-workspace
@@ -151,6 +157,7 @@ Examples:
   juiced claude
   juiced claude --new
   juiced claude --session ses_<id>
+  juiced claude sessions
   juiced claude --model sonnet
   juiced --workspace my-project claude
   echo "Explain this project" | juiced claude -p
@@ -174,6 +181,7 @@ to their previous Juiced session. Use juiced claude --new before other Claude
 arguments to start fresh. Explicit session flags and native passthrough bypass
 the terminal binding. Use juiced claude --session ID to reopen a specific session
 from another tab; its ID is displayed in the session header.
+List saved conversations in this project and workspace with juiced claude sessions.
 Supplying Claude arguments starts a fresh bound session so prompts and flags apply.
 /detach leaves remote work running. Sleep and network interruptions reconnect
 automatically. Idle processes resume their saved conversation on the next input.
@@ -191,7 +199,7 @@ status includes descendants. Pass a path to drill down one level. Both inspect
 current Git-visible contents without syncing, changing the real index, or starting
 Claude. Ignored files are excluded; --include-ignored requires an explicit PATH.
 Use juiced claude -- <prompt> for literal prompts named login, github-configure, sync, fast-forward,
-delete, ls, or peek. Workspace operations use app credentials through the SDK.
+delete, ls, peek, or sessions. Workspace operations use app credentials through the SDK.
 Non-Git directories use a persistent remote project folder, initially empty.
 Normal Claude launches never sync local and remote files. For non-Git folders,
 sync --files explicitly reconciles files in both directions and exits. Add

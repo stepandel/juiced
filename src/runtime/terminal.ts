@@ -13,6 +13,7 @@ import { inspectRemote } from './inspection.js';
 import { INSPECTION_TIMEOUT_MS, validateInspectionCommand } from '../inspection-protocol.js';
 import { saveSettings } from './settings.js';
 import { createDurableAgent } from './durable-agent.js';
+import { listRemoteSessions } from './session-list.js';
 
 type Work = { signal: AbortSignal; output: SessionOutput<TerminalEvent> };
 type Start = Extract<TerminalCommand, { type: 'start' }>;
@@ -261,6 +262,11 @@ export async function activateTerminal(context: SessionActivationContext<Termina
 
 export async function receiveTerminal(context: SessionContext<TerminalCommand, TerminalEvent, TerminalReply>): Promise<void> {
   const command = context.message.payload;
+  if (command.type === 'sessions-list') {
+    try { context.reply({ ok: true, sessions: await listRemoteSessions(command, context.signal) }); }
+    catch (error) { context.reply({ ok: false, error: error instanceof Error ? error.message : 'Session listing failed' }); }
+    return;
+  }
   if (command.type === 'agent-replay' || command.type === 'agent-input' || command.type === 'start' && command.durable) {
     try {
       if (command.type === 'start') { validateStart(command); context.reply(await agent.open(command, context)); }

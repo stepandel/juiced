@@ -15,6 +15,7 @@ import { inspectWorkspace } from './inspect-workspace.js';
 import { syncFiles } from './file-sync.js';
 import { prepareAgentSession } from './session-state.js';
 import { terminalIdentity, usesTerminalSession } from './terminal-session.js';
+import { listSessions } from './list-sessions.js';
 
 const controller = new AbortController();
 let interrupted = 0;
@@ -36,6 +37,9 @@ try {
   }
   else if (args.command === 'claude' && args.action === 'github-configure') {
     await configureGitHub(claudeApp.environment(), args.stdin, process, controller.signal);
+  }
+  else if (args.command === 'claude' && args.action === 'sessions') {
+    await listSessions(claudeApp, process.cwd(), args.workspace, controller.signal);
   }
   else if (args.command === 'claude' && (args.action === 'ls' || args.action === 'peek')) {
     process.exitCode = await inspectWorkspace(claudeApp, process.cwd(), args, controller.signal);

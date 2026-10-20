@@ -2,6 +2,7 @@ import type { GitCommand, GitEvent, GitResult, StaleLease } from './git-protocol
 import type { InspectionCommand, InspectionEvent } from './inspection-protocol.js';
 import type { SavedSettings } from './settings.js';
 import type { ClaudeFrame } from './agent-protocol.js';
+import type { SessionListCommand, SessionListPage } from './session-list-protocol.js';
 
 export type AgentJournalEvent =
   | { type: 'bytes'; channel: 'stdout' | 'stderr'; data: string }
@@ -23,6 +24,7 @@ export type TerminalCommand =
   | { type: 'heartbeat' }
   | { type: 'save-settings'; settings: SavedSettings }
   | GitCommand
+  | SessionListCommand
   | InspectionCommand;
 
 export type TerminalEvent =
@@ -36,7 +38,7 @@ export type TerminalEvent =
   | GitEvent
   | InspectionEvent;
 
-export type TerminalReply = { ok: true; git?: GitResult; agent?: AgentConnection; replay?: { entries: AgentJournalEntry[]; latest: number } } | { ok: false; error: string; stale?: StaleLease[]; busy?: 'sessions' | 'maintenance' };
+export type TerminalReply = { ok: true; git?: GitResult; agent?: AgentConnection; replay?: { entries: AgentJournalEntry[]; latest: number }; sessions?: SessionListPage } | { ok: false; error: string; stale?: StaleLease[]; busy?: 'sessions' | 'maintenance' };
 
 export const MAX_INPUT_BYTES = 16 * 1024;
 export const MAX_BUFFERED_INPUT = 1024 * 1024;

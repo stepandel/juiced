@@ -3,6 +3,7 @@ import { mkdir, open, type FileHandle } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { dirname, join } from 'node:path';
 import type { AgentJournalEntry, AgentJournalEvent, TerminalCommand } from '../protocol.js';
+import { saveSessionIdentity } from './session-list.js';
 
 type Record = { kind: 'event'; entry: AgentJournalEntry }
   | { kind: 'conversation'; id: string }
@@ -49,6 +50,7 @@ export class AgentJournal {
       }
       if (offset !== length) { await this.file.truncate(offset); await this.file.sync(); }
       this.size = offset;
+      await saveSessionIdentity(directory, this.session);
     })();
   }
 

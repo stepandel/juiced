@@ -66,7 +66,7 @@ test('session selection follows claude and is consumed before Claude arguments',
     assert.throws(() => parseArguments(['claude', ...flags], {}), /cannot be combined/);
   }
   assert.throws(() => parseArguments(['claude', '--session', id, '--session', id], {}), /only once/);
-  for (const command of ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek']) {
+  for (const command of ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek', 'sessions']) {
     assert.throws(() => parseArguments(['claude', '--session', id, command], {}), /interactive/);
   }
   for (const args of [['claude', '--session'], ['claude', '--session', 'invalid'], ['claude', '--session=']]) {
@@ -122,7 +122,7 @@ test('Git maintenance is scoped under claude and directions are explicit', () =>
 });
 
 test('reserved subcommand names can still be sent as literal Claude prompts', () => {
-  for (const prompt of ['login', 'github-configure', 'sync', 'fast-forward', 'delete']) {
+  for (const prompt of ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'sessions']) {
     assert.deepEqual(parseArguments(['claude', '--', prompt], {}), {
       command: 'claude', action: 'run', workspace: undefined, argv: [prompt],
     });

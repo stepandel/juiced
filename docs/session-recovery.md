@@ -17,6 +17,15 @@ answer a pending permission request.
 Supplying Claude arguments starts a fresh bound session so launch settings and
 initial prompts take effect; reattachment retains its saved launch configuration.
 
+Run `juiced claude sessions` to list saved remote conversations in this project
+and workspace, newest first, with their Juiced IDs and last update times (UTC).
+Listing does not start Claude, require Claude login, sync files, or modify
+conversation histories. It inspects an existing workspace and does not provision
+a missing one. It includes older conversations after a tab starts fresh with
+`--new`; it is not limited to the tab bindings stored locally. Git sessions are
+scoped to the same repository binding and relative launch directory used when
+reopening. Native passthrough sessions are excluded.
+
 Use `juiced claude --session ses_<id>` from any tab in the same project and
 workspace to reopen a specific session using the ID displayed in its header.
 This option bypasses the terminal binding, as do explicit Claude
@@ -29,9 +38,16 @@ terminal identity comes from a terminal session ID, tmux/screen pane ID, or the
 parent shell's PID and start time; a reused TTY device alone is never a key.
 Without an available identity Juiced reports that automatic resume is disabled.
 Bindings are saved atomically after first-launch Git preparation succeeds.
-There is no project-wide last-session pointer; older pointer files are ignored.
+Automatic reconnect uses only tab bindings.
 Resume does not refresh or transfer the Git checkout. File transfer remains an
 explicit command.
+
+The runtime saves each Juiced ID in `identity.json` beside its hashed journal.
+Older runtimes saved only the hash. Listing can recover those IDs from matching
+local tab bindings; it reports the number of older histories whose IDs remain
+unknown. Reopening an older session from its original tab or with its known ID
+saves its identity for future discovery. Unreadable histories are counted in the
+listing. Build and deploy matching CLI and runtime sources to enable listing.
 
 ## Runtime lifetime
 
