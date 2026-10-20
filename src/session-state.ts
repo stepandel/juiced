@@ -2,11 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-type Project = { localDirectory: string; workspace: string };
+type Project = { localDirectory: string; workspace: string; scope?:string };
 type TerminalBinding = { identity: string; workspaceId: string };
 
 function sessionPath(project: Project, terminal: TerminalBinding) {
-  const key = JSON.stringify([project.workspace, terminal.workspaceId, terminal.identity]);
+  const key = JSON.stringify([...(project.scope?[project.scope]:[]), project.workspace, terminal.workspaceId, terminal.identity]);
   return join(project.localDirectory, '.cantelop', 'juiced', `${createHash('sha256').update(key).digest('hex')}.json`);
 }
 

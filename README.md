@@ -1,10 +1,15 @@
 # Juiced
 
-The [managed multitenancy proposal](docs/multitenancy.md) and
-[implementation plan](docs/multitenancy-implementation.md) describe per-account
-Cantelop Apps, Juiced-managed infrastructure and billing, and the platform and CLI
-work needed for a publicly installable product. The setup below describes the
-current self-managed CLI.
+Managed mode is the default. Users sign in to a Juiced account, with isolated
+Cantelop infrastructure and subscription billing managed by Juiced. See
+[managed setup and operations](docs/managed-service.md) for configuration, release
+ordering and production qualification. No public service URL has been selected;
+use `juiced --service https://YOUR-SERVICE login` during setup.
+
+The [architecture](docs/multitenancy.md) and
+[implementation plan](docs/multitenancy-implementation.md) describe the design.
+The setup below is the explicit self-managed workflow: set
+`JUICED_MODE=self-managed` or pass `--self-managed` before commands.
 
 File sync is off by default. Git repositories initialize from local `HEAD` once; later transfers are explicit. Non-Git directories use a persistent remote project folder, initially empty, with optional file sync through `juiced claude sync --files [--watch]`. See [Git workspaces](docs/git-workspaces.md) for snapshot transfer, importing commits, optional fast-forwarding, and migration from file sync.
 

@@ -1,0 +1,144 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import type { Pool } from 'pg';
+import { relay, boundedBody } from '../src/relay.js';
+import { Platform } from '../src/platform.js';
+import { Accounts, type Account, type Installation } from '../src/accounts.js';
+import { config } from '../src/config.js';
+const cfg = config({
+  NODE_ENV: 'test',
+  JUICED_SERVICE_URL: 'http://127.0.0.1:3000',
+  JUICED_AUTH_SECRET: 'test-secret-at-least-thirty-two-characters',
+  JUICED_DATABASE_URL: 'postgresql://test@localhost/test',
+});
+const account: Account = {
+  id: 'acc_' + 'a'.repeat(32),
+  owner_user_id: 'user',
+  status: 'active',
+  entitlement: 'active',
+  period_id: 'invoice',
+  period_end: new Date(Date.now() + 86400000),
+  included_credits: '1000000',
+};
+const installation: Installation = {
+  id: 'jin_' + 'a'.repeat(32),
+  account_id: account.id,
+  external_key: 'external-account-key',
+  app_id: 'app_' + 'a'.repeat(32),
+  platform_id: 'ins_' + 'a'.repeat(32),
+  package_id: 'pkg_' + 'a'.repeat(32),
+  runtime_id: 'runtime-v1',
+  status: 'ready',
+  error_code: null,
+  policy_revision: 2,
+  entitlement_epoch: 'invoice',
+  desired_package_id: null,
+  desired_runtime_id: null,
+};
+const envelope = (type: string) => ({
+  protocolVersion: 2,
+  id: 'msg_' + 'a'.repeat(32),
+  workspace: { id: 'wsp_' + 'a'.repeat(32) },
+  session: { id: 'ses_' + 'a'.repeat(32) },
+  command: { type },
+});
+const request = (path: string, body: unknown) =>
+  new Request('http://127.0.0.1:3000' + path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Juiced-Installation': installation.id,
+      Authorization: 'Bearer client-device-token',
+      'X-Cantelop-Session-Runtime': 'runtime-v1',
+    },
+    body: JSON.stringify(body),
+  });
+function context(platform: Platform) {
+  return {
+    pool: {} as Pool,
+    cfg,
+    account,
+    installation,
+    platform,
+    identity: { userId: 'user', deviceId: 'dev_test', expiresAt: Date.now() + 300000 },
+    accounts: { entitled: () => true } as unknown as Accounts,
+  };
+}
+test('relay pins server App credentials and streams without buffering or losing cancellation', async () => {
+  let upstreamRequest: Request | undefined,
+    cancelled = false;
+  let source!: ReadableStreamDefaultController<Uint8Array>;
+  const platform = new Platform(
+    'https://platform.example',
+    'flt_' + 'a'.repeat(32),
+    'fsp_' + 'a'.repeat(32) + '.' + 'b'.repeat(64),
+    async (r) => {
+      upstreamRequest = r as Request;
+      return new Response(
+        new ReadableStream({
+          start(c) {
+            source = c;
+            c.enqueue(new TextEncoder().encode('data: first\n\n'));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      );
+    },
+  );
+  platform.credentials = async () => ({
+    appId: installation.app_id!,
+    runtimeId: 'runtime-v1',
+    edgeUrl: 'https://tenant-a.example',
+    accessToken: 'server-app-token',
+  });
+  const input = request('/commands/stream', envelope('stream'));
+  const response = await relay(input, '/commands/stream', context(platform));
+  assert.equal(upstreamRequest!.headers.get('authorization'), 'Bearer server-app-token');
+  assert.equal(new URL(upstreamRequest!.url).origin, 'https://tenant-a.example');
+  const reader = response.body!.getReader();
+  assert.equal(new TextDecoder().decode((await reader.read()).value), 'data: first\n\n');
+  source.enqueue(new TextEncoder().encode('data: later\n\n'));
+  assert.equal(new TextDecoder().decode((await reader.read()).value), 'data: later\n\n');
+  await reader.cancel();
+  assert.equal(cancelled, true);
+});
+test('relay rejects raw database, arbitrary paths, changed pins and protocol/path mismatches before upstream', async () => {
+  let called = false;
+  const platform = {
+    credentials: async () => {
+      called = true;
+      throw new Error('unexpected');
+    },
+  } as unknown as Platform;
+  for (const [path, body, code] of [
+    [
+      '/commands/workspace.database',
+      { ...envelope('workspace.database'), session: null },
+      'database_credentials_unavailable',
+    ],
+    ['/private/admin', envelope('stop'), 'not_found'],
+    ['/commands/view', envelope('stop'), 'invalid_runtime_request'],
+  ] as const)
+    await assert.rejects(relay(request(path, body), path, context(platform)), { code });
+  const wrong = request('/commands/stop', envelope('stop'));
+  wrong.headers.set('x-juiced-installation', 'different');
+  await assert.rejects(relay(wrong, '/commands/stop', context(platform)), {
+    code: 'installation_changed',
+  });
+  assert.equal(called, false);
+});
+test('bounded upload rejects incremental oversize without buffering an unbounded body', async () => {
+  const input = new ReadableStream<Uint8Array>({
+    start(c) {
+      c.enqueue(new Uint8Array(8));
+      c.enqueue(new Uint8Array(8));
+      c.close();
+    },
+  });
+  const reader = boundedBody(input, 10)!.getReader();
+  assert.equal((await reader.read()).value!.length, 8);
+  await assert.rejects(reader.read(), { code: 'request_too_large' });
+});

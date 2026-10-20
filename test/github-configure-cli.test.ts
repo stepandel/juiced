@@ -47,7 +47,7 @@ test('built github-configure CLI uses the app API without a workspace, Claude lo
     process.on('exit', () => process.stdout.write(JSON.stringify(calls) + '\\n'));
     await import('./cli.mjs');
   `);
-  const env = { PATH: '', HOME: root, CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-app-token',
+  const env = { JUICED_MODE:'self-managed', PATH: '', HOME: root, CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-app-token',
     CANTELOP_EDGE_URL: 'https://fixture.invalid', JUICED_WORKSPACE: 'ignored-project', TEST_EXPECTED_TOKEN: 'fixture-token' };
   const configuredCalls = ['github-verify', 'app.environment.set', 'app.environment.status'];
   const savedDirectory = join(root, '.cantelop', 'juiced');

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { SessionEventCursor, SessionRef, WorkspaceRef } from '@cantelop/sdk';
 import { readRemoteConfiguration } from './git-remotes.js';
-import { ancestor, cleanRepository, createUpload, fileInfo, git, gitText, type Repository } from './git.js';
+import { ancestor, cleanRepository, createUpload, fileInfo, git, gitText, sha256, type Repository } from './git.js';
 import { MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, validTransferId, validateExportManifest, type GitCommand, type GitResult, type GitStatus, type ExportManifest, type FileInfo } from './git-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
 import type { selectProject } from './project.js';
@@ -15,7 +15,7 @@ type Project = Awaited<ReturnType<typeof selectProject>>;
 type Action = GitCommand extends infer C ? C extends GitCommand ? Omit<C, 'type' | 'directoryName' | 'binding'> : never : never;
 
 /** Retire only this attachment's observed checkout registrations after stopping. */
-export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<TerminalCommand>, 'database'>, project: Pick<Project, 'directoryName'>, id?: string): Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'view' | 'stop'> {
+export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<TerminalCommand>, 'database'>, project: Pick<Project, 'directoryName'>, id?: string,managedStop?:(session:string)=>Promise<void>): Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'view' | 'stop'> {
   const session = workspace.session({ keepAliveSeconds: 120, ...(id ? { id } : {}) });
   let stopping: Promise<void> | undefined;
   const open = () => { if (stopping) throw new Error('This Git session has stopped. Start a new session.'); };
@@ -27,6 +27,7 @@ export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<Ter
     view(options) { return session.view(options); },
     stop() {
       return stopping ??= (async () => {
+        if(managedStop){await managedStop(session.id);return;}
         const snapshot = (async () => {
           const db = await workspace.database();
           const rows = await db.execute({ sql: 'SELECT token FROM juiced_checkout_leases WHERE project = ? AND session = ?', args: [project.directoryName, session.id] });
@@ -48,6 +49,7 @@ function retryable(error: unknown) {
 
 export class GitWorkspaceClient {
   private session;
+  private get namespace() {return this.project.scope?`${sha256(this.project.scope).slice(0,24)}/${this.project.workspace}`:this.project.workspace;}
   constructor(private workspace: GitWorkspace, private project: Project, private repository: Repository, private signal: AbortSignal) {
     this.session = workspace.session({ keepAliveSeconds: 120 });
   }
@@ -174,7 +176,7 @@ export class GitWorkspaceClient {
       const prefix = `refs/juiced/exports/${id}`;
       const refs = (await gitText(this.repository.root, ['bundle', 'list-heads', bundle])).split('\n');
       if (!refs.includes(`${manifest.head} ${prefix}/head`)) throw new Error('The imported bundle does not match its declared HEAD');
-      const archive = `refs/juiced/imports/${this.project.workspace}/${id}`;
+      const archive = `refs/juiced/imports/${this.namespace}/${id}`;
       // Keep an immutable import ref even when remote branches have been rewritten.
       const extra = manifest.snapshot ? [`${prefix}/baseline:${archive}/baseline`, `${prefix}/snapshot:${archive}/snapshot`] : [];
       await git(this.repository.root, ['fetch', '--atomic', '--no-tags', bundle, `${prefix}/head:${archive}/head`, `${prefix}/branches/*:${archive}/branches/*`, ...extra], { signal: this.signal });
@@ -191,11 +193,11 @@ export class GitWorkspaceClient {
         if (patch.length) await verify(['apply', '--cached', '--binary', '--whitespace=nowarn', '-'], patch);
         if ((await verify(['write-tree'])).toString().trim() !== manifest.snapshot.tree) throw new Error('The snapshot patch does not match the imported trees');
       }
-      const ref = `refs/remotes/juiced/${this.project.workspace}/HEAD`;
+      const ref = `refs/remotes/juiced/${this.namespace}/HEAD`;
       const updates = [`update ${ref} ${manifest.head}`];
       for (const line of refs) {
         const [oid, name] = line.split(' ');
-        if (name?.startsWith(`${prefix}/branches/`) && validOid(oid)) updates.push(`update refs/remotes/juiced/${this.project.workspace}/${name.slice(`${prefix}/branches/`.length)} ${oid}`);
+        if (name?.startsWith(`${prefix}/branches/`) && validOid(oid)) updates.push(`update refs/remotes/juiced/${this.namespace}/${name.slice(`${prefix}/branches/`.length)} ${oid}`);
       }
       await git(this.repository.root, ['update-ref', '--stdin'], { input: updates.join('\n') + '\n', signal: this.signal });
       if (!prepared) await this.call({ action: 'cleanup', id });

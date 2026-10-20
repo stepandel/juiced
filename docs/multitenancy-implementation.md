@@ -1,7 +1,9 @@
 # Managed multitenancy implementation plan
 
-Status: implementation plan, 2026-10-20. No managed-service implementation is
-included in this document. Architectural context is in [the proposal](multitenancy.md).
+Status: implemented across the Juiced, Cantelop and SDK feature branches,
+2026-10-20. Deployment and paid-launch qualification remain gated on external
+configuration and real-host evidence. See [operations and remaining gates](managed-service.md).
+Architectural context is in [the proposal](multitenancy.md).
 
 ## Product decisions and scope
 
@@ -530,7 +532,8 @@ workers first, revokes devices/tickets, stops/purges Workspaces and databases,
 then archives and reconciles the App; track backups and audit/financial retention
 separately. Define exact retention durations before accepting paying users.
 
-The next executable work is P00/P01. It produces the compatible baseline, the
-reviewable API/schema contracts and evidence for the three costly assumptions:
-reusable package installation, revocable managed transport, and enforceable
-runtime/storage caps. That evidence gates the remaining implementation units.
+The feature branches implement the service, CLI, package installation and funded
+host enforcement. The remaining work is deployment configuration and qualification
+against real providers and a dedicated Linux/KVM host. Follow
+[the operations guide](managed-service.md) before enabling admission or charging
+customers; local fixtures do not establish those production properties.

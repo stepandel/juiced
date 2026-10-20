@@ -1,0 +1,48 @@
+name: Juiced checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: juiced_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      JUICED_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/juiced_test
+      JUICED_CREDENTIAL_STORE: file
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      # Until SDK 1.5.0 is published, qualify the immutable SDK PR source.
+      # Replace this bootstrap with npm ci after recording registry integrity.
+      - uses: actions/checkout@v6
+        with:
+          repository: stepandel/cantelop-sdk
+          ref: e8e94d9e88681dbf28dbf7a3c017870b73bb2722
+          path: .ci-sdk
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: .ci-sdk/native/go.mod
+      - run: corepack enable
+      - name: Build the pinned SDK dependency
+        working-directory: .ci-sdk
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          npm run prepare
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
+      - run: npm install --ignore-scripts --no-save --package-lock=false "$RUNNER_TEMP/cantelop-sdk-1.5.0.tgz"
+      - run: npm run check
+      - run: npm run check:service
+      - run: npm test
+      - run: npm run test:service
+      - name: Fresh public package installation
+        run: CANTELOP_SDK_TARBALL="$RUNNER_TEMP/cantelop-sdk-1.5.0.tgz" npm run check:package

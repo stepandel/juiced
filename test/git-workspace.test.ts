@@ -348,3 +348,9 @@ test('credentialed remote URLs fail before transfer without disclosing the token
   await assert.rejects(client.send(false, true), error => error instanceof Error && !error.message.includes('fixture-private-token') && /credentials/.test(error.message));
   assert.equal(f.commands.some(command => command.action === 'begin'), false);
 });
+
+test('managed Git stop uses the typed service operation and never requests database credentials',async()=>{
+ let stops=0;
+ const session=createGitSession({session(){return {id:'ses_'+'a'.repeat(32)} as ReturnType<Parameters<typeof createGitSession>[0]['session']>;},async database(){throw new Error('Managed CLI must not receive a database token');}}, {directoryName:'project'},undefined,async()=>{stops++;});
+ await Promise.all([session.stop(),session.stop()]);assert.equal(stops,1);assert.throws(()=>session.request({type:'heartbeat'}),/has stopped/);
+});
