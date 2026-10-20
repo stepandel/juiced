@@ -248,6 +248,58 @@ test('permission UI preselects Yes, ignores early and pasted keys, offers rememb
   assert.equal(stdin.isRaw, false);
 });
 
+test('questions ignore early selections and approval feedback remains interruptible', { timeout: 5000 }, async () => {
+  class PermissionAgent extends RemoteAgent {
+    answers: { allow: boolean; answers?: Record<string, string> }[] = [];
+    interrupts = 0;
+    override async start() { this.status = 'working'; this.emit('status', this.status); }
+    override async answer(id: string, allow: boolean, answers?: Record<string, string>) {
+      this.answers.push({ allow, ...(answers ? { answers } : {}) }); this.approvals.delete(id); this.emit('approvals');
+    }
+    override async interrupt() { this.interrupts++; }
+    override async close() { this.status = 'closed'; this.emit('status', this.status); }
+  }
+  const agent = new PermissionAgent({} as AgentSession);
+  const stdin = new PassThrough() as PassThrough & TerminalInput & { ref(): void; unref(): void };
+  stdin.isTTY = true; stdin.isRaw = false;
+  stdin.setRawMode = raw => { stdin.isRaw = raw; };
+  stdin.ref = () => {}; stdin.unref = () => {};
+  let latest = '';
+  const stdout = new Writable({ write(chunk, _, done) {
+    const text = stripVTControlCharacters(chunk.toString());
+    if (text.includes('──')) latest = text;
+    done();
+  } }) as TerminalOutput;
+  stdout.isTTY = true; stdout.columns = 100; stdout.rows = 30;
+  const lifetime = new AbortController();
+  const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
+  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error(`UI did not update: ${latest}`); await delay(5); } };
+  try {
+    await wait(() => agent.status === 'working');
+    agent.approvals.set('question', { id: 'question', tool: 'AskUserQuestion', input: { questions: [{ question: 'Choose a target', options: [{ label: 'Staging' }, { label: 'Production' }] }] }, description: '' });
+    agent.emit('approvals');
+    await wait(() => latest.includes('Choose a target'));
+    await delay(40);
+    stdin.write('\r'); stdin.write('2'); stdin.write('\x1b[200~1\x1b[201~');
+    await delay(40);
+    assert.deepEqual(agent.answers, [], 'Prompt keys arriving with a question must not select an answer');
+    stdin.write('\x03'); await wait(() => agent.interrupts === 1);
+    await delay(320);
+    stdin.write('\r'); await wait(() => agent.answers.length === 1);
+    assert.deepEqual(agent.answers, [{ allow: true, answers: { 'Choose a target': 'Staging' } }]);
+
+    agent.approvals.set('command', { id: 'command', tool: 'Bash', input: { command: 'pwd' }, description: '' });
+    agent.emit('approvals');
+    await wait(() => latest.includes('Bash command'));
+    await delay(40); stdin.write('\t');
+    await wait(() => latest.includes('Tell Claude what to do differently'));
+    await delay(40); stdin.write('Keep this draft'); await delay(40); stdin.write('\x03');
+    await wait(() => agent.interrupts === 2);
+    assert.equal(agent.answers.length, 1, 'Interrupting from feedback must not answer the approval');
+  } finally { lifetime.abort(); await running; }
+  assert.equal(stdin.isRaw, false);
+});
+
 test('long conversations and permission previews stay inside the terminal while switching options', { timeout: 5000 }, async () => {
   class PreviewAgent extends RemoteAgent {
     answers: boolean[] = [];
@@ -295,7 +347,7 @@ test('long conversations and permission previews stay inside the terminal while 
     agent.approvals.set('question', { id: 'question', tool: 'AskUserQuestion', input: { questions: [{ question: 'Which option?', options: Array.from({ length: 20 }, (_, i) => ({ label: `Option ${i + 1}`, description: 'A detailed option description that wraps onto multiple rows.' })) }] }, description: '' });
     agent.emit('approvals');
     await wait(() => frames.at(-1)?.text.includes('Which option?') ?? false);
-    await delay(40); stdin.write('2'); await delay(40); stdin.write('\r');
+    await delay(320); stdin.write('2'); await delay(40); stdin.write('\r');
     await wait(() => agent.answers.length === 2);
     assert.deepEqual(agent.questionAnswers, { 'Which option?': 'Option 2' });
 

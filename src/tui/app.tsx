@@ -191,6 +191,7 @@ function Choices({ items, index, rows }: { items: { label: string; description?:
 }
 
 function Question({ questions, rows, answer, cancel }: { questions: Record<string, unknown>[]; rows: number; answer(allow: boolean, answers?: Record<string, string>): void; cancel(): void }) {
+  const opened = useRef(Date.now());
   const [editor, setEditor] = useDraft();
   const state = useRef({ question: 0, index: 0, typing: false, checked: new Set<number>(), answers: {} as Record<string, string> });
   const [, refresh] = useReducer((value: number) => value + 1, 0);
@@ -222,6 +223,7 @@ function Question({ questions, rows, answer, cancel }: { questions: Record<strin
     if (current.typing) return;
     if (key.escape) { answer(false); return; }
     if (key.upArrow || key.downArrow || key.tab) { current.index = (current.index + (key.upArrow || key.shift ? -1 : 1) + items.length) % items.length; refresh(); }
+    else if (Date.now() - opened.current < settle) return;
     else if (key.return || input === ' ' && multiple) pick(current.index);
     else if (/^[1-9]$/u.test(input) && Number(input) <= items.length) { current.index = Number(input) - 1; pick(current.index); }
   });
@@ -276,9 +278,10 @@ function Permission({ approval, rows, answer, cancel }: { approval: Approval; ro
   // Pasting text must never act as an Allow shortcut.
   usePaste(() => {}, { isActive: !asking && !amending });
   useInput((input, key) => {
-    if (asking || amending) return;
-    if (key.escape) { answer(false); return; }
+    if (asking) return;
     if (key.ctrl && input === 'c') { cancel(); return; }
+    if (amending) return;
+    if (key.escape) { answer(false); return; }
     if (key.upArrow || key.leftArrow || key.shift && key.tab) select(index.current - 1);
     else if (key.downArrow || key.rightArrow) select(index.current + 1);
     else if (key.tab && !approval.local) { select(no); setAmending(true); }

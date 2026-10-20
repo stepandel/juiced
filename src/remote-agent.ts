@@ -50,6 +50,7 @@ export class RemoteAgent extends EventEmitter {
   private sleeping = false;
   private remoteState = 'ready';
   private nativeInitialization: ClaudeFrame | undefined;
+  private sessionPermissionMode: { mode: string; epoch: string } | undefined;
   private submitting = false;
   private initializing = false;
   private startCommand?: Extract<TerminalCommand, { type: 'start' }>;
@@ -221,6 +222,14 @@ export class RemoteAgent extends EventEmitter {
       if (this.epoch !== reply.agent.epoch) this.nativeInitialization = undefined;
       this.epoch = reply.agent.epoch; this.sleeping = false;
       if (!this.nativeInitialization) this.initialize(reply.agent.initialized ?? await this.control({ subtype: 'initialize', hooks: null }));
+      // Idle restarts use the launch defaults. Restore the acknowledged session
+      // choice before any input, retaining it for another attempt if refused.
+      const permission = this.sessionPermissionMode;
+      if (permission && permission.epoch !== this.epoch) {
+        await this.control({ subtype: 'set_permission_mode', mode: permission.mode });
+        this.sessionPermissionMode = { mode: permission.mode, epoch: this.epoch };
+        this.info.current_permission_mode = permission.mode;
+      }
     })().finally(() => { this.reopening = undefined; });
   }
 
@@ -288,6 +297,7 @@ export class RemoteAgent extends EventEmitter {
       await this.ensureProcess(true);
       const response = await this.control(request);
       if (request.subtype === 'set_permission_mode') {
+        this.sessionPermissionMode = { mode: request.mode, epoch: this.epoch };
         this.info.current_permission_mode = request.mode;
         if (options.persist !== false) await this.persist({ permissionMode: request.mode });
       }
@@ -420,7 +430,10 @@ export class RemoteAgent extends EventEmitter {
       }
     }
     // Claude reports its own mode changes, such as leaving plan mode, in status frames.
-    if (frame.type === 'system' && frame.subtype === 'status' && typeof frame.permissionMode === 'string') this.info.current_permission_mode = frame.permissionMode;
+    if (frame.type === 'system' && frame.subtype === 'status' && typeof frame.permissionMode === 'string') {
+      this.info.current_permission_mode = frame.permissionMode;
+      if (this.sessionPermissionMode?.epoch === this.epoch) this.sessionPermissionMode.mode = frame.permissionMode;
+    }
     if (frame.type === 'system' && typeof frame.task_id === 'string') {
       if (frame.subtype === 'task_started') this.tasks.set(frame.task_id, { ...frame, status: 'running' });
       else if (frame.subtype === 'task_notification') this.tasks.set(frame.task_id, { ...this.tasks.get(frame.task_id), ...frame });

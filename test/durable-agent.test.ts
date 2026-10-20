@@ -26,7 +26,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   const root = await mkdtemp('/tmp/juiced-durable-');
   const lifetime = new AbortController(), events = new EventEmitter();
   const stored: SessionEvent<TerminalEvent>[] = [];
-  const prompts: string[] = [], launches: string[][] = [], requests: TerminalCommand[] = [], replays: Extract<TerminalCommand, { type: 'agent-replay' }>[] = [];
+  const prompts: string[] = [], promptModes: string[] = [], launches: string[][] = [], requests: TerminalCommand[] = [], replays: Extract<TerminalCommand, { type: 'agent-replay' }>[] = [];
   const replayWork: Promise<void>[] = [];
   const requestIds: Array<{ command: TerminalCommand; id: string | undefined }> = [];
   let currentOutput: { send(event: TerminalEvent): Promise<void> };
@@ -34,6 +34,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   let viewCursor: SessionEventCursor | undefined;
   let viewState: unknown;
   let activityTimeout = 0;
+  let rejectedPermissionMode: string | undefined;
   let replayHook: ((event: Extract<TerminalEvent, { type: 'agent-replay' }>) => Promise<void>) | undefined;
   let outputHook: ((event: Extract<TerminalEvent, { type: 'agent-output' }>) => Promise<void>) | undefined;
   let viewHook: (() => Promise<void>) | undefined;
@@ -50,10 +51,15 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   const context = { signal: lifetime.signal, session: { id: sessionId, keepAliveSeconds: 120 }, env: {}, database: async () => { throw new Error('unused'); } } as SessionHarnessContext;
   const factory = () => {
     let decoder = new ClaudeDecoder(), finish!: () => void;
+    let permissionMode = 'default';
     const done = new Promise<void>(resolve => { finish = resolve; });
     return {
       async run(command: Extract<TerminalCommand, { type: 'start' }>, work: { output: typeof output; signal: AbortSignal }) {
         launches.push(command.argv); currentOutput = work.output;
+        const modeIndex = command.argv.indexOf('--permission-mode');
+        permissionMode = command.argv.includes('--dangerously-skip-permissions') ? 'bypassPermissions'
+          : modeIndex >= 0 ? command.argv[modeIndex + 1]!
+          : command.argv.find(arg => arg.startsWith('--permission-mode='))?.split('=')[1] ?? 'default';
         await work.output.send({ type: 'ready' });
         const abort = () => finish();
         work.signal.addEventListener('abort', abort, { once: true });
@@ -73,10 +79,19 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
           if (value.type === 'control_request') {
             const subtype = object(value.request).subtype;
             if (subtype === 'initialize') initializations++;
+            if (subtype === 'set_permission_mode') {
+              const mode = String(object(value.request).mode);
+              if (mode === rejectedPermissionMode) {
+                await frame({ type: 'control_response', response: { subtype: 'error', request_id: value.request_id, error: 'Permission mode unavailable' } });
+                continue;
+              }
+              permissionMode = mode;
+            }
             await frame({ type: 'control_response', response: { subtype: 'success', request_id: value.request_id,
-              response: subtype === 'initialize' ? { commands: [{ name: 'compact' }], models: [{ value: 'sonnet' }] } : {} } });
+              response: subtype === 'initialize' ? { current_permission_mode: permissionMode, commands: [{ name: 'compact' }], models: [{ value: 'sonnet' }] } : {} } });
           } else if (value.type === 'user') {
             prompts.push(String(object(value.message).content));
+            promptModes.push(permissionMode);
             const argv = launches.at(-1)!;
             const id = argv.at(-1)!;
             await mkdir(join(root, '.claude', 'projects', 'test'), { recursive: true });
@@ -146,7 +161,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   const received: ClaudeFrame[] = [];
   agent.on('frame', value => received.push(value));
   t.after(async () => { await agent.close(false); lifetime.abort(); await activity; await Promise.allSettled(replayWork); await service.dispose(); await rm(root, { recursive: true, force: true }); });
-  return { root, agent, session, service, frame, raw, prompts, launches, requests, requestIds, replays, stored, received, views,
+  return { root, agent, session, service, frame, raw, prompts, promptModes, launches, requests, requestIds, replays, stored, received, views,
     async publish(publication: Publication, active = true) { if (active) publications.set(publication.id, undefined); await currentOutput.send({ type: 'local-publish', publication }); },
     onReplay(hook: typeof replayHook) { replayHook = hook; },
     onOutput(hook: typeof outputHook) { outputHook = hook; },
@@ -156,6 +171,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
     pauseStream(value: boolean) { streamPaused = value; events.emit('event'); },
     loseReply() { loseReply = true; },
     expireStream() { expired = true; events.emit('event'); },
+    rejectPermissionMode(mode?: string) { rejectedPermissionMode = mode; },
   };
 }
 
@@ -455,6 +471,47 @@ test('idle processes exit and the next prompt resumes the native conversation', 
   assert.equal(f.launches[0]?.at(-1), f.launches[1]?.at(-1));
   assert.ok(f.launches[1]?.includes('--resume'));
   assert.deepEqual(f.prompts, ['First', 'Second']);
+});
+
+test('session-only permission choices apply before prompts after idle native restarts', async t => {
+  for (const argv of [['--permission-mode', 'acceptEdits'], ['--dangerously-skip-permissions']]) {
+    await t.test(argv.join(' '), async t => {
+      const f = await fixture(t, 150); await f.agent.start(argv);
+      await f.agent.configure({ subtype: 'set_permission_mode', mode: 'plan' }, { persist: false });
+      await f.agent.submit('First');
+      await f.frame({ type: 'result', result: 'Saved' });
+      await until(() => !f.service.active);
+      await f.agent.submit('Second');
+      assert.equal(f.launches.length, 2);
+      assert.deepEqual(f.promptModes, ['plan', 'plan']);
+      assert.equal(f.agent.info.current_permission_mode, 'plan');
+      assert.equal(f.requests.some(command => command.type === 'save-settings'), false);
+
+      await f.frame({ type: 'system', subtype: 'status', permissionMode: 'default' });
+      await until(() => f.agent.info.current_permission_mode === 'default');
+      await f.frame({ type: 'result', result: 'Left plan mode' });
+      await until(() => !f.service.active);
+      await f.agent.submit('After leaving plan mode');
+      assert.equal(f.launches.length, 3);
+      assert.equal(f.promptModes.at(-1), 'default', 'Claude mode changes must replace the session override');
+    });
+  }
+});
+
+test('a rejected permission restoration blocks the prompt and retries before later input', async t => {
+  const f = await fixture(t, 150); await f.agent.start(['--permission-mode=acceptEdits']);
+  await f.agent.configure({ subtype: 'set_permission_mode', mode: 'plan' }, { persist: false });
+  await f.agent.submit('First');
+  await f.frame({ type: 'result', result: 'Saved' });
+  await until(() => !f.service.active);
+  f.rejectPermissionMode('plan');
+  await assert.rejects(f.agent.submit('Wait for plan mode'), /Permission mode unavailable/);
+  assert.deepEqual(f.prompts, ['First'], 'A failed restoration must never deliver the queued prompt');
+  assert.equal(f.agent.status, 'ready');
+  f.rejectPermissionMode();
+  await f.agent.submit('Retry in plan mode');
+  assert.deepEqual(f.prompts, ['First', 'Retry in plan mode']);
+  assert.deepEqual(f.promptModes, ['plan', 'plan']);
 });
 
 test('warm settings menus stay local and live data reads omit the process preflight', async t => {
