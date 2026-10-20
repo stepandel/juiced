@@ -6,41 +6,6 @@ import { stripVTControlCharacters } from 'node:util';
 import { RemoteAgent, type AgentSession } from '../src/remote-agent.js';
 import { runLocalTui } from '../src/tui/app.js';
 import type { TerminalInput, TerminalOutput } from '../src/remote-terminal.js';
-import { emptyConversation, receiveFrame } from '../src/tui/conversation.js';
-
-test('the TUI renders a compact view snapshot once and preserves the draft while output continues', { timeout: 5000 }, async () => {
-  let snapshot = receiveFrame(emptyConversation(), { type: 'result', result: 'LATEST_COMPLETED_ANSWER' });
-  snapshot = receiveFrame(snapshot, { type: 'juiced_user', text: 'CURRENT_PROMPT' });
-  snapshot = receiveFrame(snapshot, { type: 'stream_event', event: { type: 'message_start', message: { id: 'current' } } });
-  snapshot = receiveFrame(snapshot, { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'RESTORED_PROGRESS' } } });
-  class SnapshotAgent extends RemoteAgent {
-    override async start() { this.emit('snapshot', snapshot); this.status = 'working'; this.emit('status', this.status); }
-    override async close() { this.status = 'closed'; this.emit('status', this.status); }
-  }
-  const agent = new SnapshotAgent({ id: 'snapshot-session' } as AgentSession);
-  const stdin = new PassThrough() as PassThrough & TerminalInput & { ref(): void; unref(): void };
-  stdin.isTTY = true; stdin.isRaw = false; stdin.setRawMode = raw => { stdin.isRaw = raw; };
-  stdin.ref = () => {}; stdin.unref = () => {};
-  const writes: string[] = [];
-  const stdout = new Writable({ write(chunk, _, done) { writes.push(stripVTControlCharacters(chunk.toString())); done(); } }) as TerminalOutput;
-  stdout.isTTY = true; stdout.columns = 80; stdout.rows = 24;
-  const lifetime = new AbortController();
-  const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
-  const wait = async (check: () => boolean) => { for (let i = 0; !check(); i++) { if (i > 200) throw new Error('Snapshot UI did not update'); await delay(5); } };
-  try {
-    await wait(() => writes.join('').includes('RESTORED_PROGRESS'));
-    assert.ok(writes.join('').includes('LATEST_COMPLETED_ANSWER'));
-    assert.ok(writes.join('').includes('CURRENT_PROMPT'));
-    stdin.write('LOCAL_DRAFT');
-    await wait(() => writes.join('').includes('LOCAL_DRAFT'));
-    const offset = writes.length;
-    agent.emit('snapshot', snapshot);
-    agent.emit('frame', { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: ' PLUS_LIVE_OUTPUT' } } });
-    await wait(() => writes.slice(offset).join('').includes('PLUS_LIVE_OUTPUT'));
-    assert.ok(writes.slice(offset).join('').includes('LOCAL_DRAFT'));
-    assert.equal(writes.slice(offset).join('').includes('LATEST_COMPLETED_ANSWER'), false);
-  } finally { lifetime.abort(); await running; }
-});
 
 test('reattaching prints saved turns and the entire unfinished turn into scrollback', { timeout: 5000 }, async () => {
   class ReattachedAgent extends RemoteAgent {

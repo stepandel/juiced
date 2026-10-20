@@ -51,7 +51,6 @@ test('durable agent routes run through the real SDK activity and native JSON pro
     const id = `msg_${randomUUID().replaceAll('-', '')}`;
     await request('/__cantelop/v2/messages', { session: { id: 'durable-test', workspace_id: `wsp_${'2'.repeat(32)}`, keep_alive_seconds: 120 }, message: { id, payload }, reply: true });
     for (let attempt = 0; attempt < 400; attempt++) {
-      if (payload.type === 'start') await drain(() => true);
       const status = await request(`/__cantelop/v2/messages/${id}`);
       if (status.state === 'succeeded') return (await request(`/__cantelop/v2/messages/${id}/reply`)).reply;
       assert.notEqual(status.state, 'failed'); await delay(5);

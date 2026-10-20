@@ -35,16 +35,6 @@ export function restoreHistory(state: Conversation): Conversation {
   return { ...state, history: [...state.history, { id: state.history.length, entries }], printed: state.live };
 }
 
-/** Keep terminal scrollback stable when replacing the current display from a view. */
-export function receiveSnapshot(state: Conversation, snapshot: Conversation): Conversation {
-  const history = [...state.history];
-  for (const turn of snapshot.history) {
-    const entries = JSON.stringify(turn.entries);
-    if (snapshot.turn > state.turn || !history.some(previous => JSON.stringify(previous.entries) === entries)) history.push({ id: history.length, entries: turn.entries });
-  }
-  return { ...snapshot, history, printed: snapshot.turn === state.turn ? state.printed : [] };
-}
-
 /** Partial events and final assistant snapshots describe the same blocks. */
 export function receiveFrame(state: Conversation, frame: ClaudeFrame): Conversation {
   if (frame.type === 'juiced_user' && typeof frame.text === 'string') {

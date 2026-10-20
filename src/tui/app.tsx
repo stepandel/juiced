@@ -4,7 +4,7 @@ import { object, type Approval, type ClaudeFrame, type SlashCommand } from '../a
 import { RemoteAgent, type AgentStatus } from '../remote-agent.js';
 import type { TerminalIO } from '../remote-terminal.js';
 import { cursorParts, edit, type Editor } from './editor.js';
-import { emptyConversation, liveEntries, plain, receiveFrame, receiveSnapshot, restoreHistory, userTurn, type Conversation, type Entry } from './conversation.js';
+import { emptyConversation, liveEntries, plain, receiveFrame, restoreHistory, userTurn, type Entry } from './conversation.js';
 import { availableCommands, matchingCommands } from './commands.js';
 import { CommandMenu, type MenuPage } from './menu.js';
 import { commandMenu, menuCommand } from './command-menus.js';
@@ -143,17 +143,17 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
   const exit = () => { if (!closing) { setClosing(true); quit(0); } };
   useEffect(() => {
     const frame = (value: ClaudeFrame) => setConversation(previous => receiveFrame(previous, value));
-    const snapshot = (value: Conversation) => setConversation(previous => receiveSnapshot(previous, value));
     const state = (value: AgentStatus) => { setStatus(value); if (value === 'ready') setNotice(''); };
     const permission = () => setApprovals([...agent.approvals.values()]);
     const failure = (error: Error) => { setClosing(true); setNotice(plain(error.message)); quit(1, false); };
     const reconnect = () => setNotice('Reconnecting to the output stream… Your draft is kept locally.');
     const reconnected = () => setNotice('');
     const model = (value: string) => setConversation(previous => ({ ...previous, model: plain(value) }));
-    agent.on('frame', frame).on('snapshot', snapshot).on('status', state).on('approvals', permission).on('commands', setCommands).on('model', model).on('failure', failure).on('reconnecting', reconnect).on('reconnected', reconnected);
-    // Print the restored current display once; new output continues below it.
+    agent.on('frame', frame).on('status', state).on('approvals', permission).on('commands', setCommands).on('model', model).on('failure', failure).on('reconnecting', reconnect).on('reconnected', reconnected);
+    // start waits for journal replay. Print its unfinished turn as well as
+    // completed turns, so saved output is available in terminal scrollback.
     void agent.start(argv).then(() => setConversation(restoreHistory)).catch(() => {});
-    return () => { agent.off('frame', frame).off('snapshot', snapshot).off('status', state).off('approvals', permission).off('commands', setCommands).off('model', model).off('failure', failure).off('reconnecting', reconnect).off('reconnected', reconnected); };
+    return () => { agent.off('frame', frame).off('status', state).off('approvals', permission).off('commands', setCommands).off('model', model).off('failure', failure).off('reconnecting', reconnect).off('reconnected', reconnected); };
   }, [agent]);
   const cancel = () => { if (['working', 'interrupting'].includes(agent.status)) action(agent.interrupt()); };
   useInput((input, key) => {

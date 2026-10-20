@@ -1,19 +1,7 @@
 import type { GitCommand, GitEvent, GitResult, StaleLease } from './git-protocol.js';
 import type { InspectionCommand, InspectionEvent } from './inspection-protocol.js';
 import type { SavedSettings } from './settings.js';
-import type { Approval, ClaudeFrame } from './agent-protocol.js';
-import type { Conversation } from './tui/conversation.js';
-
-export type AgentSnapshot = {
-  version: 1;
-  sequence: number;
-  epoch: string;
-  state: 'ready' | 'working' | 'sleeping' | 'interrupted';
-  conversation: Conversation;
-  approvals: Approval[];
-  info: ClaudeFrame;
-  tasks: ClaudeFrame[];
-};
+import type { ClaudeFrame } from './agent-protocol.js';
 
 export type AgentJournalEvent =
   | { type: 'bytes'; channel: 'stdout' | 'stderr'; data: string }
