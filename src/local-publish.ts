@@ -52,6 +52,18 @@ export class LocalPublisher {
     if (!repository || repository.root !== this.original.root || repository.binding !== this.original.binding || await realpath(repository.root) !== repository.root)
       throw new Error('The local repository binding changed. Reconnect Juiced.');
     const release = await checkoutLock(repository.root);
+    let result: PublishResult;
+    try { result = await this.applyLocked(publication, signal, repository); }
+    catch (error) { await release().catch(() => {}); throw error; }
+    // Local files may already be changed; a lock failure must not be reported as a conflict.
+    try { await release(); }
+    catch (error) {
+      return { ...result, message: `${result.message} The local publication lock could not be released (${error instanceof Error ? error.message : String(error)}); if later publications report a busy repository, delete refs/juiced/local-publish-lock.` };
+    }
+    return result;
+  }
+
+  private async applyLocked(publication: Publication, signal: AbortSignal, repository: Repository): Promise<PublishResult> {
     let client: GitWorkspaceClient | undefined;
     try {
       const root = await gitText(repository.root, ['rev-parse', '--path-format=absolute', '--git-path', 'juiced-publications']);
@@ -119,9 +131,6 @@ export class LocalPublisher {
       // is preserved, and an ordinary patch rejection does not apply a subset.
       await git(repository.root, ['apply', '--binary', '--whitespace=nowarn', '-'], { input: imported.patch!, signal });
       return complete('applied', `Applied ${paths.length} snapshot path${paths.length === 1 ? '' : 's'} as local uncommitted edits; the index was preserved.`);
-    } finally {
-      await client?.close().catch(() => {});
-      await release();
-    }
+    } finally { await client?.close().catch(() => {}); }
   }
 }
