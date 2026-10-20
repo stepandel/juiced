@@ -23,7 +23,7 @@ export class AgentJournal {
   state: 'ready' | 'working' | 'sleeping' | 'interrupted' = 'sleeping';
   readonly inputs = new Map<string, Extract<Record, { kind: 'input' }>>();
 
-  constructor(private workspace: string, private session: string) {}
+  constructor(private workspace: string, private session: string, private onEvent?: (entry: AgentJournalEntry) => void) {}
   get latest() { return this.positions.length; }
 
   open(): Promise<void> {
@@ -62,6 +62,7 @@ export class AgentJournal {
       this.positions.push({ offset, bytes });
       if (record.entry.event.type === 'state') this.state = record.entry.event.state;
       if (record.entry.event.type === 'reset') this.state = 'ready';
+      this.onEvent?.(record.entry);
     } else throw new Error('Invalid agent journal record');
   }
 

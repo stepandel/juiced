@@ -5,6 +5,8 @@ import type { SessionEvent, SessionEventCursor, SessionRef } from '@cantelop/sdk
 import { MAX_BUFFERED_INPUT, MAX_INPUT_BYTES, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, type Approval, type ClaudeFrame, type ModelOption, type SlashCommand } from './agent-protocol.js';
 import type { SavedSettings } from './settings.js';
+import { readAgentSnapshot } from './agent-snapshot.js';
+import { observeAgentMetadata } from './agent-metadata.js';
 
 export type AgentSession = Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'> & Partial<Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'view'>>;
 export type AgentStatus = 'connecting' | 'ready' | 'working' | 'configuring' | 'interrupting' | 'closed' | 'failed';
@@ -357,19 +359,8 @@ export class RemoteAgent extends EventEmitter {
     if (frame.type === 'system' && frame.subtype === 'init') {
       this.invalidateSettings();
       this.updateCommands(frame.slash_commands);
-      if (Array.isArray(frame.plugins)) this.info.plugins = frame.plugins;
-      if (typeof frame.permissionMode === 'string') this.info.current_permission_mode = frame.permissionMode;
     }
-    if (frame.type === 'system' && typeof frame.task_id === 'string') {
-      if (frame.subtype === 'task_started') this.tasks.set(frame.task_id, { ...frame, status: 'running' });
-      else if (frame.subtype === 'task_notification') this.tasks.set(frame.task_id, { ...this.tasks.get(frame.task_id), ...frame });
-      else if (frame.subtype === 'task_progress') this.tasks.set(frame.task_id, { status: 'running', ...this.tasks.get(frame.task_id), ...frame });
-      else if (frame.subtype === 'task_updated') this.tasks.set(frame.task_id, { ...this.tasks.get(frame.task_id), ...object(frame.patch), task_id: frame.task_id });
-    }
-    if (frame.type === 'system' && frame.subtype === 'background_tasks_changed' && Array.isArray(frame.tasks)) {
-      this.tasks.clear();
-      for (const raw of frame.tasks) { const task = object(raw); if (typeof task.task_id === 'string') this.tasks.set(task.task_id, { ...task, status: 'running' }); }
-    }
+    observeAgentMetadata(this.info, this.tasks, frame);
     if (frame.type === 'control_response') {
       const response = object(frame.response);
       const id = String(response.request_id);
@@ -444,6 +435,24 @@ export class RemoteAgent extends EventEmitter {
           if (['session_view_not_found', 'session_not_found', 'resource_not_found'].includes(String((error as { code?: string }).code))) return undefined;
           throw error;
         });
+        const snapshot = readAgentSnapshot(object(view?.state).snapshot);
+        // Pending control responses must still be consumed from the journal.
+        if (snapshot && !this.controls.size && !this.pendingBytes && this.status !== 'configuring' && snapshot.sequence >= this.sequence) {
+          const changed = snapshot.sequence > this.sequence;
+          this.sequence = snapshot.sequence;
+          this.decoder = new ClaudeDecoder(); this.userChunks.clear();
+          this.remoteState = snapshot.state;
+          this.sleeping = snapshot.state === 'sleeping' || !snapshot.epoch || snapshot.epoch !== this.epoch;
+          this.approvals.clear();
+          for (const approval of snapshot.approvals) this.approvals.set(approval.id, approval);
+          this.tasks.clear();
+          for (const task of snapshot.tasks) this.tasks.set(String(task.task_id), task);
+          if (this.initializing) Object.assign(this.info, snapshot.info);
+          this.emit('approvals');
+          if (changed) this.emit('snapshot', snapshot.conversation);
+          if (!this.initializing) this.setStatus(snapshot.state === 'working' ? 'working' : 'ready');
+          recover = false;
+        }
         // A read watchdog also recovers half-open connections after laptop sleep.
         // View and stream reads do not activate compute or extend a work lease.
         watchdog = AbortSignal.timeout(30_000);

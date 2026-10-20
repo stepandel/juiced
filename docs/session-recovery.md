@@ -10,10 +10,10 @@ to reconnect to that tab's session. The first launch starts a new session;
 one. Resumption recovers live work, saved output, and conversation context through
 the existing durable session protocol, including after an explicit `/exit` has
 stopped the remote process.
-Reattachment prints saved prompts, responses, and tool activity into terminal
-scrollback, including output from a turn that is still running. New output then
-continues below that history; restoring the display does not submit a prompt or
-answer a pending permission request.
+Reattachment renders a compact snapshot of the latest completed turn and current
+output, then continues with live events. Detailed older history is not downloaded
+or printed. Restoring the display does not submit a prompt or answer a pending
+permission request; native conversation context remains in the remote transcript.
 Supplying Claude arguments starts a fresh bound session so launch settings and
 initial prompts take effect; reattachment retains its saved launch configuration.
 
@@ -67,22 +67,31 @@ reply limit and read records by file offset rather than keeping transcripts in
 memory. Journals currently remain until workspace deletion.
 
 SSE notifications carry journal sequence numbers and may coalesce under output
-backpressure. The runtime commits a small Cantelop view with the published
-sequence. Reattachment subscribes at that boundary and dispatches one replay
-command. The runtime streams a fixed journal snapshot in bounded pages over the
-same subscription, pipelining up to twelve pages per durable handoff batch. This
-avoids a separate command round trip for every 48 KiB of history. Replay IDs
-isolate concurrent readers, and an explicit end marker confirms completeness.
-New output interleaved with recovery is reconciled by journal sequence; any
-remaining gap starts another snapshot from the last recovered entry. Interrupted
-transfers and expired/reset transport cursors resume there without repeating
-displayed frames. Replay advances the saved transport boundary between batches
-so large histories can exceed transport retention. Legacy paginated request
-replies remain available for diagnostics. A 30-second read watchdog reconnects
-half-open subscriptions after sleep. View/subscription
+backpressure. The runtime commits a Cantelop view containing a display snapshot,
+journal sequence, process state, pending permissions, and menu metadata. The
+snapshot retains at most one completed turn and twelve entries of current
+output, with text previews of at most 4,096 characters. It stays below 60 KiB by
+removing older display entries or shortening previews. Exact permission payloads
+are never truncated. Journal indexing rebuilds this projection after runtime
+replacement; existing journals require no migration.
+
+Reattachment reads that snapshot and subscribes at the view's event boundary,
+without replaying the old journal. Snapshots stop at complete JSON/UTF-8 and user
+message boundaries. New events continue the restored text/tool blocks using
+their existing identities. An expired transport cursor can restore a newer view.
+Pending control responses are recovered through the journal so a snapshot cannot
+skip an outstanding menu response.
+
+Older views, missing snapshots, unsupported native control requests, oversized
+permission/metadata payloads, and gaps after the snapshot use streamed journal
+recovery. One command streams a fixed
+journal range in bounded pages, pipelining up to twelve pages per handoff batch.
+Replay IDs isolate concurrent readers and an end marker confirms completeness.
+Legacy paginated replies remain available for diagnostics. A 30-second read
+watchdog reconnects half-open subscriptions after sleep. View/subscription
 reads do not keep compute alive; while a turn is working, a watchdog also checks
 the journal so sandbox loss can be reported.
-The streamed protocol requires rebuilding the CLI and deploying its matching
+The snapshot protocol requires rebuilding the CLI and deploying its matching
 runtime together; existing journals remain readable.
 
 ## Input and permissions
@@ -107,8 +116,11 @@ in the same TUI, but not a CLI restart.
 
 ## Verification
 
-`test/durable-agent.test.ts` exercises output beyond the transport replay window,
-streamed history, interrupted transfers, interleaved live output, duplicate and
+`test/agent-snapshot.test.ts` verifies view size bounds, exact permissions, frame
+boundaries, menu metadata, and projection rebuilding after runtime replacement.
+`test/durable-agent.test.ts` exercises attachment without history replay, live
+output racing with snapshot reads, pending control recovery, streamed fallback
+history, interrupted transfers, interleaved live output, duplicate and
 ambiguous input acknowledgments, expired cursors, reattachment with pending
 approvals, idle native resumption, partial append
 repair, and recovery of uncertain input after runtime replacement.

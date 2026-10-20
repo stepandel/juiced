@@ -16,13 +16,15 @@ import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/proto
 import { agentSessionId, prepareAgentSession } from '../src/session-state.js';
 import { parseArguments } from '../src/args.js';
 import { commandMenu } from '../src/tui/command-menus.js';
+import { readAgentSnapshot } from '../src/agent-snapshot.js';
+import { emptyConversation, receiveFrame, receiveSnapshot, type Conversation } from '../src/tui/conversation.js';
 
 async function until(check: () => boolean, ms = 10_000) {
   const end = Date.now() + ms;
   while (!check()) { if (Date.now() > end) throw new Error('Condition timed out'); await delay(5); }
 }
 
-async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 'test') {
+async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 'test', snapshots = true) {
   const root = await mkdtemp('/tmp/juiced-durable-');
   const lifetime = new AbortController(), events = new EventEmitter();
   const stored: SessionEvent<TerminalEvent>[] = [];
@@ -80,7 +82,11 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   };
   const service = createDurableAgent(context, factory, root, { idleTimeoutMs });
   let activity = Promise.resolve();
-  const view = { async commit(state: unknown) { viewState = state; viewCursor = stored.at(-1)?.cursor; } };
+  const view = { async commit(state: unknown) {
+    assert.ok(Buffer.byteLength(JSON.stringify(state)) < 64 * 1024, 'The real platform bounds view size');
+    viewState = JSON.parse(JSON.stringify(state));
+    viewCursor = stored.at(-1)?.cursor ?? { streamId: 'a'.repeat(32), sequence: 0 };
+  } };
   const intake = { ...context, output, view, activity: { queue(work: (context: unknown) => Promise<void>, options: { timeoutMs: number }) {
     activityTimeout = options.timeoutMs;
     activity = activity.then(() => work({ output, signal: lifetime.signal, view }));
@@ -112,7 +118,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
     async view() {
       network();
       if (!viewCursor) throw Object.assign(new Error('missing view'), { code: 'session_view_not_found', status: 404 });
-      return { revision: 'view', updatedAt: new Date(), state: viewState, cursor: viewCursor };
+      return { revision: 'view', updatedAt: new Date(), state: snapshots ? viewState : { agentSequence: object(viewState).agentSequence }, cursor: viewCursor };
     },
     async *stream(options) {
       network();
@@ -134,6 +140,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   t.after(async () => { await agent.close(false); lifetime.abort(); await activity; await Promise.allSettled(replayWork); await service.dispose(); await rm(root, { recursive: true, force: true }); });
   return { root, agent, session, service, frame, raw, prompts, launches, requests, requestIds, replays, stored, received,
     onReplay(hook: typeof replayHook) { replayHook = hook; },
+    get snapshot() { return readAgentSnapshot(object(viewState).snapshot); },
     get stops() { return stops; }, get initializations() { return initializations; }, get activityTimeout() { return activityTimeout; },
     offline(value: boolean) { clientOffline = value; events.emit('event'); },
     pauseStream(value: boolean) { streamPaused = value; events.emit('event'); },
@@ -143,7 +150,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
 }
 
 test('a disconnected client recovers large history with one streamed replay and deduplicates output', { timeout: 20_000 }, async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, 60_000, 'test', false);
   await f.agent.start(); await f.agent.submit('Keep working while the laptop sleeps');
   assert.equal(f.activityTimeout, 24 * 60 * 60 * 1000);
   f.offline(true);
@@ -162,7 +169,7 @@ test('a disconnected client recovers large history with one streamed replay and 
 });
 
 test('an interrupted streamed reattachment resumes after its last journal entry without repeating frames', { timeout: 20_000 }, async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, 60_000, 'test', false);
   await f.agent.start(); await f.agent.submit('Restore a large conversation'); await f.agent.close(false);
   for (let index = 0; index < 200; index++) await f.frame({ type: 'assistant', message: { id: `saved-${index}`, content: [{ type: 'text', text: `${index} ` + '🍈'.repeat(2000) }] } });
   await f.frame({ type: 'result', result: 'Recovered' });
@@ -190,7 +197,7 @@ test('an interrupted streamed reattachment resumes after its last journal entry 
 });
 
 test('live output interleaved with a fixed replay snapshot catches up through coalesced notifications', async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, 60_000, 'test', false);
   await f.agent.start(); await f.agent.submit('Continue during reconnect'); await f.agent.close(false);
   for (let index = 0; index < 20; index++) await f.frame({ type: 'assistant', message: { id: `saved-${index}`, content: [{ type: 'text', text: 'saved '.repeat(2000) }] } });
   let injected = false;
@@ -208,6 +215,71 @@ test('live output interleaved with a fixed replay snapshot catches up through co
   assert.equal(new Set(frames.filter(frame => frame.type === 'assistant').map(frame => object(frame.message).id)).size, 30);
   assert.equal(frames.filter(frame => frame.type === 'result').length, 1);
   assert.deepEqual(f.prompts, ['Continue during reconnect']);
+});
+
+test('a fresh attachment restores one recent display from a view without streaming old history', { timeout: 20_000 }, async t => {
+  const f = await fixture(t);
+  await f.agent.start(); await f.agent.submit('Keep the conversation'); await f.agent.close(false);
+  for (let index = 0; index < 80; index++) {
+    await f.frame({ type: 'assistant', message: { id: `saved-${index}`, content: [{ type: 'text', text: `ANSWER_${index}: ` + '🍈'.repeat(2000) }] } });
+    await f.frame({ type: 'result' });
+  }
+  await until(() => f.snapshot?.conversation.history.at(-1)?.entries.some(entry => entry.text.startsWith('ANSWER_79:')) ?? false);
+  const before = f.replays.length;
+  const next = new RemoteAgent({ ...f.session, async dispatch() { throw new Error('A view must avoid history replay'); } });
+  t.after(() => next.close(false));
+  const snapshots: Conversation[] = [], frames: ClaudeFrame[] = [];
+  next.on('snapshot', value => snapshots.push(value)).on('frame', frame => frames.push(frame));
+  await next.start();
+  assert.equal(next.status, 'ready');
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.history.length, 1);
+  assert.ok(JSON.stringify(snapshots).includes('ANSWER_79:'));
+  assert.equal(JSON.stringify(snapshots).includes('ANSWER_0:'), false);
+  assert.equal(frames.some(frame => frame.type === 'assistant' || frame.type === 'result'), false);
+  assert.equal(f.replays.length, before);
+  assert.equal(f.launches.length, 1);
+  assert.deepEqual(f.prompts, ['Keep the conversation']);
+});
+
+test('live deltas racing with snapshot attachment continue the same text block exactly once', async t => {
+  const f = await fixture(t);
+  await f.agent.start(); await f.agent.submit('Continue'); await f.agent.close(false);
+  await f.frame({ type: 'stream_event', event: { type: 'message_start', message: { id: 'current' } } });
+  await f.frame({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'Saved 🍈' } } });
+  await until(() => f.snapshot?.conversation.live.at(-1)?.text === 'Saved 🍈');
+  let raced = false;
+  const next = new RemoteAgent({ ...f.session, async view(options) {
+    const saved = await f.session.view!(options);
+    if (!raced) {
+      raced = true;
+      await f.frame({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: ' plus live' } } });
+    }
+    return saved;
+  } });
+  t.after(() => next.close(false));
+  let display = emptyConversation();
+  next.on('snapshot', value => { display = receiveSnapshot(display, value); });
+  next.on('frame', frame => { display = receiveFrame(display, frame); });
+  await next.start();
+  await until(() => display.live.at(-1)?.text === 'Saved 🍈 plus live');
+  await f.frame({ type: 'assistant', message: { id: 'current', content: [{ type: 'text', text: 'Saved 🍈 plus live' }] } });
+  await f.frame({ type: 'result' });
+  await until(() => display.history.length > 0);
+  assert.deepEqual(display.history.at(-1)?.entries.filter(entry => entry.kind === 'text').map(entry => entry.text), ['Saved 🍈 plus live']);
+  assert.deepEqual(f.prompts, ['Continue']);
+});
+
+test('recovery consumes an outstanding control response instead of skipping it with a snapshot', async t => {
+  const f = await fixture(t); await f.agent.start();
+  const before = f.replays.length;
+  f.pauseStream(true);
+  const query = f.agent.query({ subtype: 'mcp_status' });
+  await until(() => f.requests.some(command => command.type === 'agent-input' && object(command.frame.request).subtype === 'mcp_status'));
+  f.expireStream(); f.pauseStream(false);
+  await query;
+  assert.ok(f.replays.length > before);
+  assert.deepEqual(f.prompts, []);
 });
 
 test('an ambiguous input acknowledgment retries the same identity without delivering twice', async t => {
@@ -249,28 +321,35 @@ test('permission answers cannot splice native output split inside a UTF-8 JSON f
   assert.equal(assistant.length, 1); assert.match(JSON.stringify(assistant), /A split 🍈 response/);
 });
 
-test('an expired transport cursor recovers journal history without duplicating a completed turn', async t => {
+test('an expired transport cursor recovers a snapshot without replaying a completed turn', async t => {
   const f = await fixture(t); await f.agent.start(); await f.agent.submit('First');
   await f.frame({ type: 'result', result: 'One completed turn' });
   await until(() => f.received.some(value => value.type === 'result'));
   const before = f.replays.length;
+  let reconnects = 0; f.agent.on('reconnected', () => reconnects++);
   f.expireStream();
-  await until(() => f.replays.length > before);
+  await until(() => reconnects > 0);
+  assert.equal(f.replays.length, before);
   await f.agent.submit('Second'); await f.frame({ type: 'result', result: 'Two' });
   await until(() => f.received.filter(value => value.type === 'result').length === 2);
   assert.deepEqual(f.prompts, ['First', 'Second']);
 });
 
-test('reattachment restores the whole conversation and pending permissions without starting another process', async t => {
+test('reattachment restores the current display and exact pending permissions without replay', async t => {
   const f = await fixture(t); await f.agent.start(); await f.agent.submit('Wait for approval');
   await f.frame({ type: 'control_request', request_id: 'permission', request: { subtype: 'can_use_tool', tool_name: 'Write', input: { file_path: 'test' } } });
   await until(() => f.agent.approvals.size === 1); await f.agent.close(false);
   const next = new RemoteAgent(f.session); t.after(() => next.close(false));
   const frames: ClaudeFrame[] = []; next.on('frame', frame => frames.push(frame));
+  const snapshots: Conversation[] = []; next.on('snapshot', value => snapshots.push(value));
+  const before = f.replays.length;
   await next.start();
   assert.equal(next.status, 'working'); assert.equal(next.approvals.size, 1);
   assert.equal(f.launches.length, 1); assert.equal(f.initializations, 1);
-  assert.ok(frames.some(value => value.type === 'juiced_user' && value.text === 'Wait for approval'));
+  assert.ok(snapshots.some(value => value.live.some(entry => entry.kind === 'user' && entry.text === 'Wait for approval')));
+  assert.deepEqual(next.approvals.get('permission')?.input, { file_path: 'test' });
+  assert.equal(frames.some(value => value.type === 'juiced_user'), false);
+  assert.equal(f.replays.length, before);
   await next.answer('permission', false);
   await until(() => next.approvals.size === 0);
 });
@@ -288,9 +367,11 @@ test('rerunning in the same terminal selects the durable session and restores it
   assert.equal(selected.resumed, true); assert.equal(selected.id, f.session.id);
   const next = new RemoteAgent({ ...f.session, id: selected.id }); t.after(() => next.close(false));
   const frames: ClaudeFrame[] = []; next.on('frame', frame => frames.push(frame));
+  const snapshots: Conversation[] = []; next.on('snapshot', value => snapshots.push(value));
   await next.start();
-  assert.ok(frames.some(frame => frame.type === 'result' && frame.result === 'Saved response'));
-  assert.ok(frames.some(frame => frame.type === 'juiced_user' && frame.text === 'Remember this terminal conversation'));
+  assert.ok(snapshots.some(value => value.history.some(turn => turn.entries.some(entry => entry.text === 'Saved response'))));
+  assert.ok(snapshots.some(value => value.history.some(turn => turn.entries.some(entry => entry.text === 'Remember this terminal conversation'))));
+  assert.equal(frames.some(frame => frame.type === 'result'), false);
   assert.deepEqual(f.prompts, ['Remember this terminal conversation']);
   assert.equal(f.launches.length, 1); assert.equal(f.stops, 0);
 });

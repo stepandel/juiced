@@ -6,6 +6,7 @@ import type { SessionContext, SessionHarnessContext, SessionOutput } from '@cant
 import { ClaudeDecoder, object, type ClaudeFrame } from '../agent-protocol.js';
 import { MAX_INPUT_BYTES, type AgentJournalEvent, type AgentJournalEntry, type TerminalCommand, type TerminalEvent, type TerminalReply } from '../protocol.js';
 import { AgentJournal } from './agent-journal.js';
+import { AgentSnapshotProjection } from '../agent-snapshot.js';
 import type { createTerminal } from './terminal.js';
 
 type Context = SessionContext<TerminalCommand, TerminalEvent, TerminalReply>;
@@ -27,7 +28,8 @@ async function transcriptExists(workspace: string, id: string) {
 
 /** Keep native menus and approvals while making process lifetime and output server-owned. */
 export function createDurableAgent(context: SessionHarnessContext, factory: () => ReturnType<typeof createTerminal>, workspace = process.cwd(), options: { idleTimeoutMs?: number; runTimeoutMs?: number } = {}) {
-  const journal = new AgentJournal(workspace, context.session.id);
+  const projection = new AgentSnapshotProjection();
+  const journal = new AgentJournal(workspace, context.session.id, entry => projection.observe(entry));
   let loading: Promise<void> | undefined;
   let terminal: ReturnType<typeof createTerminal> | undefined;
   let running: Promise<void> | undefined;
@@ -64,7 +66,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
         const next: AgentJournalEntry = newest;
         try {
           await sink.send({ type: 'agent-output', ...next });
-          await view?.commit({ agentSequence: next.sequence });
+          await view?.commit(projection.view(journal.latest));
         }
         catch {
           if (outputSignal.aborted) break;
@@ -186,6 +188,8 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
         }, { timeoutMs: options.runTimeoutMs ?? RUN_TIMEOUT_MS, onCancel: () => { terminal?.cancel(); } });
       }
       if (journal.state === 'ready') armIdle();
+      // Refresh an old view even when reopening an idle process produces no bytes yet.
+      await intake.view.commit(projection.view(journal.latest));
       return { ok: true, agent: { epoch, ...(initialized ? { initialized } : {}) } };
     },
     async send(command: Extract<TerminalCommand, { type: 'agent-input' }>) {
@@ -225,7 +229,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       const flush = async () => {
         await Promise.all(pending.splice(0));
         // Keep a recent subscription boundary even when history exceeds transport retention.
-        await intake.view.commit({ agentSequence: journal.latest });
+        await intake.view.commit(projection.view(journal.latest));
       };
       try {
         await load();
@@ -244,7 +248,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
         }
         await flush();
         await intake.output.send({ type: 'agent-replay-end', id, latest });
-        await intake.view.commit({ agentSequence: journal.latest });
+        await intake.view.commit(projection.view(journal.latest));
       } catch (error) {
         await Promise.allSettled(pending);
         if (intake.signal.aborted) throw error;
