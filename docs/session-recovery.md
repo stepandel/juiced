@@ -142,3 +142,33 @@ delivery at 258 ms before these changes and 10 ms afterward; subsequent batched
 deltas measured 259 ms and 33 ms. The fixture measures the native output callback
 through journal fsync to a `RemoteAgent` frame with immediate mocked collector
 acknowledgments. It excludes the public network and is not a hosted latency SLA.
+
+
+Hosted measurements on October 20, 2026 used release v17, runtime code commit
+`2b547a1`, the original history session, and a separate disposable control session.
+The history now contains 1,838 entries and 3,100,500 serialized replay bytes. It
+restored through one command and 68 streamed chunks per run:
+
+| Measurement | Median | Observed range | Samples |
+| --- | --- | --- | --- |
+| Full history replay, including stream setup | 1,532 ms | 1,492–2,088 ms | 3 |
+| History replay plus its preceding view read | 1,816 ms | 1,728–2,362 ms | 3 |
+| Warm sequential request acknowledgment, workspace ID | 377 ms | 363–424 ms | 12 |
+| Warm sequential request acknowledgment, workspace slug | 414 ms | 376–438 ms | 12 |
+| Native control response arriving over SSE | 341 ms | 318–516 ms | 12 |
+| Lightweight authenticated origin read | 236 ms | 216–275 ms | 6 |
+
+Successive history chunks arrived 10 ms apart at the median and 55 ms apart at
+p95. These chunk spacings measure replay throughput, not fresh request latency.
+The earlier paginated restore took 39,161 ms after the dispatcher fix; the original
+user report was 139 seconds. The current history has gained a small number of
+records, so byte counts differ slightly. Standalone request samples return empty
+history pages while native work stays alive. Control-response timings include
+native control handling, journaling and the transport path, with no model
+inference. A lightweight origin read includes Edge, routing and database work;
+it does not isolate physical RTT. Fresh requests remain above 100 ms on the
+measured route. Small sample sizes limit percentile conclusions. Full handshake
+and process startup are excluded from the standalone replay timings.
+
+The measurement created no model prompts and did not stop the existing history
+session. See [the timing samples](../diagnostics/streaming-latency-2026-10-20.json).
