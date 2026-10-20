@@ -31,7 +31,7 @@ test('reattaching prints saved turns and the entire unfinished turn into scrollb
   stdin.setRawMode = raw => { stdin.isRaw = raw; };
   stdin.ref = () => {}; stdin.unref = () => {};
   const writes: string[] = [];
-  const stdout = new Writable({ write(chunk, _, done) { writes.push(stripVTControlCharacters(chunk.toString())); done(); } }) as TerminalOutput;
+  const stdout = new Writable({ write(chunk, _, done) { writes.push(chunk.toString().includes('\x1b[3J') ? '<CLEARED>' : stripVTControlCharacters(chunk.toString())); done(); } }) as TerminalOutput;
   stdout.isTTY = true; stdout.columns = 60; stdout.rows = 16;
   const lifetime = new AbortController();
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
@@ -46,11 +46,22 @@ test('reattaching prints saved turns and the entire unfinished turn into scrollb
     assert.deepEqual(agent.submitted, [], 'Displaying history must not send a prompt');
     assert.equal(agent.approvals.size, 1, 'Displaying history must leave approval pending');
 
-    const offset = writes.length;
+    let offset = writes.length;
     agent.emit('reconnecting'); agent.emit('reconnected');
-    stdout.columns = 50; stdout.emit('resize');
-    await delay(60);
+    stdout.rows = 18; stdout.emit('resize');
+    await delay(80);
     assert.equal(writes.slice(offset).join('').includes('SAVED_PROGRESS_0:'), false, 'Repaints must not print the history again');
+
+    // A narrower terminal clears scrollback once and reflows saved turns to the new width.
+    offset = writes.length;
+    for (const columns of [55, 50]) { stdout.columns = columns; stdout.emit('resize'); }
+    await wait(() => writes.slice(offset).join('').includes('SAVED_ANSWER_1'));
+    await delay(80);
+    const reflowed = writes.slice(offset).join('');
+    assert.equal(reflowed.split('<CLEARED>').length, 2, 'Resizing clears the screen once after the width settles');
+    assert.equal(reflowed.split('<CLEARED>')[1]!.split('SAVED_PROMPT_0').length, 2, 'Saved turns print exactly once after the clear');
+    assert.ok(reflowed.split('<CLEARED>')[1]!.split('\n').every(line => line.length <= 50), 'Reflowed lines fit the new width');
+    offset = writes.length;
 
     agent.emit('frame', { type: 'assistant', message: { id: 'new-answer', content: [{ type: 'text', text: 'NEW_OUTPUT_AFTER_REATTACH' }] } });
     agent.approvals.clear(); agent.emit('approvals');

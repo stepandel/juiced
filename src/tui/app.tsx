@@ -364,7 +364,7 @@ function Transcript({ entries, rows, columns, close }: { entries: Entry[]; rows:
   </Box>;
 }
 
-function Juiced({ agent, argv, workspace, rows, columns, quit }: { agent: RemoteAgent; argv: string[]; workspace: string; rows: number; columns: number; quit(code: number, stop?: boolean): void }) {
+function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent: RemoteAgent; argv: string[]; workspace: string; rows: number; columns: number; reflow: number; quit(code: number, stop?: boolean): void }) {
   const [conversation, setConversation] = useState(emptyConversation);
   const [editor, setEditor] = useDraft();
   const [status, setStatus] = useState<AgentStatus>(agent.status);
@@ -487,7 +487,7 @@ function Juiced({ agent, argv, workspace, rows, columns, quit }: { agent: Remote
   // and the actual height of the controls before clipping conversation rows.
   const height = Math.max(1, rows - 1);
   return <Box flexDirection="column">
-    <Static items={[{ id: 'header', entries: [] }, ...conversation.history.map(turn => ({ id: String(turn.id), entries: turn.entries }))]}>{item => item.id === 'header'
+    <Static key={reflow} items={[{ id: 'header', entries: [] }, ...conversation.history.map(turn => ({ id: String(turn.id), entries: turn.entries }))]}>{item => item.id === 'header'
       ? <Header key="header" workspace={workspace} session={agent.session.id} />
       : <Entries key={item.id} entries={item.entries} />}</Static>
     {transcript && !active && !menu ? <Transcript entries={[...conversation.history.flatMap(item => item.entries), ...conversation.live]} rows={rows} columns={columns} close={() => setTranscript(false)} /> : <Box flexDirection="column" maxHeight={height} overflow="hidden">
@@ -517,11 +517,21 @@ export async function runLocalTui(agent: RemoteAgent, argv: string[], workspace:
     code = Math.max(code, nextCode);
     quitting ??= agent.close(stop).catch(error => { code = 1; io.stderr.write(`juiced: ${plain((error as Error).message)}\n`); }).finally(() => instance.unmount());
   };
-  const ui = () => <Juiced agent={agent} argv={argv} workspace={workspace} rows={io.stdout.rows || 24} columns={io.stdout.columns || 80} quit={quit} />;
+  let reflow = 0, width = io.stdout.columns || 80, reflowTimer: NodeJS.Timeout | undefined;
+  const ui = () => <Juiced agent={agent} argv={argv} workspace={workspace} rows={io.stdout.rows || 24} columns={io.stdout.columns || 80} reflow={reflow} quit={quit} />;
   const instance = render(ui(), { stdin: io.stdin as NodeJS.ReadStream, stdout: io.stdout as NodeJS.WriteStream, stderr: io.stderr as NodeJS.WriteStream, exitOnCtrlC: false, interactive: true });
+  // Finished turns sit in scrollback at the width they were printed with, so
+  // a narrower terminal hard-wraps them mid-word. Like Claude Code, once the
+  // width settles, clear the screen and scrollback and print them again.
+  const reprint = () => {
+    if ((io.stdout.columns || 80) === width) return;
+    width = io.stdout.columns || 80; reflow++;
+    instance.clear(); io.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+    instance.rerender(ui());
+  };
   // Update the row budget before Ink's synchronous resize repaint, which would
   // otherwise paint one frame using the old height in the smaller terminal.
-  const resize = () => instance.rerender(ui());
+  const resize = () => { instance.rerender(ui()); clearTimeout(reflowTimer); reflowTimer = setTimeout(reprint, 50); };
   io.stdout.prependListener('resize', resize);
   const abort = () => quit(0, false);
   const ioError = (error: Error) => { io.stderr.write(`juiced: ${plain(error.message)}\n`); quit(1, false); };
@@ -531,5 +541,5 @@ export async function runLocalTui(agent: RemoteAgent, argv: string[], workspace:
   io.stdout.once('error', ioError);
   if (signal.aborted) abort();
   try { await instance.waitUntilExit(); await quitting; return code; }
-  finally { signal.removeEventListener('abort', abort); io.stdin.off('end', abort); io.stdin.off('error', ioError); io.stdout.off('error', ioError); io.stdout.off('resize', resize); await agent.close().catch(() => {}); }
+  finally { clearTimeout(reflowTimer); signal.removeEventListener('abort', abort); io.stdin.off('end', abort); io.stdin.off('error', ioError); io.stdout.off('error', ioError); io.stdout.off('resize', resize); await agent.close().catch(() => {}); }
 }
