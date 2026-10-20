@@ -8,6 +8,7 @@ import { captureInspection } from './inspection-snapshot.js';
 import { compareInspection, renderInspection, renderRemoteListing } from './inspection-view.js';
 import { INSPECTION_CHUNK_BYTES, INSPECTION_TIMEOUT_MS, MAX_INSPECTION_BYTES, InspectionIncomplete, inspectionScope, validateInspectionListing, validateInspectionSnapshot, type InspectionListing, type InspectionSnapshot } from './inspection-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
+import { isCursorExpired, isViewMissing } from './transport.js';
 
 type Workspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'inspect' | 'session' | 'selector'>;
 type InspectionApp = { workspace(selector: WorkspaceSelector): Workspace };
@@ -43,7 +44,7 @@ async function remoteInventory<T>(workspace: InspectionWorkspace, command: Inspe
     combined.throwIfAborted();
     // A durable end boundary avoids replaying old inventories across CLI processes.
     const after = fresh ? undefined : await session.view({ signal: combined }).then(view => view.cursor).catch(error => {
-      if (['session_view_not_found', 'session_not_found', 'resource_not_found'].includes(String((error as { code?: string }).code))) return undefined;
+      if (isViewMissing(error)) return undefined;
       throw error;
     });
     const requested = session.request(command, { signal: combined, timeoutMs: INSPECTION_TIMEOUT_MS }).then(reply => {
@@ -80,7 +81,7 @@ async function remoteInventory<T>(workspace: InspectionWorkspace, command: Inspe
   } catch (error) {
     // A large/abandoned inventory or concurrent readers can outrun retained replay.
     // Retry once in an isolated session that expires as soon as its work settles.
-    if (!fresh && !combined.aborted && ['event_cursor_expired', 'event_stream_reset'].includes(String((error as { code?: string }).code))) {
+    if (!fresh && !combined.aborted && isCursorExpired(error)) {
       controller.abort();
       return remoteInventory(workspace, { ...command, id: randomUUID() }, signal, validate, true);
     }

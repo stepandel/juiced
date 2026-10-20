@@ -7,6 +7,7 @@ import { ClaudeDecoder, headlessArguments, modelOptions, object, slashCommands, 
 import type { SavedSettings } from './settings.js';
 import { validateExportManifest, validTransferId } from './git-protocol.js';
 import type { Publication, PublishResult } from './publish-protocol.js';
+import { backoffMs, isCursorExpired, isTransient, isViewMissing, linkSignal, messageId, withTimeout } from './transport.js';
 
 export type AgentSession = Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'stop'> & Partial<Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'view'>>;
 export type AgentStatus = 'connecting' | 'ready' | 'working' | 'configuring' | 'interrupting' | 'closed' | 'failed';
@@ -25,6 +26,8 @@ export type MenuChange = { subtype: 'apply_flag_settings'; settings: ClaudeFrame
   | { subtype: 'stop_task'; task_id: string };
 class RemoteProcessError extends Error {}
 const processChanged = (error: unknown) => error instanceof RemoteProcessError && error.message === 'The Claude process changed. Reconnect before submitting input.';
+/** Older Claude binaries reject newer menu queries by subtype. */
+export const unsupportedControl = (error: unknown) => /Unsupported control request subtype/u.test((error as Error).message);
 
 /** A headless Claude process on Cantelop. Keyboard editing never enters this class. */
 export class RemoteAgent extends EventEmitter {
@@ -134,24 +137,19 @@ export class RemoteAgent extends EventEmitter {
     this.emit('models', this.models);
   }
 
-  private retryable(error: unknown): boolean {
-    const remote = error as { status?: number; name?: string; message?: string };
-    return remote.status !== undefined ? remote.status === 0 || remote.status >= 500 : remote.name === 'AbortError' || /stream|fetch|network|socket|terminated|connection|timed out/i.test(remote.message ?? '');
-  }
-
-  private async request(command: TerminalCommand, id = `msg_${randomUUID().replaceAll('-', '')}`): Promise<TerminalReply> {
+  private async request(command: TerminalCommand, id = messageId()): Promise<TerminalReply> {
     for (let failures = 0; ; failures++) {
       this.controller.signal.throwIfAborted();
       try {
-        const reply = await this.session.request(command, { id, timeoutMs: 120_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(125_000)]) });
+        const reply = await withTimeout(this.controller.signal, 125_000, signal => this.session.request(command, { id, timeoutMs: 120_000, signal }));
         if (!reply.ok) throw new RemoteProcessError(reply.error);
         if (failures) this.emit('reconnected');
         return reply;
       } catch (error) {
         if (this.controller.signal.aborted) throw this.controller.signal.reason;
-        if (!this.retryable(error) || error instanceof RemoteProcessError) throw error;
+        if (!isTransient(error) || error instanceof RemoteProcessError) throw error;
         this.emit('reconnecting', failures + 1);
-        await delay(Math.min(5000, 250 * 2 ** Math.min(failures, 5)), undefined, { signal: this.controller.signal });
+        await delay(backoffMs(failures), undefined, { signal: this.controller.signal });
       }
     }
   }
@@ -165,8 +163,8 @@ export class RemoteAgent extends EventEmitter {
       this.debug('control.dispatch', { type: command.type });
       // Serialize durable handoff receipts and legacy dispatch acceptance;
       // keyboard editing remains independent of this queue.
-      if (command.type === 'agent-input') await this.request(command, `msg_${command.id.replaceAll('-', '')}`);
-      else await this.session.dispatch(command, { signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(35_000)]) });
+      if (command.type === 'agent-input') await this.request(command, messageId(command.id));
+      else await withTimeout(this.controller.signal, 35_000, signal => this.session.dispatch(command, { signal }));
       this.debug('control.accepted', { type: command.type, elapsedMs: Date.now() - start });
     }).finally(() => { this.pendingBytes -= bytes; });
     this.pending = next.catch(() => {});
@@ -242,7 +240,7 @@ export class RemoteAgent extends EventEmitter {
       this.emit('models', this.models);
     } catch (error) {
       // Older binaries only expose the initialization catalog.
-      if (!/Unsupported control request subtype/u.test((error as Error).message)) throw error;
+      if (!unsupportedControl(error)) throw error;
     }
     return this.models;
   }
@@ -265,9 +263,7 @@ export class RemoteAgent extends EventEmitter {
 
   private async persist(settings: SavedSettings): Promise<void> {
     try {
-      const reply = await this.session.request({ type: 'save-settings', settings }, {
-        timeoutMs: 15_000, signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(20_000)]),
-      });
+      const reply = await withTimeout(this.controller.signal, 20_000, signal => this.session.request({ type: 'save-settings', settings }, { timeoutMs: 15_000, signal }));
       if (!reply?.ok) throw new Error(reply && 'error' in reply ? reply.error : 'The runtime did not confirm the save');
     } catch (error) {
       throw new Error(`Changed for this session, but could not save for future sessions: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
@@ -296,7 +292,7 @@ export class RemoteAgent extends EventEmitter {
       return response;
     }
     catch (error) {
-      if (/Unsupported control request subtype/u.test((error as Error).message)) this.unsupportedQueries.add(request.subtype);
+      if (unsupportedControl(error)) this.unsupportedQueries.add(request.subtype);
       throw error;
     }
   }
@@ -405,9 +401,11 @@ export class RemoteAgent extends EventEmitter {
       let result: PublishResult = { status: 'declined', message: 'The user declined local application. Local files were not changed.' };
       if (allow) {
         try {
-          const signal = AbortSignal.any([this.controller.signal, controller.signal, AbortSignal.timeout(Math.max(1, publication.expiresAt - Date.now()))]);
-          signal.throwIfAborted();
-          result = await this.options.localPublish!.apply(publication, signal);
+          result = await withTimeout(this.controller.signal, Math.max(1, publication.expiresAt - Date.now()), async expiry => {
+            const signal = AbortSignal.any([expiry, controller.signal]);
+            signal.throwIfAborted();
+            return this.options.localPublish!.apply(publication, signal);
+          });
         } catch (error) { result = { status: 'conflict', message: error instanceof Error ? error.message : 'Local application failed. Check the local checkout before retrying.' }; }
       }
       this.emit('frame', { type: 'juiced_publish', id, message: result.message, failed: !['applied', 'already-applied'].includes(result.status) });
@@ -538,16 +536,18 @@ export class RemoteAgent extends EventEmitter {
       const connectedAt = performance.now();
       let firstEvent = true, caught = false;
       const subscription = new AbortController();
+      // Every watchdog cycle reconnects; never accumulate dependents on the agent signal.
+      const connection = linkSignal(this.controller.signal);
       try {
         const view = await this.session.view?.({ signal: this.controller.signal }).catch(error => {
-          if (['session_view_not_found', 'session_not_found', 'resource_not_found'].includes(String((error as { code?: string }).code))) return undefined;
+          if (isViewMissing(error)) return undefined;
           throw error;
         });
         this.debug('agent.view', { elapsedMs: performance.now() - connectedAt, sequence: Number(object(view?.state).agentSequence) || 0 });
         // A read watchdog also recovers half-open connections after laptop sleep.
         // View and stream reads do not activate compute or extend a work lease.
         watchdog = AbortSignal.timeout(30_000);
-        const signal = AbortSignal.any([this.controller.signal, watchdog, subscription.signal]);
+        const signal = AbortSignal.any([connection.signal, watchdog, subscription.signal]);
         const replay = () => {
           const id = replayId = randomUUID();
           replayStarted = performance.now(); replayChunks = 0; replayEntries = 0;
@@ -603,13 +603,13 @@ export class RemoteAgent extends EventEmitter {
         if (watchdog?.aborted) { recover = Boolean(replayId) || this.remoteState === 'working'; continue; }
         if (subscription.signal.aborted) error = subscription.signal.reason;
         this.invalidateSettings();
-        const expired = ['event_cursor_expired', 'event_stream_reset'].includes(String((error as { code?: string }).code));
+        const expired = isCursorExpired(error);
         if (expired) this.cursor = undefined;
-        if (error instanceof RemoteProcessError || !expired && !this.retryable(error)) throw error;
+        if (error instanceof RemoteProcessError || !expired && !isTransient(error)) throw error;
         recover = true;
         this.emit('reconnecting', ++failures);
-        await delay(Math.min(5000, 250 * 2 ** Math.min(failures - 1, 5)), undefined, { signal: this.controller.signal });
-      } finally { subscription.abort(); await events?.return?.(); }
+        await delay(backoffMs(failures - 1), undefined, { signal: this.controller.signal });
+      } finally { subscription.abort(); connection.dispose(); await events?.return?.(); }
     }
   }
 
@@ -639,13 +639,11 @@ export class RemoteAgent extends EventEmitter {
         throw new Error('The Claude output stream ended unexpectedly');
       } catch (error) {
         if (this.controller.signal.aborted) return;
-        const remote = error as { status?: number; name?: string; message?: string };
-        const retryable = remote.status !== undefined ? remote.status === 0 || remote.status >= 500 : remote.name === 'AbortError' || /stream|fetch|network|socket|terminated|connection/i.test(remote.message ?? '');
-        if (error instanceof RemoteProcessError || !retryable) throw error;
+        if (error instanceof RemoteProcessError || !isTransient(error)) throw error;
         ++failures;
-        this.debug('stream.retry', { attempt: failures, name: remote.name });
+        this.debug('stream.retry', { attempt: failures, name: (error as Error)?.name });
         this.emit('reconnecting', failures);
-        await delay(Math.min(5000, 250 * 2 ** Math.min(failures - 1, 5)), undefined, { signal: this.controller.signal });
+        await delay(backoffMs(failures - 1), undefined, { signal: this.controller.signal });
       }
     }
   }
