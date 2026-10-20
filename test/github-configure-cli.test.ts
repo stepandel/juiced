@@ -61,7 +61,7 @@ test('built github-configure CLI uses the app API without a workspace, Claude lo
   assert.deepEqual(JSON.parse(existing.stdout), configuredCalls);
   assert.match(existing.stderr, /Authenticated with GitHub as octocat/);
   assert.match(existing.stderr, /\[1\/3\].*Finding.*\[2\/3\].*Verifying.*\[3\/3\].*Saving/s);
-  assert.match(existing.stderr, /juiced --resume claude/);
+  assert.match(existing.stderr, /same terminal tab.*juiced claude/);
   assert.doesNotMatch(existing.stderr, /fixture-token|Claude sign-in required|Preparing Git workspace|Connecting to Cantelop workspace|--new/);
   assert.deepEqual(await readdir(savedDirectory), ['existing-session.json']);
   assert.equal(await readFile(join(savedDirectory, 'existing-session.json'), 'utf8'), savedSession, 'Setup must preserve the saved conversation binding');

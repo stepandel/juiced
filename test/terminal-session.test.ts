@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
-import { agentSessionId, prepareAgentSession } from '../src/session-state.js';
+import { prepareAgentSession } from '../src/session-state.js';
 import { terminalIdentity, usesTerminalSession } from '../src/terminal-session.js';
 
 async function fixture(t: TestContext) {
@@ -35,15 +36,14 @@ test('explicit Claude session selection and disabled persistence bypass the bind
   assert.throws(() => usesTerminalSession(['--resume', 'id'], true), /cannot be combined/);
 });
 
-test('subsequent launches reuse the terminal session and keep explicit last-session recovery working', async t => {
+test('subsequent launches reuse the terminal session and save only its binding', async t => {
   const f = await fixture(t);
   const first = await prepareAgentSession(f.project, { terminal: f.terminal });
   assert.equal(first.resumed, false); await first.save();
   const next = await prepareAgentSession(f.project, { terminal: f.terminal });
   assert.equal(next.id, first.id); assert.equal(next.resumed, true); await next.save();
-  assert.equal(await agentSessionId(f.project, true), first.id);
   const directory = join(f.root, '.cantelop', 'juiced');
-  const files = await readdir(directory); assert.equal(files.length, 2);
+  const files = await readdir(directory); assert.equal(files.length, 1);
   for (const file of files) {
     assert.deepEqual(JSON.parse(await readFile(join(directory, file), 'utf8')), { workspace: 'project', id: first.id });
     assert.equal((await stat(join(directory, file))).mode & 0o777, 0o600);
@@ -90,11 +90,29 @@ test('explicit recovery bypasses the terminal binding and ordinary non-bound lau
   const f = await fixture(t);
   const first = await prepareAgentSession(f.project, { terminal: f.terminal }); await first.save();
   const explicit = `ses_${'1'.repeat(32)}`;
-  assert.equal(await agentSessionId(f.project, true, explicit), explicit);
+  const recovered = await prepareAgentSession(f.project, { explicit, terminal: f.terminal });
+  assert.equal(recovered.id, explicit); assert.equal(recovered.resumed, true); await recovered.save();
   assert.equal((await prepareAgentSession(f.project, { terminal: f.terminal })).id, first.id);
-  assert.notEqual(await agentSessionId(f.project), explicit);
-  await assert.rejects(prepareAgentSession(f.project, { fresh: true, resume: true }), /cannot be combined/);
-  await assert.rejects(agentSessionId(f.project, false, ''), /Invalid/);
+  const unbound = await prepareAgentSession(f.project); await unbound.save();
+  assert.notEqual((await prepareAgentSession(f.project)).id, unbound.id);
+  assert.equal((await readdir(join(f.root, '.cantelop', 'juiced'))).length, 1);
+  await assert.rejects(prepareAgentSession(f.project, { fresh: true, explicit }), /cannot be combined/);
+  await assert.rejects(prepareAgentSession(f.project, { explicit: '' }), /Invalid/);
+});
+
+test('legacy project-wide last-session pointers are ignored and never updated', async t => {
+  const f = await fixture(t);
+  const directory = join(f.root, '.cantelop', 'juiced');
+  await mkdir(directory, { recursive: true });
+  const legacy = join(directory, `${createHash('sha256').update(f.project.workspace).digest('hex')}.json`);
+  const state = JSON.stringify({ workspace: f.project.workspace, id: `ses_${'2'.repeat(32)}` });
+  await writeFile(legacy, state);
+  const first = await prepareAgentSession(f.project, { terminal: f.terminal }); await first.save();
+  const other = await prepareAgentSession(f.project, { terminal: { ...f.terminal, identity: 'tab-b' } }); await other.save();
+  const explicit = await prepareAgentSession(f.project, { explicit: first.id }); await explicit.save();
+  assert.equal(first.resumed, false); assert.equal(other.resumed, false);
+  assert.notEqual(first.id, JSON.parse(state).id); assert.notEqual(other.id, first.id);
+  assert.equal(await readFile(legacy, 'utf8'), state);
 });
 
 test('corrupt saved identities fail explicitly and --new repairs the binding', async t => {

@@ -3,7 +3,7 @@ import { inspectionScope } from './inspection-protocol.js';
 export type Arguments =
   | { command: 'env'; action: 'set' | 'unset'; name: string; secret: boolean; workspace: undefined; argv: [] }
   | { command: 'help' | 'version'; workspace: string | undefined; argv: string[] }
-  | ({ command: 'claude'; workspace: string | undefined; argv: string[]; resume?: boolean; session?: string } & (
+  | ({ command: 'claude'; workspace: string | undefined; argv: string[]; session?: string } & (
     | { action: 'run'; newSession?: boolean }
     | { action: 'login' | 'fast-forward' }
     | { action: 'github-configure'; stdin: boolean }
@@ -16,7 +16,7 @@ export type Arguments =
 
 export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.env): Arguments {
   let workspace = env.JUICED_WORKSPACE;
-  let resume = false, session: string | undefined;
+  let session: string | undefined;
   let index = 0;
   while (index < args.length) {
     const arg = args[index]!;
@@ -26,16 +26,17 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
     } else if (arg.startsWith('--workspace=')) {
       workspace = arg.slice('--workspace='.length);
       index++;
-    } else if (arg === '--resume') { resume = true; index++; }
-    else if (arg === '--session') { session = args[++index] ?? ''; resume = true; index++; }
+    } else if (arg === '--resume' || arg.startsWith('--resume=')) {
+      throw new Error('--resume has been removed. Run juiced claude in the original terminal tab, or juiced --session ID claude to select a session.');
+    } else if (arg === '--session') { session = args[++index] ?? ''; index++; }
     else break;
   }
   if (workspace !== undefined && !/^[a-z0-9][a-z0-9-]{0,62}$/.test(workspace)) throw new Error('Workspace must be 1–63 lowercase letters, numbers, or hyphens');
   const command = args[index];
   const argv = args.slice(index + 1);
   if (session !== undefined && !/^ses_[a-f0-9]{32}$/.test(session)) throw new Error('Invalid Juiced session ID');
-  if (resume && (command !== 'claude' || ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek'].includes(argv[0] ?? ''))) throw new Error('--resume and --session apply to interactive juiced claude sessions.');
-  const connection = { ...(resume ? { resume: true } : {}), ...(session ? { session } : {}) };
+  if (session !== undefined && (command !== 'claude' || ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek'].includes(argv[0] ?? ''))) throw new Error('--session applies to interactive juiced claude sessions.');
+  const connection = { ...(session ? { session } : {}) };
   if (command === 'env') {
     const [action, name, ...flags] = argv;
     if (argv.length === 1 && ['--help', '-h'].includes(action!)) return { command: 'help', workspace: undefined, argv: [] };
@@ -53,7 +54,7 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
       return { command, action: 'github-configure', workspace: undefined, stdin: argv[1] === '--stdin', argv: [] };
     }
     if (argv[0] === '--new') {
-      if (resume) throw new Error('--new cannot be combined with --resume or --session.');
+      if (session) throw new Error('--new cannot be combined with --session.');
       return { command, action: 'run', workspace, newSession: true, argv: argv.slice(argv[1] === '--' ? 2 : 1) };
     }
     if (argv[0] === '--') return { command, action: 'run', workspace, argv: argv.slice(1), ...connection };
@@ -126,7 +127,7 @@ Usage:
 
 Environment values are stored as Cantelop secrets by default. --plain selects a
 declared ordinary variable. Updates apply to new remote processes without redeployment.
-To reload credentials and keep a conversation, use /exit, then juiced --resume claude.
+To reload credentials and keep a conversation, use /exit, then juiced claude in the same tab.
 github-configure verifies and saves GitHub credentials for the whole Juiced app.
 
 Examples:
@@ -140,7 +141,6 @@ Examples:
   echo "Explain this project" | juiced claude -p
 
 Options before the command:
-  --resume          Reattach to the last Juiced session in this project/workspace
   --session ID      Reattach to a specific Juiced session
   --workspace SLUG  Override the workspace derived from the current directory
                    (JUICED_WORKSPACE also overrides automatic selection)
@@ -154,7 +154,8 @@ use native CLI passthrough.
 Interactive launches in the same terminal tab, project, and workspace reconnect
 to their previous Juiced session. Use juiced claude --new before other Claude
 arguments to start fresh. Explicit session flags and native passthrough bypass
-the terminal binding. --resume and --session can also reopen a session explicitly.
+the terminal binding. Use juiced --session ID claude to reopen a specific session
+from another tab; its ID is displayed in the session header.
 Supplying Claude arguments starts a fresh bound session so prompts and flags apply.
 /detach leaves remote work running. Sleep and network interruptions reconnect
 automatically. Idle processes resume their saved conversation on the next input.

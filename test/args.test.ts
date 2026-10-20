@@ -26,9 +26,28 @@ test('a leading --new starts fresh without forwarding the Juiced option to Claud
   assert.deepEqual(parseArguments(['claude', '--', '--new'], {}), {
     command: 'claude', action: 'run', workspace: undefined, argv: ['--new'],
   });
-  for (const flags of [['--resume'], ['--session', `ses_${'1'.repeat(32)}`]]) {
-    assert.throws(() => parseArguments([...flags, 'claude', '--new'], {}), /cannot be combined/);
+  assert.throws(() => parseArguments(['--session', `ses_${'1'.repeat(32)}`, 'claude', '--new'], {}), /cannot be combined/);
+});
+
+test('removed global --resume fails with guidance while explicit session selection remains available', () => {
+  const id = `ses_${'1'.repeat(32)}`;
+  for (const args of [['--resume', 'claude'], ['--workspace', 'chosen', '--resume', 'claude'], ['--resume', 'claude', '--new'], ['--resume=latest', 'claude']]) {
+    assert.throws(() => parseArguments(args, {}), /--resume has been removed.*original terminal tab.*--session ID claude/);
   }
+  assert.deepEqual(parseArguments(['--workspace', 'chosen', '--session', id, 'claude'], {}), {
+    command: 'claude', action: 'run', workspace: 'chosen', argv: [], session: id,
+  });
+  for (const command of ['login', 'github-configure', 'sync', 'fast-forward', 'delete', 'ls', 'peek']) {
+    assert.throws(() => parseArguments(['--session', id, 'claude', command], {}), /interactive/);
+  }
+  for (const args of [['--session'], ['--session', 'invalid', 'claude']]) {
+    assert.throws(() => parseArguments(args, {}), /Invalid Juiced session ID/);
+  }
+  assert.throws(() => parseArguments(['--session', id, 'env', 'unset', 'MODEL'], {}), /interactive/);
+  assert.deepEqual(parseArguments(['claude', '--resume', 'native-id'], {}), {
+    command: 'claude', action: 'run', workspace: undefined, argv: ['--resume', 'native-id'],
+  });
+  assert.doesNotMatch(HELP, /--resume/);
 });
 
 test('supports global help and version and rejects unknown harnesses', () => {

@@ -19,7 +19,7 @@ export const menuCommands: SlashCommand[] = [
 // These screens have no equivalent in the pinned headless protocol. Recognize
 // them even though initialize omits them, rather than submitting an LLM prompt.
 const unavailable: Record<string, string> = {
-  resume: 'Claude does not expose its session browser over the headless protocol. Start juiced claude --resume <session-id> to resume a known session.',
+  resume: 'Claude does not expose its session browser over the headless protocol. Run juiced claude in the original terminal tab, or juiced --session <session-id> claude to reopen a known Juiced session.',
   rewind: 'Claude does not expose conversation checkpoints over the headless protocol. File rewind alone would not restore the conversation.',
   checkpoint: 'Claude does not expose conversation checkpoints over the headless protocol.',
   theme: 'Claude’s terminal themes apply to its native renderer. Juiced uses your terminal colors and its own local renderer.',

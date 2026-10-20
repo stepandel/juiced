@@ -17,9 +17,9 @@ answer a pending permission request.
 Supplying Claude arguments starts a fresh bound session so launch settings and
 initial prompts take effect; reattachment retains its saved launch configuration.
 
-Use `juiced --resume claude` from any tab in the same project and workspace to
-reopen the last session, or `juiced --session ses_<id> claude` to select one
-explicitly. These options bypass the terminal binding, as do explicit Claude
+Use `juiced --session ses_<id> claude` from any tab in the same project and
+workspace to reopen a specific session using the ID displayed in its header.
+This option bypasses the terminal binding, as do explicit Claude
 session-selection flags, disabled native persistence, and native passthrough.
 
 The local `.cantelop/juiced/` directory stores only session identities. Tab
@@ -29,6 +29,7 @@ terminal identity comes from a terminal session ID, tmux/screen pane ID, or the
 parent shell's PID and start time; a reused TTY device alone is never a key.
 Without an available identity Juiced reports that automatic resume is disabled.
 Bindings are saved atomically after first-launch Git preparation succeeds.
+There is no project-wide last-session pointer; older pointer files are ignored.
 Resume does not refresh or transfer the Git checkout. File transfer remains an
 explicit command.
 
@@ -129,9 +130,10 @@ Renderer tests
 verify local editing while connectivity is stalled and detachment on terminal
 loss. Hosted sleep/wake verification still requires a matching runtime deployment.
 
-For hosted latency diagnosis, run `JUICED_DEBUG=1 juiced --resume claude` after
-building and deploying matching sources. Diagnostic records include view read
-time, time to the first stream event, replay first-chunk/completion time and
+For hosted latency diagnosis, run `JUICED_DEBUG=1 juiced claude` in the original
+terminal tab after building and deploying matching sources, or use
+`JUICED_DEBUG=1 juiced --session ID claude` for a specific session. Diagnostic
+records include view read time, time to the first stream event, replay first-chunk/completion time and
 chunk/entry counts, and existing command acknowledgment timings. These records
 contain timing and sequence metadata rather than transcript contents. Elapsed
 durations use the client clock; they do not isolate network RTT or backend time.

@@ -194,7 +194,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
       if (journal.configuration && (journal.configuration.directoryName !== command.directoryName || JSON.stringify(journal.configuration.git) !== JSON.stringify(command.git)))
         throw new Error('This session belongs to another project checkout. Use its original project and workspace.');
       if (command.tty || command.argv.some(arg => ['--resume', '-r', '--continue', '-c', '--session-id'].includes(arg) || /^--(?:resume|session-id)=/.test(arg)))
-        throw new Error('Use juiced --resume claude to resume a Juiced conversation. Native conversation flags are unavailable in the local TUI.');
+        throw new Error('Run juiced claude in the original terminal tab, or juiced --session ID claude to select a Juiced conversation. Native conversation flags are unavailable in the local TUI.');
       if (stopping) await running;
       if (!running) {
         if (!journal.configuration) await journal.configure(command);

@@ -49,6 +49,7 @@ test('CLI reconnects the same tab, starts fresh on --new, and bypasses bindings 
     });
     return { ...JSON.parse(stdout) as { id: string; argv: string[]; operations: Array<{ type: string; workspace: { id?: string; slug?: string } }> }, stderr };
   };
+  await assert.rejects(run(['--resume', 'claude']), /--resume has been removed/);
   const first = await run(); assert.match(first.id, /^ses_[a-f0-9]{32}$/u);
   assert.deepEqual(first.operations, [
     { type: 'workspace.resolve', workspace: { slug: 'chosen' } },
@@ -58,6 +59,8 @@ test('CLI reconnects the same tab, starts fresh on --new, and bypasses bindings 
   const other = await run(['claude'], 'tab-b'); assert.notEqual(other.id, first.id);
   const explicit = await run(['--session', other.id, 'claude']); assert.equal(explicit.id, other.id);
   assert.equal((await run()).id, first.id, 'Explicit recovery must preserve this tab’s binding');
+  assert.equal((await run(['claude'], 'tab-b')).id, other.id);
+  await assert.rejects(run(['--session', other.id, 'claude', '-p', 'prompt']), /requires an interactive terminal/);
   const native = await run(['claude', '--resume', 'native-id']); assert.deepEqual(native.argv, ['--resume', 'native-id']);
   assert.notEqual(native.id, first.id); assert.equal((await run()).id, first.id);
 

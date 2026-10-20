@@ -36,5 +36,5 @@ test('Juiced waits for the SDK revision and logs only metadata; unset never read
   assert.deepEqual(calls, [{ name: 'GH_TOKEN', value: 'fixture-token', secret: true }, { wait: 7 }, { unset: 'GH_TOKEN' }, { wait: 7 }]);
   assert.doesNotMatch(output, /fixture-token/);
   assert.match(output, /Running processes keep/);
-  assert.match(output, /existing Claude conversation.*\/exit.*juiced --resume claude/);
+  assert.match(output, /existing Claude conversation.*\/exit.*juiced claude.*same terminal tab/);
 });

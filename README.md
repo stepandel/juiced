@@ -10,7 +10,7 @@ juiced claude
 
 Interactive invocations open the **Juiced TUI on your machine**, connected to a headless Claude Code process on Cantelop. Typing, cursor movement, multiline editing, and pasting happen locally. Submitted prompts, menu data requests, confirmed actions, permission answers, and interrupts cross the network. Claude's agent loop, tools, files, and authentication stay in the persistent remote workspace. Git repositories upload local `HEAD` on first launch; local uncommitted files are included only through an explicit transfer.
 
-The local interface streams Claude's responses, shows tool activity, and asks before actions that Claude requires permission to run. Rerunning `juiced claude` in the same terminal tab, project, and workspace reconnects to that tab's session. Use `juiced claude --new` to start fresh, `juiced --resume claude` to reopen the last session from any tab, or `juiced --session ses_… claude` for the session ID displayed in its header. Piped commands and explicit `-p`, `--help`, and `--version` invocations retain the native CLI passthrough.
+The local interface streams Claude's responses, shows tool activity, and asks before actions that Claude requires permission to run. Rerunning `juiced claude` in the same terminal tab, project, and workspace reconnects to that tab's session. Use `juiced claude --new` to start fresh, or `juiced --session ses_… claude` to reopen a specific session from its displayed header ID. Piped commands and explicit `-p`, `--help`, and `--version` invocations retain the native CLI passthrough.
 
 ## Set up
 
@@ -66,8 +66,10 @@ saving `GH_TOKEN` as an app secret while waiting for propagation. It runs locall
 and keeps your Claude conversations unchanged.
 
 To pick up the new token in an **existing conversation**, use `/exit` if Claude
-is still running, then run `juiced --resume claude` from the same project. This
-restarts the remote process with the updated environment and preserves the same
+is still running, then run `juiced claude` from the same terminal tab, project,
+and workspace. If the original tab is closed, use `juiced --session ID claude`
+with the session ID from its header. This restarts the remote process with the
+updated environment and preserves the same
 conversation and history. `/detach` leaves the existing process running with its
 previous credentials. If you have not started a conversation yet, run
 `juiced claude` normally.
@@ -130,7 +132,7 @@ prompts, responses, and conversation state stay in the remote workspace.
 Use `juiced claude --new [Claude arguments...]` to replace the current tab's
 binding. Supplying Claude arguments, such as `--model sonnet` or an initial
 prompt, also starts a fresh bound session so those arguments take effect; a plain
-`juiced claude` reconnects. Explicit Juiced `--resume`/`--session` options before `claude`, Claude
+`juiced claude` reconnects. An explicit Juiced `--session ID` before `claude`, Claude
 session-selection flags after it (such as `--resume`, `--continue`, or
 `--session-id`), and `--no-session-persistence` bypass the terminal binding.
 Pipes, print mode, help, and version commands also bypass it. If Juiced cannot
@@ -194,7 +196,7 @@ In the local UI:
 - Arrow keys, Home/End, backspace/delete, Ctrl+A/E, Ctrl+U/K/W edit the local draft, including Unicode characters.
 - **Esc** or **Ctrl+C** during a turn interrupts Claude. You can draft your next prompt while it works; Enter keeps that draft until the current turn finishes.
 - **Ctrl+C** while idle clears the draft, then exits if it is empty. **Ctrl+D** with an empty draft, **`/exit`**, and **`/quit`** disconnect and stop the remote process.
-- **`/detach`** disconnects while remote work continues. Closing the terminal also detaches. Reattach with **`juiced --resume claude`**.
+- **`/detach`** disconnects while remote work continues. Closing the terminal also detaches. Reattach with **`juiced claude`** in the same tab, or **`juiced --session ID claude`** from another tab in the same project and workspace.
 - **`/`** previews available commands with descriptions and argument hints. Keep typing to filter, use **↑/↓** to select, **Tab** to complete before adding arguments, and **Enter** to run the selection. **Esc** closes the menu without changing your draft.
 - **`/model`**, **`/effort`**, **`/output-style`**, **`/config`**, **`/permissions`**, and **`/mcp`** open local menus. Model choices, effort levels, styles, and servers come from the remote Claude session. Use **↑/↓** to navigate, type to filter, **Enter** to confirm, and **Esc** to go back. **`/model <name>`** also accepts a full model ID. Changes keep the current conversation and do not submit a model prompt.
 - Confirmed model, effort, output style, fast mode, and permission mode changes are saved in `/workspace/.claude/settings.json` for future sessions in that workspace, including launches from another machine. Explicit Claude flags override saved defaults for that invocation. Individual tool approvals remain one-time grants. A failed save is reported while the running session keeps the applied choice.

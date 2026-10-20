@@ -21,7 +21,7 @@ Pull requests: Read and write allows PR creation; add Workflows: Write to edit w
 Verifies the GitHub account, stores GH_TOKEN as a Cantelop app secret, and waits
 for propagation. No local gh or Cantelop CLI installation or Claude login is required.
 Keep your conversation: if Claude is running, use /exit, then run
-juiced --resume claude from the same project to reload credentials and history.
+juiced claude from the same terminal tab, project, and workspace to reload credentials and history.
 If you have not started a conversation yet, run juiced claude normally.
 Local Git remotes and GitHub's HTTPS credential helper are configured on launch.
 `;
@@ -134,5 +134,5 @@ export async function configureGitHub(api: AppEnvironment, stdin: boolean, io: I
   io.stderr.write('[3/3] Saving GH_TOKEN as an app secret and waiting for Cantelop…\n');
   const update = await api.set('GH_TOKEN', token, { secret: true, signal });
   await api.wait(update.revision, { signal });
-  io.stderr.write(`\nGitHub configured for ${login}.\n\nTo continue your existing conversation with the new credential:\n  1. If Claude is still running, use /exit in that conversation.\n  2. From the same project, run: juiced --resume claude\n\nThis reloads credentials and preserves your conversation and history.\nIf you have not started a conversation yet, run juiced claude normally.\n`);
+  io.stderr.write(`\nGitHub configured for ${login}.\n\nTo continue your existing conversation with the new credential:\n  1. If Claude is still running, use /exit in that conversation.\n  2. From the same terminal tab, project, and workspace, run: juiced claude\n\nThis reloads credentials and preserves your conversation and history.\nIf the original tab is closed, run juiced --session ID claude with the ID from its header.\nIf you have not started a conversation yet, run juiced claude normally.\n`);
 }

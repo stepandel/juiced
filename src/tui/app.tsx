@@ -206,7 +206,7 @@ function Juiced({ agent, argv, workspace, rows, quit }: { agent: RemoteAgent; ar
   const height = Math.max(1, rows - 1);
   return <Box flexDirection="column">
     <Static items={[{ id: 'header', entries: [] }, ...conversation.history.map(turn => ({ id: String(turn.id), entries: turn.entries }))]}>{item => item.id === 'header'
-      ? <Box key="header" flexDirection="column" marginBottom={1}><Text bold color="green">JUICED</Text><Text dimColor>Claude on Cantelop · workspace {workspace} · local keyboard and interface</Text><Text dimColor>Session {agent.session.id} · reattach with juiced --resume claude</Text></Box>
+      ? <Box key="header" flexDirection="column" marginBottom={1}><Text bold color="green">JUICED</Text><Text dimColor>Claude on Cantelop · workspace {workspace} · local keyboard and interface</Text><Text dimColor>Session {agent.session.id} · reattach with juiced claude in this tab</Text></Box>
       : <Entries key={item.id} entries={item.entries} />}</Static>
     <Box flexDirection="column" maxHeight={height} overflow="hidden">
       <Clipped tail><Entries entries={liveEntries(conversation).slice(-12)} /></Clipped>

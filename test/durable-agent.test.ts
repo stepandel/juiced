@@ -13,8 +13,7 @@ import { createDurableAgent } from '../src/runtime/durable-agent.js';
 import { AgentJournal } from '../src/runtime/agent-journal.js';
 import type { createTerminal } from '../src/runtime/terminal.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
-import { agentSessionId, prepareAgentSession } from '../src/session-state.js';
-import { parseArguments } from '../src/args.js';
+import { prepareAgentSession } from '../src/session-state.js';
 import { commandMenu } from '../src/tui/command-menus.js';
 
 async function until(check: () => boolean, ms = 10_000) {
@@ -469,17 +468,4 @@ test('a replacement runtime reports interruption and never resends an uncertain 
   assert.ok(reply.ok && reply.replay?.entries.some(entry => entry.event.type === 'reset' && entry.event.interrupted));
   await assert.rejects(service.send({ type: 'agent-input', id, epoch: 'old-process', frame }), /interrupted/);
   await service.dispose();
-});
-
-test('resume pointers distinguish workspaces and validate explicit session identities', async t => {
-  const root = await mkdtemp('/tmp/juiced-session-pointer-'); t.after(() => rm(root, { recursive: true, force: true }));
-  const project = { localDirectory: root, workspace: 'one' };
-  const id = await agentSessionId(project); assert.equal(await agentSessionId(project, true), id);
-  await assert.rejects(agentSessionId({ ...project, workspace: 'two' }, true), /No saved/);
-  const explicit = `ses_${randomUUID().replaceAll('-', '')}`;
-  assert.equal(await agentSessionId(project, true, explicit), explicit);
-  assert.equal(await agentSessionId(project, true), explicit);
-  assert.deepEqual(parseArguments(['--resume', 'claude'], {}), { command: 'claude', action: 'run', workspace: undefined, argv: [], resume: true });
-  assert.equal(parseArguments(['--session', explicit, 'claude'], {}).command, 'claude');
-  assert.throws(() => parseArguments(['--resume', 'claude', 'sync', '--files'], {}), /interactive/);
 });

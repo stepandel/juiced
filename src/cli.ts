@@ -72,12 +72,12 @@ try {
         } finally { await client.close().catch(() => {}); }
       } else {
         const localTui = useLocalTui(args.argv, Boolean(process.stdin.isTTY && process.stdout.isTTY));
-        if (args.resume && !localTui) throw new Error('Juiced session recovery requires an interactive terminal.');
-        const automaticResume = args.action === 'run' && localTui && !args.resume && usesTerminalSession(args.argv, args.newSession);
+        if (args.session && !localTui) throw new Error('Juiced session recovery requires an interactive terminal.');
+        const automaticResume = args.action === 'run' && localTui && !args.session && usesTerminalSession(args.argv, args.newSession);
         const terminal = automaticResume ? await terminalIdentity() : undefined;
         if (automaticResume && !terminal) process.stderr.write('juiced: Could not identify this terminal session; automatic resume is unavailable.\n');
         const selected = localTui ? await prepareAgentSession(project, {
-          ...(args.resume ? { resume: true } : {}), ...(args.session ? { explicit: args.session } : {}),
+          ...(args.session ? { explicit: args.session } : {}),
           // Reattaching keeps the saved launch configuration. New Claude
           // arguments must start a new session so prompts and flags take effect.
           ...(args.action === 'run' && (args.newSession || terminal && args.argv.length > 0) ? { fresh: true } : {}),
