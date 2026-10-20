@@ -9,10 +9,11 @@ import { DOWNLOAD_CHUNK_BYTES, MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid,
 import { validProjectName } from '../project-name.js';
 import { acquireCheckout, reapCheckout } from './project-state.js';
 import { workingTree } from '../working-tree.js';
+import { isENOENT, writeFileAtomic } from '../fs-util.js';
 
 type Binding = { version: 1; binding: string; sourceBranch: string | null; publishBase?: { head: string; tree: string } };
 type Journal = { id: string; binding: Binding; hadOriginal: boolean };
-const exists = async (path: string) => { try { await lstat(path); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; } };
+const exists = async (path: string) => { try { await lstat(path); return true; } catch (error) { if (isENOENT(error)) return false; throw error; } };
 
 export async function projectPaths(workspace: string, directoryName: string) {
   if (!validProjectName(directoryName)) throw new Error('Invalid project directory');
@@ -28,7 +29,7 @@ export async function projectPaths(workspace: string, directoryName: string) {
   try {
     const info = await lstat(target);
     if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Unsafe project directory');
-  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  } catch (error) { if (!isENOENT(error)) throw error; }
   return { root, target, metadata, transfers: join(metadata, 'transfers') };
 }
 
@@ -38,15 +39,10 @@ export async function readBinding(metadata: string): Promise<Binding | undefined
     if (value.version !== 1 || !/^[a-f0-9]{64}$/.test(value.binding) || value.sourceBranch !== null && typeof value.sourceBranch !== 'string') throw new Error('Invalid workspace Git binding');
     if (value.publishBase && (!validOid(value.publishBase.head) || !validOid(value.publishBase.tree))) throw new Error('Invalid publication baseline');
     return value;
-  } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+  } catch (error) { if (isENOENT(error)) return; throw error; }
 }
 
-export async function atomicJSON(path: string, value: unknown) {
-  const file = await open(path + '.next', 'w', 0o600);
-  try { await file.writeFile(JSON.stringify(value)); await file.sync(); }
-  finally { await file.close(); }
-  await rename(path + '.next', path);
-}
+export const atomicJSON = (path: string, value: unknown) => writeFileAtomic(path, JSON.stringify(value));
 
 /** GNU cp is several times faster than fs.cp on large checkouts and keeps mtimes, so Git's stat cache stays useful. */
 async function copyTree(source: string, destination: string, signal: AbortSignal) {
@@ -104,7 +100,7 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
     const recover = async () => {
       let journal: Journal;
       try { journal = JSON.parse(await readFile(join(paths.metadata, 'journal.json'), 'utf8')); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+      catch (error) { if (isENOENT(error)) return; throw error; }
       if (!validTransferId(journal.id) || journal.binding.binding !== command.binding) throw new Error('Invalid Git publication journal');
       const candidate = join(paths.transfers, journal.id, 'candidate');
       const backup = join(paths.transfers, journal.id, 'previous');
@@ -126,10 +122,10 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
         if (current.sourceBranch !== command.configuration.branch) throw new Error('The local branch changed. Select a fresh --workspace for that branch.');
         const path = join(paths.metadata, 'remotes.json');
         const desired = JSON.stringify(command.configuration);
-        const stored = await readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
+        const stored = await readFile(path, 'utf8').catch(error => { if (isENOENT(error)) return undefined; throw error; });
         if (stored === desired) return {};
         return maintenance(async signal => {
-          const latest = await readFile(path, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
+          const latest = await readFile(path, 'utf8').catch(error => { if (isENOENT(error)) return undefined; throw error; });
           if (latest === desired) return {};
           const previous = latest ? JSON.parse(latest) as GitRemoteConfiguration : undefined;
           await applyRemoteConfiguration(paths.target, command.configuration, previous, signal);

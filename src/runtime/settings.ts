@@ -1,8 +1,8 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { validateSavedSettings, type SavedSettings } from '../settings.js';
+import { isENOENT, writeFileAtomic } from '../fs-util.js';
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -23,11 +23,10 @@ export async function saveSettings(workspace: string, patch: SavedSettings, sign
     }
   }
   const path = join(directory, 'settings.json');
-  const temporary = join(directory, `.settings-${randomUUID()}.tmp`);
   try {
     let settings: unknown = {};
     try { settings = JSON.parse(await readFile(path, 'utf8')); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    catch (error) { if (!isENOENT(error)) throw error; }
     if (!record(settings)) throw new Error('Claude settings.json must contain a JSON object');
     for (const [key, value] of Object.entries(patch)) {
       if (key === 'permissionMode') {
@@ -35,13 +34,6 @@ export async function saveSettings(workspace: string, patch: SavedSettings, sign
         settings.permissions = { ...settings.permissions as Record<string, unknown> | undefined, defaultMode: value };
       } else settings[key] = value;
     }
-    const file = await open(temporary, 'wx', 0o600);
-    try { await file.writeFile(JSON.stringify(settings, null, 2) + '\n'); await file.sync(); }
-    finally { await file.close(); }
-    signal.throwIfAborted();
-    await rename(temporary, path);
-  } finally {
-    try { await rm(temporary, { force: true }); }
-    finally { await rm(lock, { recursive: true, force: true }); }
-  }
+    await writeFileAtomic(path, JSON.stringify(settings, null, 2) + '\n', { signal });
+  } finally { await rm(lock, { recursive: true, force: true }); }
 }

@@ -44,8 +44,11 @@ test('withTimeout forwards the parent reason, times out with TimeoutError and un
   parent.abort(reason);
   await assert.rejects(pending, error => error === reason);
 
+  // Like AbortSignal.timeout, the deadline timer is unref'd; hold the loop open here.
+  const alive = setTimeout(() => {}, 10_000);
   await assert.rejects(withTimeout(new AbortController().signal, 5, signal => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)))),
     (error: Error) => error.name === 'TimeoutError');
+  clearTimeout(alive);
 
   const aborted = AbortSignal.abort(reason);
   assert.equal(await withTimeout(aborted, 1000, async signal => signal.reason), reason);

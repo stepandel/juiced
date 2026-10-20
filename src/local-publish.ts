@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { isENOENT, writeFileAtomic } from './fs-util.js';
 import { ancestor, cleanRepository, discoverRepository, git, gitText, sha256, type Repository } from './git.js';
 import { GitWorkspaceClient, type GitWorkspace } from './git-workspace.js';
 import { validateExportManifest, validTransferId } from './git-protocol.js';
@@ -36,10 +37,8 @@ async function checkoutLock(root: string) {
   throw new Error('Another Juiced client is updating this repository. Retry.');
 }
 
-async function saveJSON(path: string, value: unknown) {
-  await writeFile(path + '.next', JSON.stringify(value), { mode: 0o600 });
-  await rename(path + '.next', path);
-}
+// The receipt guards against applying twice, so it must survive a crash.
+const saveJSON = (path: string, value: unknown) => writeFileAtomic(path, JSON.stringify(value));
 
 export class LocalPublisher {
   constructor(private workspace: GitWorkspace, private project: Project, private original: Repository) {}
@@ -73,7 +72,7 @@ export class LocalPublisher {
       const fingerprint = sha256(JSON.stringify({ kind: publication.kind, manifest: publication.manifest }));
       let receipt: Receipt | undefined;
       try { receipt = JSON.parse(await readFile(receiptPath, 'utf8')); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      catch (error) { if (!isENOENT(error)) throw error; }
       if (receipt?.fingerprint !== undefined && receipt.fingerprint !== fingerprint) throw new Error('This publication identity was used for different contents.');
       if (receipt?.result) return { status: 'already-applied', message: 'This publication was already applied locally; no files were changed again.' };
       const check = async () => {
@@ -117,7 +116,7 @@ export class LocalPublisher {
         for (const part of path.split('/').slice(0, -1)) {
           parent = join(parent, part);
           try { if (!(await lstat(parent)).isDirectory()) throw new Error(`A snapshot path has a symlink or non-directory ancestor: ${path}`); }
-          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; break; }
+          catch (error) { if (!isENOENT(error)) throw error; break; }
         }
       }
       const matches = async (expected: string, actual: string) => !(await git(repository.root, ['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', '--no-renames', expected, actual, '--', ...paths], { env: { GIT_LITERAL_PATHSPECS: '1' }, signal })).length;

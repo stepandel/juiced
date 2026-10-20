@@ -1,23 +1,16 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, open, readdir, rename, rm } from 'node:fs/promises';
+import { lstat, open, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SESSION_PAGE_SIZE, validSessionId, validSessionKey, validateSessionListCommand, type SessionListCommand, type SessionListPage } from '../session-list-protocol.js';
+import { isENOENT, writeFileAtomic } from '../fs-util.js';
 
 export const sessionKey = (id: string) => createHash('sha256').update(id).digest('hex');
 
 /** Save the reversible identity beside the hashed history, including on legacy reattachment. */
 export async function saveSessionIdentity(directory: string, id: string) {
   if (!validSessionId(id)) return;
-  const temporary = join(directory, `identity.${randomUUID()}.tmp`);
-  try {
-    const file = await open(temporary, 'wx', 0o600);
-    try { await file.writeFile(JSON.stringify({ version: 1, id }) + '\n'); await file.sync(); }
-    finally { await file.close(); }
-    await rename(temporary, join(directory, 'identity.json'));
-    const parent = await open(directory, 'r');
-    try { await parent.sync(); } finally { await parent.close(); }
-  } finally { await rm(temporary, { force: true }); }
+  await writeFileAtomic(join(directory, 'identity.json'), JSON.stringify({ version: 1, id }) + '\n');
 }
 
 async function identity(directory: string, key: string) {
@@ -72,7 +65,7 @@ export async function listRemoteSessions(command: SessionListCommand, signal: Ab
     }
     entries = await readdir(root, { withFileTypes: true });
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { items: [], unreadable: 0 };
+    if (isENOENT(error)) return { items: [], unreadable: 0 };
     throw error;
   }
   const keys = entries.filter(entry => entry.isDirectory() && validSessionKey(entry.name) && entry.name > (command.after ?? '')).map(entry => entry.name).sort();
@@ -87,7 +80,7 @@ export async function listRemoteSessions(command: SessionListCommand, signal: Ab
       page.items.push({ key, ...(id ? { id } : {}), updatedAt: saved.updatedAt });
     } catch (error) {
       if (signal.aborted) throw error;
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') page.unreadable++;
+      if (!isENOENT(error)) page.unreadable++;
     }
   }
   if (keys.length > SESSION_PAGE_SIZE) page.after = keys[SESSION_PAGE_SIZE - 1]!;

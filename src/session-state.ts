@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { isENOENT, writeFileAtomic } from './fs-util.js';
 
 type Project = { localDirectory: string; workspace: string };
 type TerminalBinding = { identity: string; workspaceId: string };
@@ -24,7 +25,7 @@ export async function prepareAgentSession(project: Project, options: { explicit?
       id = state.id;
       resumed = true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (!isENOENT(error)) throw error;
     }
   }
   id ??= `ses_${randomUUID().replaceAll('-', '')}`;
@@ -40,13 +41,5 @@ export async function prepareAgentSession(project: Project, options: { explicit?
 
 async function saveSession(path: string, state: string) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  try {
-    const file = await open(temporary, 'wx', 0o600);
-    try { await file.writeFile(state); await file.sync(); }
-    finally { await file.close(); }
-    await rename(temporary, path);
-    const directory = await open(dirname(path), 'r');
-    try { await directory.sync(); } finally { await directory.close(); }
-  } finally { await rm(temporary, { force: true }); }
+  await writeFileAtomic(path, state);
 }

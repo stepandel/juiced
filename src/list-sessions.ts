@@ -5,6 +5,7 @@ import type { Writable } from 'node:stream';
 import type { WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
 import { discoverRepository } from './git.js';
 import { selectProject } from './project.js';
+import { isENOENT } from './fs-util.js';
 import { SESSION_LIST_TIMEOUT_MS, validSessionId, validateSessionListPage, type SessionListCommand } from './session-list-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
 
@@ -14,14 +15,14 @@ async function localIdentities(project: { localDirectory: string; workspace: str
   const directory = join(project.localDirectory, '.cantelop', 'juiced');
   let entries;
   try { entries = await readdir(directory, { withFileTypes: true }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Map<string, string>(); throw error; }
+  catch (error) { if (isENOENT(error)) return new Map<string, string>(); throw error; }
   const ids = new Map<string, string>();
   for (const entry of entries) if (entry.isFile() && /^[a-f0-9]{64}\.json$/.test(entry.name)) {
     try {
       const state = JSON.parse(await readFile(join(directory, entry.name), 'utf8'));
       if (state?.workspace === project.workspace && validSessionId(state.id)) ids.set(createHash('sha256').update(state.id).digest('hex'), state.id);
     } catch (error) {
-      if (!(error instanceof SyntaxError) && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (!(error instanceof SyntaxError) && !isENOENT(error)) throw error;
     }
   }
   return ids;
