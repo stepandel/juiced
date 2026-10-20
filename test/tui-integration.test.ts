@@ -223,6 +223,14 @@ test('permission UI defaults to deny, ignores pasted approval shortcuts and pres
     stdin.write('\x1b[C'); stdin.write('\r');
     await wait(() => agent.answers.length === 2);
     assert.equal(agent.answers[1], true, 'A rapid arrow then Enter must confirm the selected choice');
+    const localOffset = output.length;
+    agent.approvals.set('local-publication', { id: 'local-publication', local: true, tool: 'Publish snapshot', input: { files: 2, paths: ['README.md', 'src/app.ts'] }, description: 'Apply remote edits locally' });
+    agent.emit('approvals');
+    await wait(() => stripVTControlCharacters(output.slice(localOffset)).includes('in your local checkout?'));
+    stdin.write('\x1b[200~y\x1b[201~'); await delay(40);
+    assert.equal(agent.answers.length, 2, 'Pasted text cannot approve a local publication');
+    stdin.write('\r'); await wait(() => agent.answers.length === 3);
+    assert.equal(agent.answers[2], false, 'Local publication defaults to Deny');
   } finally { lifetime.abort(); await running; }
   assert.equal(stdin.isRaw, false);
 });

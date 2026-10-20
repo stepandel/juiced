@@ -105,7 +105,7 @@ function Permission({ approval, answer, cancel }: { approval: Approval; answer(a
   });
   const preview = plain(JSON.stringify(approval.input, null, 2));
   return <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} overflow="hidden">
-    <Box flexShrink={0}><Text bold color="yellow">{asking ? 'Claude has a question' : `Allow ${plain(approval.tool)} on Cantelop?`}</Text></Box>
+    <Box flexShrink={0}><Text bold color="yellow">{asking ? 'Claude has a question' : `Allow ${plain(approval.tool)} ${approval.local ? 'in your local checkout' : 'on Cantelop'}?`}</Text></Box>
     {asking ? <>
       <Clipped>
         <Text>{plain(question.question)}</Text>

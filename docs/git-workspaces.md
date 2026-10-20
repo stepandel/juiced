@@ -68,6 +68,12 @@ another snapshot. A different local branch requires a fresh workspace selection.
 
 ## Import and apply results
 
+Interactive Claude can also request local application through the built-in
+`juiced-local` MCP tools. Commit publication uses the same import and fast-forward
+rules; snapshot publication brings file edits back without requiring a user
+commit. Both require an explicit local TUI confirmation. See
+[local publication](local-publication.md).
+
 ```sh
 juiced claude sync --from-workspace
 juiced claude fast-forward

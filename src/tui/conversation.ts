@@ -48,6 +48,7 @@ export function receiveFrame(state: Conversation, frame: ClaudeFrame): Conversat
     if (index === -1) live.push(entry); else live[index] = entry;
   };
   if (frame.type === 'system' && frame.subtype === 'init') return { ...state, model: plain(frame.model) };
+  if (frame.type === 'juiced_publish') put({ id: `publish-${frame.id}`, kind: 'notice', text: plain(frame.message), status: frame.failed ? 'failed' : 'done' });
   if (frame.type === 'system' && frame.subtype === 'api_retry') {
     put({ id: 'retry', kind: 'notice', text: `Claude is retrying (${frame.attempt ?? '?'})…` });
   }
