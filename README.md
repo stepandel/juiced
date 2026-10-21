@@ -29,7 +29,7 @@ and pick up where you left off.
 
 ## Requirements
 
-- Node.js 22 or later
+- macOS 13.5+ or Linux with glibc 2.28+, on Apple Silicon, x64, or Linux arm64
 - Git, for working with Git repositories
 - A Claude account with Claude Code access (Juiced does not include model usage)
 - A [Juiced account](https://juiced.codes/pricing), or your own
@@ -37,7 +37,32 @@ and pick up where you left off.
 
 ## Install
 
-The CLI is not yet published to npm. Build it from source:
+```sh
+curl -fsSL https://juiced.codes/install.sh | sh
+```
+
+The installer downloads a [release](https://github.com/stepandel/juiced/releases)
+with Node.js and all dependencies bundled, so you don't need Node.js or npm. It
+verifies checksums and installs without `sudo` into `~/.local/share/juiced`, with
+the `juiced` command in `~/.local/bin`. Add `~/.local/bin` to your `PATH` if
+prompted; shell startup files are left unchanged.
+
+Rerun the command to update, or pin a version:
+
+```sh
+curl -fsSL https://juiced.codes/install.sh | sh -s -- 0.2.0
+```
+
+`JUICED_INSTALL_DIR` and `JUICED_BIN_DIR` choose other absolute install and
+command directories; set them on `sh` when piping. See
+[CLI releases](docs/cli-releases.md) for removal and other details.
+
+> The unrelated `juiced` package on the npm registry is not this project. Don't
+> install it.
+
+### From source
+
+With Node.js 22 or later:
 
 ```sh
 git clone https://github.com/stepandel/juiced.git
@@ -46,9 +71,6 @@ npm install
 npm run build
 npm link
 ```
-
-> The unrelated `juiced` package on the npm registry is not this project. Don't
-> install it.
 
 ## Quick start
 
@@ -97,7 +119,8 @@ juiced claude fast-forward             # apply them to your branch
 ## Contributing
 
 See [development](docs/development.md) for building, testing, and the
-architecture overview.
+architecture overview, and [CLI releases](docs/cli-releases.md) for packaging and
+publishing.
 
 ## License
 

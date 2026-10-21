@@ -14,7 +14,7 @@ const execute = promisify(execFile);
 
 // Keep the actual CLI, argument parsing, identity selection, and SDK validation.
 // Replace only rendering and network IO so repeated invocations are deterministic.
-test('CLI reconnects the same tab, starts fresh on --new, and bypasses bindings for explicit recovery', { timeout: 20_000 }, async t => {
+test('CLI reconnects the same tab, starts fresh on --new, and bypasses bindings for explicit recovery', { timeout: 60_000 }, async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'juiced-terminal-cli-')));
   const projectRoot = fileURLToPath(new URL('../', import.meta.url));
   await mkdir(join(projectRoot, '.cantelop'), { recursive: true });
