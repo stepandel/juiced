@@ -102,7 +102,7 @@ cantelop() {
     process.stdout.write(m.session_runtime_id);')
   # CANTELOP_RELEASE selects a release; the App's active one is the default.
   # Package versions are immutable, so each App release gets its own.
-  read -r release version < <(cantelop releases --json | CANTELOP_RELEASE=${CANTELOP_RELEASE:-} node -e '
+  read -r release version < <(command cantelop releases --json | CANTELOP_RELEASE=${CANTELOP_RELEASE:-} node -e '
     let s = ""; process.stdin.on("data", (c) => (s += c)).on("end", () => {
       const d = JSON.parse(s), rs = Array.isArray(d) ? d : d.releases ?? d.items;
       const want = process.env.CANTELOP_RELEASE;
