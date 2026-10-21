@@ -2,7 +2,7 @@ import { PublicPage } from '../site-components';
 import { pageMetadata } from '../../src/site';
 
 const description =
-  'Juiced is free: every feature and the compute your workspaces use. Claude Code access is separate.';
+  'Start free with every Juiced feature and 10 vCPU hours. Unlimited compute for $25 per month is coming soon. Claude Code access is separate.';
 export const metadata = pageMetadata('Pricing', description, '/pricing');
 
 export default function Pricing() {
@@ -12,12 +12,21 @@ export default function Pricing() {
         <section className="pricing-card" aria-labelledby="free-plan">
           <h2 id="free-plan">Free</h2>
           <p className="price">$0</p>
-          <p>Every feature and the compute your workspaces use.</p>
+          <p>10 vCPU hours.</p>
+        </section>
+        <section className="pricing-card soon" aria-labelledby="paid-plan">
+          <h2 id="paid-plan">
+            Unlimited <span className="badge mono">coming soon</span>
+          </h2>
+          <p className="price">
+            $25 <span>/ month</span>
+          </p>
+          <p>Unlimited compute.</p>
         </section>
       </div>
       <p className="pricing-details">
-        Juiced accounts are free while we learn how people use them. Claude
-        Code access is separate.
+        Both plans include every feature. One vCPU hour is one virtual CPU
+        running for one hour. Claude Code access is separate.
       </p>
       <p>
         <a href="/docs/getting-started">Get started</a>

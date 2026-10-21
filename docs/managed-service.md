@@ -68,7 +68,8 @@ The website is `https://juiced.codes`.
 The homepage is a static Next.js page and
 `/health` checks the HTTP handler without account credentials. Account routes and
 `/ready` return HTTP 503 until production configuration is supplied. The homepage
-links to public docs and pricing. Every account is free: migration
+links to public docs and pricing. Free includes 10 vCPU hours; Unlimited
+($25/month) is marked coming soon. Both plans include all features. In the service every account is free: migration
 `0011-free-accounts.sql` starts each account on the `free` epoch with an
 effectively unlimited allowance (10^15 credits until 2100). A paid Stripe
 invoice replaces that epoch when billing is configured later. See

@@ -13,7 +13,7 @@ Source repository: https://github.com/stepandel/juiced
 - [Syncing code](https://juiced.codes/docs/syncing-code): Initial Git checkout, explicit uploads, importing commits, and fast-forwarding locally.
 - [Remote Claude Code](https://juiced.codes/docs/remote-claude-code): Running a turn with your laptop closed, permission pauses, and Claude access requirements.
 - [Juiced vs a VPS](https://juiced.codes/docs/juiced-vs-vps): Compare managed project workspaces with operating your own server.
-- [Pricing](https://juiced.codes/pricing): Juiced accounts are free, including every feature and workspace compute. Claude Code access is separate.
+- [Pricing](https://juiced.codes/pricing): Free includes 10 vCPU hours. Unlimited compute for $25/month is coming soon. Both plans include all Juiced features. One vCPU hour is one virtual CPU running for one hour. Claude Code access is separate.
 
 ## Product facts
 
