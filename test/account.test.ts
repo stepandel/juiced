@@ -6,6 +6,18 @@ import { join } from 'node:path';
 import { parseInvocation } from '../src/account/invocation.js';
 import { CredentialStore } from '../src/account/store.js';
 import { AccountClient } from '../src/account/client.js';
+import { readInstallation } from '../contracts/account.js';
+
+test('installation responses carry prerelease minimums through the shared CLI/service contract', () => {
+  const installation = {
+    id: 'jin_' + 'a'.repeat(32), status: 'ready', runtimeId: 'runtime-1',
+    minimumCli: '0.2.0-rc.2', error: null, operationId: 'provision:test',
+  };
+  assert.deepEqual(readInstallation(installation), installation);
+  assert.equal(readInstallation({ ...installation, minimumCli: '0.2.0' }).minimumCli, '0.2.0');
+  for (const minimumCli of ['0.2.0-rc.01', '0.2.0\n', 'not-a-version', '0.2.0-' + 'a'.repeat(128)])
+    assert.throws(() => readInstallation({ ...installation, minimumCli }), /Invalid Juiced installation/);
+});
 
 test('managed invocation defaults explicitly and separates account selectors from Claude prompts', () => {
   assert.deepEqual(parseInvocation(['claude', '--', 'login'], {}), {

@@ -4,7 +4,7 @@ import type { Pool, PoolClient } from 'pg';
 import { ServiceError } from './config.js';
 import { transaction } from './db.js';
 import type { Identity } from './auth.js';
-import { cliVersionAtLeast } from './cli-version.js';
+import { cliVersionAtLeast } from '../../contracts/cli-version.js';
 
 export const id = (prefix: string) => `${prefix}_${randomUUID().replaceAll('-', '')}`;
 export interface Account {

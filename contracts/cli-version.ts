@@ -21,6 +21,10 @@ export function cliVersionAtLeast(version: string, minimum: string): boolean {
   return true;
 }
 
+export function isCliVersion(value: string): boolean {
+  return parse(value) !== undefined;
+}
+
 function parse(value: string) {
   if (value.length > 128) return;
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);

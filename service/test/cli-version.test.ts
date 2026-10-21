@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { cliVersionAtLeast } from '../src/cli-version.js';
+import { cliVersionAtLeast } from '../../contracts/cli-version.js';
 
 test('release candidates must be explicitly allowed by the service minimum', () => {
   assert.equal(cliVersionAtLeast('0.2.0-rc.1', '0.2.0-rc.1'), true);
