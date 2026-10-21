@@ -140,7 +140,10 @@ References: [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/ne
    With it, Stripe's fixed-price subscription and portal configuration is required. Remote PostgreSQL uses
    certificate verification. Register OAuth callbacks at
    `https://juiced.codes/api/auth/callback/github` and `/google`.
-3. Run `npm run migrate:service` as the schema owner. Apply
+3. `service/deploy/production-env.sh` performs this step and writes the
+   generated role URLs, auth secret, OAuth and Fleet values to Vercel production
+   without echoing them; run it per section (`auth`, `database`, `oauth`,
+   `cantelop`). Manually: run `npm run migrate:service` as the schema owner. Apply
    `service/deploy/roles.sql` after migrations and provision login secrets outside
    source control. The API role cannot update paid periods, included credits,
    usage or immutable grants. Use separate database credentials and Fleet
