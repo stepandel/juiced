@@ -20,8 +20,8 @@
     .cursor{display:inline-block;height:15px;width:7px;background:var(--green);vertical-align:-3px;animation:blink 1.1s steps(1) infinite}
     .terminal-foot{border-top:1px solid #1d241e;padding:9px 16px;color:var(--muted);font-size:10px;letter-spacing:.06em;text-transform:uppercase;display:flex;justify-content:space-between}.terminal-foot span{display:flex;gap:7px;align-items:center}
     .live{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
-    .features{border-top:1px solid var(--line);padding:64px 0 80px;display:grid;grid-template-columns:repeat(3,1fr);gap:48px}
-    .number{color:var(--green);font-size:12px;text-transform:uppercase;letter-spacing:.04em}h2{font-size:20px;letter-spacing:-.02em;font-weight:600;margin:14px 0 10px}.features p{color:var(--muted);font-size:14px;line-height:1.8;margin:0}
+    .features{border-top:1px solid var(--line);padding:56px 0 80px;display:grid;grid-template-columns:repeat(3,1fr);gap:24px 48px}.features>h2{grid-column:1/-1;margin:0}
+    .number{color:var(--green);font-size:12px;text-transform:uppercase;letter-spacing:.04em}h3{font-size:20px;letter-spacing:-.02em;font-weight:600;margin:6px 0 8px}.features p{color:var(--muted);font-size:15px;line-height:1.7;margin:0}.features code{color:var(--ink);font-size:.9em}
     footer{border-top:1px solid var(--line);padding:24px 0 36px;display:flex;justify-content:space-between;gap:20px;font-size:12px;color:var(--muted)}footer a{text-decoration:none}footer a:hover{color:var(--green)}
     @keyframes blink{50%{opacity:0}}
     @media(max-width:900px){.hero{gap:40px;padding:72px 0 80px}.terminal-body{padding:20px;font-size:12px}.features{gap:28px}}

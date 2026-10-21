@@ -3,9 +3,9 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Juiced — Claude Code, with more juice.',
+  title: 'Juiced — Claude Code, always on.',
   description:
-    'Run Claude Code in an isolated cloud workspace. Keep your terminal, your code, and your Claude account.',
+    'Juiced runs Claude Code in a private cloud workspace that you drive from your terminal. Close your laptop. Claude keeps working.',
   icons: { icon: '/favicon.svg' },
 };
 export const viewport: Viewport = { themeColor: '#0b0d0b' };
