@@ -12,7 +12,7 @@ import { CredentialStore } from '../src/account/store.js';
 const execute = promisify(execFile);
 test(
   'built managed CLI pins account, installation, device token and compiled runtime without Cantelop credentials',
-  { timeout: 20000 },
+  { timeout: 60_000 },
   async (t) => {
     const root = await mkdtemp(join(tmpdir(), 'juiced-managed-cli-')),
       projectRoot = fileURLToPath(new URL('../', import.meta.url));

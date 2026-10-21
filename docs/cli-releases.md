@@ -50,20 +50,20 @@ runs that archive with Node and npm absent from PATH.
 
 ### Release candidates
 
-Use a SemVer suffix such as `0.2.0-rc.2` for all CLI version fields and the matching
-`v0.2.0-rc.2` tag. The workflow marks the draft as a prerelease automatically.
+Use a SemVer suffix such as `0.2.0-rc.3` for all CLI version fields and the matching
+`v0.2.0-rc.3` tag. The workflow marks the draft as a prerelease automatically.
 Publish it with the prerelease flag retained and without marking it latest.
 Before `/install.sh` is deployed to the website, install the candidate directly:
 
 ```sh
-curl -fsSL https://github.com/stepandel/juiced/releases/download/v0.2.0-rc.2/install.sh | sh -s -- 0.2.0-rc.2
+curl -fsSL https://github.com/stepandel/juiced/releases/download/v0.2.0-rc.3/install.sh | sh -s -- 0.2.0-rc.3
 ```
 
 An RC requires an explicit version; GitHub's stable `latest` endpoint excludes
 prereleases. For managed-account testing, deploy the service's prerelease-aware
-version check and set `JUICED_MINIMUM_CLI=0.2.0-rc.2` alongside the matching
+version check and set `JUICED_MINIMUM_CLI=0.2.0-rc.3` alongside the matching
 qualified package/runtime IDs. A stable minimum of `0.2.0` correctly excludes
-`0.2.0-rc.2`. Publishing the CLI does not activate or deploy account infrastructure.
+`0.2.0-rc.3`. Publishing the CLI does not activate or deploy account infrastructure.
 
 The installer resolves GitHub's latest release to a specific version before
 downloading its checksum manifest and archive. Checksums detect corrupt or

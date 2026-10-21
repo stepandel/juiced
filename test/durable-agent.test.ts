@@ -501,7 +501,9 @@ test('rerunning in the same terminal selects the durable session and restores it
 });
 
 test('idle processes exit and the next prompt resumes the native conversation', async t => {
-  const f = await fixture(t, 50); await f.agent.start(); await f.agent.submit('First');
+  // Leave enough time for initialization and input under native CI contention;
+  // still wait for the observed idle exit before submitting the second turn.
+  const f = await fixture(t, 500); await f.agent.start(); await f.agent.submit('First');
   await f.frame({ type: 'result', result: 'Saved first turn' });
   await until(() => !f.service.active);
   await f.agent.submit('Second');

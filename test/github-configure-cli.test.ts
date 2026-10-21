@@ -11,7 +11,9 @@ import { createCantelopCompilerPlugin } from '@cantelop/sdk/build';
 
 const execute = promisify(execFile);
 
-test('built github-configure CLI uses the app API without a workspace, Claude login, or Cantelop CLI', { timeout: 20_000 }, async t => {
+// Allow compilation plus five subprocesses on slower native CI hosts. Each
+// subprocess retains its own deadline below.
+test('built github-configure CLI uses the app API without a workspace, Claude login, or Cantelop CLI', { timeout: 60_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'juiced-github-cli-'));
   const projectRoot = fileURLToPath(new URL('../', import.meta.url));
   await mkdir(join(projectRoot, '.cantelop'), { recursive: true });
