@@ -430,9 +430,15 @@ test('a cancelled MCP upload cannot apply bytes that were already transferred', 
   const pending = await f.pull();
   await f.uploader.prepare(pending.request, f.signal);
   const uploaded = await f.uploader.send(pending.request, f.signal);
+  const client = randomUUID();
+  await f.bridge.input({ type: 'publish-claim', id: pending.request.id, client });
   pending.cancel();
   assert.equal((await pending.response).isError, true);
+  // The MCP child reports its socket closure before the runtime necessarily
+  // observes it. Wait for the runtime's completion event before retrying there.
+  await poll(() => f.completed.includes(pending.request.id), { message: 'Runtime did not finish the cancelled upload' });
   await assert.rejects(f.bridge.input({ type: 'publish-claim', id: pending.request.id, client: randomUUID() }), /no longer pending/);
+  await assert.rejects(f.bridge.input({ type: 'publish-result', id: pending.request.id, client, result: uploaded }), /no longer pending/);
   assert.equal(await readFile(join(f.target, 'README.md'), 'utf8'), 'base\n');
   await assert.rejects(readFile(join(f.remote, '.juiced', f.project.directoryName, 'transfers', uploaded.uploadId!, 'live-started.json')), /ENOENT/);
 });
