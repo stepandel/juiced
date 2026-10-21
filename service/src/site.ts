@@ -4,7 +4,7 @@ export const site = {
   name: 'Juiced',
   url: 'https://juiced.codes',
   github: 'https://github.com/stepandel/juiced',
-  title: 'Juiced — Claude Code, always on.',
+  title: 'Juiced — Claude Code, with more juice.',
   description:
     'Juiced runs Claude Code in a private cloud workspace that you drive from your terminal. Close your laptop. Claude keeps working.',
 };

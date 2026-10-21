@@ -45,7 +45,9 @@ export default function OpenGraphImage() {
           }}
         >
           <span>Claude Code,</span>
-          <span style={{ color: '#6fd987' }}>always on.</span>
+          <span style={{ display: 'flex', gap: 24 }}>
+            with more <span style={{ color: '#6fd987' }}>juice.</span>
+          </span>
         </div>
         <div
           style={{
