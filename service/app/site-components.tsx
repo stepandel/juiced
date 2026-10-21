@@ -1,25 +1,36 @@
 import type { ReactNode } from 'react';
 import { site } from '../src/site';
 
+export function LogoMark({
+  color = 'currentColor',
+  cutout = 'var(--bg)',
+  ...props
+}: {
+  color?: string;
+  cutout?: string;
+  className?: string;
+  width?: number;
+  height?: number;
+}) {
+  return (
+    <svg viewBox="0 0 26 30" fill="none" aria-hidden="true" {...props}>
+      <path d="M5 10h16l-2 16H7L5 10Z" fill={color} />
+      <path
+        d="m14 3-2 7M5 7h16"
+        stroke={color}
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <path d="m14 14-4 6h4l-1 4 5-7h-4l1-3Z" fill={cutout} />
+    </svg>
+  );
+}
+
 export function SiteHeader() {
   return (
     <header>
       <a href="/" className="brand" aria-label="Juiced home">
-        <svg
-          className="mark"
-          viewBox="0 0 26 30"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path d="M5 10h16l-2 16H7L5 10Z" fill="currentColor" />
-          <path
-            d="m14 3-2 7M5 7h16"
-            stroke="currentColor"
-            strokeWidth="3"
-            strokeLinecap="round"
-          />
-          <path d="m14 14-4 6h4l-1 4 5-7h-4l1-3Z" fill="var(--bg)" />
-        </svg>
+        <LogoMark className="mark" />
         juiced
       </a>
       <nav className="site-nav mono" aria-label="Main navigation">

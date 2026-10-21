@@ -1,9 +1,16 @@
 import { InstallCommand } from './install-command';
 import { SiteHeader, SiteFooter } from './site-components';
-import { site } from '../src/site';
+import { guides } from '../src/guides';
+import { pageMetadata, site } from '../src/site';
 
 // Placeholder until the install script ships.
 const install = 'curl -fsSL https://juiced.codes/install.sh | sh';
+
+export const metadata = pageMetadata(
+  { absolute: site.title },
+  site.description,
+  '/',
+);
 
 export default function Home() {
   return (
@@ -152,10 +159,11 @@ export default function Home() {
           </p>
           <p>Requires Node.js 22 or later and your own Claude Code access.</p>
           <nav className="guide-links" aria-label="Learn about Juiced">
-            <a href="/docs/getting-started">Get started</a>
-            <a href="/docs/workspaces-and-sessions">Workspaces and sessions</a>
-            <a href="/docs/syncing-code">Sync your code</a>
-            <a href="/docs/juiced-vs-vps">Juiced vs a VPS</a>
+            {guides.map(({ slug, title }) => (
+              <a key={slug} href={`/docs/${slug}`}>
+                {title}
+              </a>
+            ))}
           </nav>
         </section>
       </main>

@@ -4,11 +4,7 @@ import { pageMetadata } from '../../src/site';
 
 const description =
   'Learn how to run Claude Code in a Juiced cloud workspace, reconnect to sessions, and bring your code back locally.';
-export const metadata = pageMetadata(
-  'Juiced documentation',
-  description,
-  '/docs',
-);
+export const metadata = pageMetadata('Documentation', description, '/docs');
 
 export default function Docs() {
   return (

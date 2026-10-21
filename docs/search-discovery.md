@@ -25,8 +25,9 @@ it does not fetch fonts or images from an external service.
   offers. This does not claim eligibility for a particular search rich result.
 
 The known public alias `juiced-eight.vercel.app` redirects permanently to the
-canonical host, preserving paths, queries, and HTTP methods. Other Vercel hosts
-and localhost are not redirected. OAuth callbacks should use the canonical
+canonical host, preserving paths, queries, and HTTP methods. `/api/`, `/v1/`, and
+`/webhooks/` are not redirected because cron, queue, Stripe, and CLI callers do
+not follow redirects. Other Vercel hosts and localhost are not redirected. OAuth callbacks should use the canonical
 origin, as documented in the managed-service setup.
 
 ## Verify ownership after deployment
@@ -102,7 +103,8 @@ Start the production build with `npm run start:service` and check:
 - Internal public links resolve, and an unknown guide returns a real 404.
 - `/opengraph-image` returns a 1200 by 630 PNG; preview the image visually.
 - A request with host `juiced-eight.vercel.app` redirects to the custom domain
-  with its path and query intact. Local and preview hosts continue working.
+  with its path and query intact, except API, `/v1/`, and webhook paths. Local
+  and preview hosts continue working.
 - Sign-in/account/device responses carry `noindex`; public pages do not.
 - Sitemap and `llms.txt` contain only public canonical links.
 

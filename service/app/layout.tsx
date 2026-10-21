@@ -1,11 +1,14 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
-import { pageMetadata, site } from '../src/site';
+import { site, titleTemplate } from '../src/site';
 import './globals.css';
 
 export const metadata: Metadata = {
-  ...pageMetadata(site.title, site.description, '/'),
   metadataBase: new URL(site.url),
+  title: titleTemplate,
+  description: site.description,
+  openGraph: { title: titleTemplate },
+  twitter: { title: titleTemplate },
   icons: { icon: '/favicon.svg' },
   verification: {
     ...(process.env.GOOGLE_SITE_VERIFICATION

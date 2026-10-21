@@ -1,6 +1,8 @@
 import { ImageResponse } from 'next/og';
+import { site } from '../src/site';
+import { LogoMark } from './site-components';
 
-export const alt = 'Juiced — Claude Code, always on.';
+export const alt = site.title;
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -29,16 +31,7 @@ export default function OpenGraphImage() {
             fontWeight: 700,
           }}
         >
-          <svg width="36" height="42" viewBox="0 0 26 30" fill="none">
-            <path d="M5 10h16l-2 16H7L5 10Z" fill="#4eba65" />
-            <path
-              d="m14 3-2 7M5 7h16"
-              stroke="#4eba65"
-              strokeWidth="3"
-              strokeLinecap="round"
-            />
-            <path d="m14 14-4 6h4l-1 4 5-7h-4l1-3Z" fill="#0b0d0b" />
-          </svg>
+          <LogoMark width={36} height={42} color="#4eba65" cutout="#0b0d0b" />
           juiced
         </div>
         <div

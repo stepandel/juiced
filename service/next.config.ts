@@ -6,9 +6,10 @@ const config: NextConfig = {
   async redirects() {
     return [
       {
-        source: '/:path*',
+        // Machine callers (cron, queues, Stripe, the CLI) do not follow redirects.
+        source: '/:path((?!(?:api|v1|webhooks)(?:/|$)).*)',
         has: [{ type: 'host' as const, value: 'juiced-eight.vercel.app' }],
-        destination: 'https://juiced.codes/:path*',
+        destination: 'https://juiced.codes/:path',
         permanent: true,
       },
     ];
@@ -27,9 +28,7 @@ const config: NextConfig = {
         ],
       },
       ...[
-        'account',
-        'sign-in',
-        'device',
+        // Account pages set this header in src/pages.ts.
         'api',
         'v1',
         'webhooks',
