@@ -7,7 +7,8 @@ ordering and production qualification. The account-service origin is
 `https://juiced.codes`; builds use it by default. The public website is hosted on
 Vercel, also available at [juiced-eight.vercel.app](https://juiced-eight.vercel.app).
 Account-service activation still requires production configuration and
-qualification. CLI npm publication remains deferred.
+qualification. CLI releases can be distributed through the shell installer;
+npm publication is not required.
 
 The [architecture](docs/multitenancy.md) and
 [implementation plan](docs/multitenancy-implementation.md) describe the design.
@@ -26,7 +27,36 @@ Interactive invocations open the **Juiced TUI on your machine**, connected to a 
 
 The local interface streams Claude's responses, shows tool activity, and asks before actions that Claude requires permission to run. Rerunning `juiced claude` in the same terminal tab, project, and workspace reconnects to that tab's session. Use `juiced claude --new` to start fresh. List saved conversations with `juiced claude sessions`, then reopen one with `juiced claude --session ses_…`. Its ID is also displayed in the session header. Piped commands and explicit `-p`, `--help`, and `--version` invocations retain the native CLI passthrough.
 
-## Set up
+## Install the CLI
+
+After the first public [CLI release](https://github.com/stepandel/juiced/releases)
+is published and the website containing `public/install.sh` is deployed:
+
+```sh
+curl -fsSL https://juiced.codes/install.sh | sh
+juiced login
+juiced claude
+```
+
+The installer supports macOS 13.5+ and Linux with glibc 2.28+, on Apple Silicon,
+Intel/AMD x64, and Linux arm64. Release archives include Node.js and the CLI's
+dependencies; users do not need Node.js or npm. The installer verifies SHA-256
+checksums and installs without `sudo` in `~/.local/share/juiced`, with the command
+in `~/.local/bin`. Add `~/.local/bin` to your `PATH` if prompted. It leaves shell
+startup files unchanged. Git is still needed for Git workspace commands.
+
+Rerun the command to update, or pin a release:
+
+```sh
+curl -fsSL https://juiced.codes/install.sh | sh -s -- 0.2.0
+```
+
+`JUICED_INSTALL_DIR` and `JUICED_BIN_DIR` select absolute installation and command
+directories; set them on `sh` when using a pipe. See [CLI releases](docs/cli-releases.md) for
+building, testing, publishing, rollback and removal. Source builds remain
+available before the first public release.
+
+## Self-managed setup from source
 
 Running Juiced needs Node.js 22+ and configured Cantelop app credentials. The
 [Cantelop CLI](https://cantelop.com/docs) and Docker are deployment tools used for

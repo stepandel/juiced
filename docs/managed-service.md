@@ -8,10 +8,12 @@ Cantelop workflow explicitly.
 
 ## Install and sign in
 
-The account-service origin is `https://juiced.codes`. CLI publication is deferred;
-the unscoped npm name `juiced` is reserved by npm, so do not install its unrelated
-registry placeholder. Build and link this repository while the public service is
-being configured:
+The account-service origin is `https://juiced.codes`. Public CLI releases use the
+[shell installer](cli-releases.md), with bundled Node and dependencies; npm
+publication is not required. The installer needs the first public GitHub Release
+and a website deployment before its public URL is usable. The unscoped npm name
+`juiced` is reserved by npm, so do not install its unrelated registry placeholder.
+Build and link this repository while the public service is being configured:
 
 ```sh
 npm install
@@ -64,7 +66,8 @@ The homepage and `/health` work without account infrastructure. Account pages,
 authentication, billing and API routes remain unavailable with HTTP 503 until
 their production configuration is supplied. `/ready` checks account-service
 initialization and the database. The homepage labels the release as a private
-preview and links to source instructions while npm publication is deferred.
+preview and links to source instructions until public CLI releases and the
+managed service are ready. `public/install.sh` is served by Vercel's CDN.
 
 Set the API's values from `service/.env.example` as Vercel production environment
 variables. Keep `JUICED_SERVICE_URL=https://juiced.codes` and
@@ -104,8 +107,8 @@ Hosting references: [Hono on Vercel](https://vercel.com/docs/frameworks/backend/
 1. Install the pinned registry dependency with `npm ci`. SDK **1.5.0** supplies
    compiled transport rebinding and the public relay validators; its registry
    integrity is recorded in the lockfile. `npm run check:package` verifies a fresh
-   CLI tarball installation against that dependency. CLI npm publication remains
-   deferred until a package name and production launch are ready.
+   CLI tarball installation against that dependency. Public CLI distribution uses
+   [GitHub Release archives](cli-releases.md), independently of npm publication.
 2. Set the values in `service/.env.example`. Production requires both OAuth
    providers, PostgreSQL, a Fleet, approved package/runtime IDs and Stripe's
    fixed-price subscription and portal configuration. Remote PostgreSQL uses

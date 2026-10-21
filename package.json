@@ -16,6 +16,8 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:release": "node scripts/build-release.mjs",
+    "test:installer": "node scripts/test-installer.mjs",
     "build:runtime": "node scripts/build-runtime.mjs",
     "check": "tsc --noEmit",
     "test": "node --import tsx --import ./test/self-managed-fixtures.ts --test --test-concurrency=4 test/*.test.ts",

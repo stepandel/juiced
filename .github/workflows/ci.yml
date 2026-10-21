@@ -26,6 +26,7 @@ jobs:
       - run: npm run check
       - run: npm run check:service
       - run: npm test
+      - run: npm run test:installer
       - run: npm run test:service
       - name: Fresh public package installation
         run: npm run check:package
