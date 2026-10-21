@@ -4,7 +4,7 @@ import type { Approval, ClaudeFrame, SlashCommand } from '../agent-protocol.js';
 import { RemoteAgent, type AgentStatus } from '../remote-agent.js';
 import type { TerminalIO } from '../remote-terminal.js';
 import { emptyConversation, liveEntries, plain, receiveFrame, restoreHistory, turnTokens, userTurn, type Entry } from './conversation.js';
-import { Entries, Header } from './transcript.js';
+import { Entries, Header, Intro } from './transcript.js';
 import { availableCommands } from './commands.js';
 import { CommandMenu, type MenuPage } from './menu.js';
 import { commandMenu, menuCommand } from './command-menus.js';
@@ -25,6 +25,7 @@ function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent
   const [closing, setClosing] = useState(false);
   const [help, setHelp] = useState(false);
   const [transcript, setTranscript] = useState(false);
+  const [intro, setIntro] = useState(true);
   const refused = useRef(new Set<string>());
   const [, repaint] = useReducer((value: number) => value + 1, 0);
   const [pending, setPending] = useState<Pending>();
@@ -126,6 +127,8 @@ function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent
     }));
   };
   const active = approvals[0];
+  // Reattaching skips the intro so saved turns print right away.
+  if (intro && (conversation.history.length || conversation.live.length || approvals.length)) setIntro(false);
   const live = useMemo(() => liveEntries(conversation), [conversation.live, conversation.printed]);
   const entries = useMemo(() => [...conversation.history.flatMap(item => item.entries), ...conversation.live], [conversation.history, conversation.live]);
   const history = useMemo(() => entries.filter(entry => entry.kind === 'user').map(entry => entry.text), [entries]);
@@ -138,10 +141,11 @@ function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent
   // and the actual height of the controls before clipping conversation rows.
   const height = Math.max(1, rows - 1);
   return <Box flexDirection="column">
-    <Static key={reflow} items={scrollback}>{item => item.id === 'header'
+    <Static key={reflow} items={intro ? [] : scrollback}>{item => item.id === 'header'
       ? <Header key="header" workspace={workspace} session={agent.session.id} />
       : <Entries key={item.id} entries={item.entries} />}</Static>
     {transcript && !active && !menu ? <Transcript entries={entries} rows={rows} columns={columns} close={() => setTranscript(false)} /> : <Box flexDirection="column" maxHeight={height} overflow="hidden">
+      {intro && <Intro done={() => setIntro(false)} />}
       <Clipped tail><Entries entries={live.slice(-12)} tail={height} /></Clipped>
       <Box flexDirection="column" flexShrink={0} maxHeight={height} overflow="hidden">
         {spinner && !active && <Box marginBottom={1} flexShrink={0} height={1}><Spinner label={spinner} since={status === 'working' ? turn.current?.since : undefined} tokens={tokens} /></Box>}

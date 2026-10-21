@@ -1,13 +1,42 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import type { Entry } from './conversation.js';
 import { Markdown } from './markdown.js';
 
+const mascot = [' ▐▛███▜▌ ', '▝▜█████▛▘', '  ▘▘ ▝▝  '];
+/** The site's --green, so the intro ends on the header's exact color. */
+const juice = '#4eba65';
+const claude = [0xd9, 0x77, 0x57], green = [0x4e, 0xba, 0x65];
+const blend = (t: number) => `#${claude.map((from, i) => Math.round(from + (green[i]! - from) * t).toString(16).padStart(2, '0')).join('')}`;
+
 export function Header({ workspace, session }: { workspace: string; session: string }) {
   return <Box flexDirection="column" marginBottom={1}>
-    <Text><Text color="green"> ▐▛███▜▌ </Text>  <Text bold>Juiced</Text> <Text dimColor>· Claude Code on Cantelop</Text></Text>
-    <Text><Text color="green">▝▜█████▛▘</Text>  <Text dimColor>workspace {workspace} · session {session}</Text></Text>
-    <Text><Text color="green">  ▘▘ ▝▝  </Text>  <Text dimColor>reattach with juiced claude in this tab</Text></Text>
+    <Text><Text color={juice}>{mascot[0]}</Text>  <Text bold>Juiced</Text> <Text dimColor>· Claude Code on Cantelop</Text></Text>
+    <Text><Text color={juice}>{mascot[1]}</Text>  <Text dimColor>workspace {workspace} · session {session}</Text></Text>
+    <Text><Text color={juice}>{mascot[2]}</Text>  <Text dimColor>reattach with juiced claude in this tab</Text></Text>
+  </Box>;
+}
+
+/** Before the header prints, the Claude mascot drinks a glass of juice through a straw and turns green. */
+export function Intro({ done }: { done(): void }) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => { const timer = setInterval(() => setTick(value => value + 1), 70); return () => clearInterval(timer); }, []);
+  useEffect(() => { if (tick === 26) done(); }, [tick]);
+  const sip = Math.min(1, Math.max(0, (tick - 4) / 14));
+  // Four half rows of juice across the glass's two rows.
+  const level = Math.ceil(4 * (1 - sip));
+  const color = blend(sip * sip * (3 - 2 * sip));
+  const full = (row: number) => level >= 4 - 2 * row;
+  const cell = (row: number) => <Text color={juice}>{full(row) ? '█' : level === 3 - 2 * row ? '▄' : ' '}</Text>;
+  const glass = (row: number) => <> <Text dimColor>▕</Text>{cell(row)}<Text color="white" {...(full(row) ? { backgroundColor: juice } : {})}>│</Text>{cell(row)}<Text dimColor>▏</Text></>;
+  const sparkle = (on: boolean) => <Text color={juice}>{on ? (tick % 2 ? '✦' : '✧') : ' '}</Text>;
+  return <Box flexDirection="column" marginBottom={1}>{tick < 20
+    ? <>
+      <Text wrap="truncate-end"><Text color={color}>{mascot[0]!.trimEnd()}</Text><Text color="white">────╮</Text></Text>
+      <Text wrap="truncate-end"><Text color={color}>{mascot[1]}</Text>{glass(0)}</Text>
+      <Text wrap="truncate-end"><Text color={color}>{mascot[2]}</Text>{glass(1)}</Text>
+    </>
+    : mascot.map((row, i) => <Text key={i} wrap="truncate-end"><Text color={juice}>{row}</Text> {sparkle(i !== 1)} {sparkle(i === 1)}</Text>)}
   </Box>;
 }
 
