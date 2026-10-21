@@ -7,12 +7,12 @@ import {
   MAX_SYNC_FILE_BYTES,
 } from '@cantelop/sdk/protocol';
 import type { Pool } from 'pg';
-import type { Accounts, Account, Installation } from './accounts.js';
-import { authenticate, deviceActive, type Identity } from './auth.js';
-import { ServiceError, type Config } from './config.js';
-import { runtimeJSON } from './terminals.js';
+import type { Accounts, Account, Installation } from './accounts';
+import { authenticate, deviceActive, type Identity } from './auth';
+import { ServiceError, type Config } from './config';
+import { runtimeJSON } from './terminals';
 import type { ProtocolEnvelope } from '@cantelop/sdk/protocol';
-import type { Platform } from './platform.js';
+import type { Platform } from './platform';
 
 export async function relay(
   request: Request,
@@ -25,6 +25,7 @@ export async function relay(
     identity: Identity;
     account: Account;
     installation: Installation;
+    wake?: (delaySeconds?: number) => Promise<void>;
   },
 ) {
   const { installation: i } = ctx;
@@ -146,6 +147,7 @@ export async function relay(
       );
       // Recheck revocation after persisting before exposing the single-use ticket.
       await authenticate(ctx.pool, ctx.cfg, request);
+      await ctx.wake?.(600);
     }
     return new Response(text, {
       status: upstream.status,

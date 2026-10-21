@@ -32,9 +32,10 @@
     "check:service": "npm run check --workspace @juiced/service",
     "test:service": "npm test --workspace @juiced/service",
     "migrate:service": "node --import tsx service/src/migrate.ts",
-    "start:service": "node --import tsx service/src/main.ts",
-    "worker:service": "node --import tsx service/src/worker.ts",
-    "check:package": "npm run build && node scripts/smoke-install.mjs"
+    "start:service": "npm run start --workspace @juiced/service",
+    "check:package": "npm run build && node scripts/smoke-install.mjs",
+    "build:service": "npm run build --workspace @juiced/service",
+    "dev:service": "npm run dev --workspace @juiced/service"
   },
   "dependencies": {
     "@cantelop/sdk": "1.5.0",

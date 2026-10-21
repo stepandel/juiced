@@ -1,13 +1,13 @@
-import { testDatabase, user as createVerifiedUser } from './database.js';
+import { testDatabase, user as createVerifiedUser } from './database';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeSignature } from 'better-auth/crypto';
-import { database, migrate } from '../src/db.js';
-import { authentication, seedClient, authenticate, CLIENT_ID } from '../src/auth.js';
-import { Accounts } from '../src/accounts.js';
-import { application } from '../src/app.js';
-import { config } from '../src/config.js';
-import type { Platform } from '../src/platform.js';
+import { database, migrate } from '../src/db';
+import { authentication, seedClient, authenticate, CLIENT_ID } from '../src/auth';
+import { Accounts } from '../src/accounts';
+import { application } from '../src/app';
+import { config } from '../src/config';
+import type { Platform } from '../src/platform';
 
 test(
   'real device approval, rotating refresh, account isolation and revocation',
@@ -42,7 +42,8 @@ test(
           throw new Error('No upstream call permitted');
         },
       } as unknown as Platform;
-      const { app } = application({ pool, cfg, accounts, platform, auth });
+      const handle = application({ pool, cfg, accounts, platform, auth });
+      const app = { request: (url: string, init?: RequestInit) => handle(new Request(url, init)) };
       const json = (path: string, body: unknown, headers: Record<string, string> = {}) =>
         app.request(`${cfg.origin}${path}`, {
           method: 'POST',

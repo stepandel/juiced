@@ -1,5 +1,5 @@
 import type { AppConnection } from '@cantelop/sdk';
-import { ServiceError, origin } from './config.js';
+import { ServiceError, origin } from './config';
 export interface PlatformInstallation {
   id: string;
   app_id: string;

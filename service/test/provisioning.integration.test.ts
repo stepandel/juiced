@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { testDatabase, user } from './database.js';
-import { Accounts, enqueue, type Account } from '../src/accounts.js';
-import { Provisioner } from '../src/provisioning.js';
-import type { Platform, PlatformInstallation } from '../src/platform.js';
-import { ServiceError } from '../src/config.js';
+import { testDatabase, user } from './database';
+import { Accounts, enqueue, type Account } from '../src/accounts';
+import { Provisioner } from '../src/provisioning';
+import type { Platform, PlatformInstallation } from '../src/platform';
+import { ServiceError } from '../src/config';
 
 test(
   'durable provisioning recovers an ambiguous create and renews policy once per epoch',

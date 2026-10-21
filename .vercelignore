@@ -2,6 +2,8 @@
 **/.env*
 .cantelop/
 node_modules/
+.next/
+service/.next/
 dist/
 diagnostics/
 test/

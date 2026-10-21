@@ -51,12 +51,10 @@ export function config(env: NodeJS.ProcessEnv = process.env) {
     githubSecret: env.JUICED_GITHUB_CLIENT_SECRET,
     googleId: env.JUICED_GOOGLE_CLIENT_ID,
     googleSecret: env.JUICED_GOOGLE_CLIENT_SECRET,
-    port: Number(env.PORT ?? '3000'),
     development,
     admissionEnabled:
       env.JUICED_ADMISSION_ENABLED === 'true' ||
       (development && env.JUICED_ADMISSION_ENABLED !== 'false'),
-    trustedProxies: (env.JUICED_TRUSTED_PROXY_CIDRS ?? '').split(',').filter(Boolean),
   };
 }
 export type Config = ReturnType<typeof config>;

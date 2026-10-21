@@ -1,9 +1,9 @@
-import { readInstallation } from '../../contracts/account.js';
+import { readInstallation } from '../../contracts/account';
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { ServiceError } from './config.js';
-import { transaction } from './db.js';
-import type { Identity } from './auth.js';
+import { ServiceError } from './config';
+import { transaction } from './db';
+import type { Identity } from './auth';
 
 export const id = (prefix: string) => `${prefix}_${randomUUID().replaceAll('-', '')}`;
 export interface Account {

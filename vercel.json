@@ -1,9 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "hono",
-  "buildCommand": "npm run check:service",
-  "installCommand": "npm ci --ignore-scripts --omit=optional --no-audit",
-  "functions": {
-    "server.ts": { "maxDuration": 300 }
-  }
-}
