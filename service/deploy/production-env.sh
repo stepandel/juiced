@@ -50,7 +50,23 @@ database() {
   echo "Database"
   command -v psql >/dev/null || { echo "psql is required" >&2; exit 1; }
   local owner api worker
-  owner=$(secret 'Owner PostgreSQL URL (used here only, never stored in Vercel)')
+  if [[ -n ${OWNER_FROM_VERCEL:-} ]]; then
+    # The Neon resource connected to the development environment only, as
+    # `vercel integration resource connect juiced-db juiced -e development
+    # --prefix JUICED_OWNER_`. Disconnect it afterwards.
+    local pulled
+    pulled=$(mktemp -d)
+    vercel env pull "$pulled/.env" --environment development --yes \
+      --project "$PROJECT" --scope "$SCOPE" >/dev/null 2>&1
+    owner=$(PULLED="$pulled/.env" node -e '
+      const line = require("fs").readFileSync(process.env.PULLED, "utf8")
+        .split("\n").find((l) => l.startsWith("JUICED_OWNER_DATABASE_URL="));
+      if (line) process.stdout.write(JSON.parse(line.slice(line.indexOf("=") + 1)));')
+    rm -rf "$pulled"
+    [[ -n $owner ]] || { echo "JUICED_OWNER_DATABASE_URL not found in development" >&2; exit 1; }
+  else
+    owner=$(secret 'Owner PostgreSQL URL (used here only, never stored in Vercel)')
+  fi
   JUICED_DATABASE_URL=$owner JUICED_SERVICE_URL=$SERVICE_URL NODE_ENV=development \
     JUICED_AUTH_SECRET=$(openssl rand -hex 32) npm run --silent migrate:service
   api=$(openssl rand -hex 24)
