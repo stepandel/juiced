@@ -1,6 +1,6 @@
 {
   "name": "juiced",
-  "version": "0.2.0-rc.4",
+  "version": "0.2.0",
   "description": "Run Claude Code on Cantelop from your terminal",
   "type": "module",
   "private": false,
