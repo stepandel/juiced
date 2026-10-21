@@ -1,6 +1,6 @@
 import { readFileSync, constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -159,6 +159,8 @@ export class CredentialStore {
           reaper = await open(path + '.reap', 'wx', 0o600);
         } catch (e) {
           if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+          // A reaper holds its file for milliseconds; an old one was abandoned by a crash.
+          if (await abandoned(path + '.reap')) await rm(path + '.reap', { force: true });
         }
         if (reaper)
           try {
@@ -169,6 +171,9 @@ export class CredentialStore {
               } catch (e) {
                 if ((e as NodeJS.ErrnoException).code === 'ESRCH') await rm(path, { force: true });
               }
+            } else if (await abandoned(path)) {
+              // The owner crashed between creating the lock and recording its PID.
+              await rm(path, { force: true });
             }
           } finally {
             await reaper.close();
@@ -184,6 +189,14 @@ export class CredentialStore {
     } finally {
       await rm(path, { force: true });
     }
+  }
+}
+
+async function abandoned(path: string) {
+  try {
+    return (await stat(path)).mtimeMs < Date.now() - 5000;
+  } catch {
+    return false;
   }
 }
 

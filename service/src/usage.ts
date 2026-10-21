@@ -24,6 +24,7 @@ export class UsageIngestor {
       if (!Array.isArray(data.items) || data.items.length > 500)
         throw new Error('invalid_usage_page');
       let next = BigInt(cursor);
+      const touched = new Map<string, { account: string; epoch: string }>();
       for (const event of data.items) {
         if (
           !/^\d+$/.test(event.sequence) ||
@@ -47,19 +48,20 @@ export class UsageIngestor {
           'INSERT INTO usage_events(id,account_id,sequence,credits,payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING',
           [event.id, account.id, event.sequence, event.credits, JSON.stringify(event)],
         );
+        touched.set(`${account.id}\0${event.epoch}`, {
+          account: String(account.id),
+          epoch: event.epoch,
+        });
+      }
+      // Check each epoch once per page rather than re-summing per event.
+      for (const { account, epoch } of touched.values()) {
         const exhausted = await tx.query(
           `UPDATE accounts SET entitlement='exhausted' WHERE id=$1 AND period_id=$2 AND entitlement='active'
           AND included_credits<=(SELECT coalesce(sum(credits),0) FROM usage_events WHERE account_id=$1 AND payload->>'epoch'=$2) RETURNING id`,
-          [account.id, event.epoch],
+          [account, epoch],
         );
         if (exhausted.rowCount)
-          await enqueue(
-            tx,
-            String(account.id),
-            'suspend',
-            {},
-            `exhausted:${account.id}:${event.epoch}`,
-          );
+          await enqueue(tx, account, 'suspend', {}, `exhausted:${account}:${epoch}`);
       }
       if (String(next) !== data.after) throw new Error('invalid_usage_cursor');
       await tx.query("UPDATE settings SET value=$1 WHERE key='usage_cursor'", [String(next)]);

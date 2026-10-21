@@ -8,7 +8,7 @@ import {
 } from '@cantelop/sdk/protocol';
 import type { Pool } from 'pg';
 import type { Accounts, Account, Installation } from './accounts.js';
-import { authenticate, type Identity } from './auth.js';
+import { authenticate, deviceActive, type Identity } from './auth.js';
 import { ServiceError, type Config } from './config.js';
 import { runtimeJSON } from './terminals.js';
 import type { ProtocolEnvelope } from '@cantelop/sdk/protocol';
@@ -164,15 +164,14 @@ export async function relay(
   const recheck = setInterval(
     () =>
       void (async () => {
-        await authenticate(ctx.pool, ctx.cfg, request);
+        if (!(await deviceActive(ctx.pool, ctx.identity))) throw new Error('revoked');
         const a = await ctx.accounts.authorize(ctx.identity, ctx.account.id),
           live = await ctx.accounts.installation(a.id);
         if (
           a.status !== 'active' ||
           !live ||
           live.id !== i.id ||
-          live.status !== 'ready' ||
-          Date.now() >= ctx.identity.expiresAt
+          live.status !== 'ready'
         )
           throw new Error('revoked');
       })().catch(() => {

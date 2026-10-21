@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseInvocation } from '../src/account/invocation.js';
@@ -54,6 +54,28 @@ test('credentials are private, origin scoped and serialize refresh across concur
     const other = new CredentialStore('https://different.example', env);
     assert.equal(await other.read(), undefined);
     assert.equal((await readFile(client.store.path, 'utf8')).includes('a'.repeat(40)), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a crashed lock owner or reaper does not block credential refresh', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'juiced-lock-'));
+  try {
+    const store = new CredentialStore('https://service.example', {
+      JUICED_CREDENTIAL_STORE: 'file',
+      JUICED_CONFIG_HOME: root,
+    });
+    await mkdir(root, { recursive: true });
+    const old = new Date(Date.now() - 60000);
+    // Killed between creating the lock and recording a PID, then while electing a reaper.
+    for (const path of [store.path + '.lock', store.path + '.lock.reap']) {
+      await writeFile(path, '');
+      await utimes(path, old, old);
+    }
+    const started = Date.now();
+    assert.equal(await store.locked(new AbortController().signal, async () => 'acquired'), 'acquired');
+    assert.ok(Date.now() - started < 5000);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

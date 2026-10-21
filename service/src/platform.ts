@@ -41,7 +41,7 @@ export class Platform {
       throw new ServiceError('platform_response_invalid', 502);
     let value: unknown;
     try {
-      value = JSON.parse(text);
+      value = text === '' && response.ok ? undefined : JSON.parse(text);
     } catch {
       throw new ServiceError('platform_response_invalid', 502);
     }

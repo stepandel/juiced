@@ -4,6 +4,7 @@ import { testDatabase, user } from './database.js';
 import { Accounts, enqueue, type Account } from '../src/accounts.js';
 import { Provisioner } from '../src/provisioning.js';
 import type { Platform, PlatformInstallation } from '../src/platform.js';
+import { ServiceError } from '../src/config.js';
 
 test(
   'durable provisioning recovers an ambiguous create and renews policy once per epoch',
@@ -128,6 +129,49 @@ test(
       assert.equal(
         (await f.pool.query('SELECT 1 FROM "user" WHERE id=$1', [a.owner_user_id])).rowCount,
         0,
+      );
+    } finally {
+      await f.close();
+    }
+  },
+);
+test(
+  'deletion converges when the platform installation is already gone',
+  { skip: !process.env.JUICED_TEST_DATABASE_URL },
+  async () => {
+    const f = await testDatabase();
+    try {
+      const accounts = new Accounts(f.pool, {
+          packageId: 'pkg_' + 'a'.repeat(32),
+          runtimeId: 'runtime-1',
+          minimumCli: '0.2.0',
+        }),
+        a = await accounts.ensure(await user(f.pool));
+      await f.pool.query(
+        `INSERT INTO installations(id,account_id,external_key,platform_id,app_id,package_id,runtime_id,status)
+        VALUES('jin_gone',$1,'installation_gone',$2,$3,$4,'runtime-1','deleting')`,
+        [a.id, 'ins_' + 'b'.repeat(32), 'app_' + 'b'.repeat(32), accounts.release.packageId],
+      );
+      await f.pool.query("UPDATE accounts SET status='deleting' WHERE id=$1", [a.id]);
+      await enqueue(f.pool, a.id, 'delete', {}, 'delete-gone');
+      // An earlier pass deleted the remote installation; every call now answers 404.
+      const missing = async () => {
+        throw new ServiceError('platform_not_found', 404);
+      };
+      const platform = {
+        remove: missing,
+        request: missing,
+        installation: missing,
+      } as unknown as Platform;
+      await new Provisioner(f.pool, accounts, platform, { async cancel() {} }).runOnce();
+      assert.equal(
+        (await f.pool.query('SELECT status FROM accounts WHERE id=$1', [a.id])).rows[0].status,
+        'deleted',
+      );
+      assert.equal(
+        (await f.pool.query("SELECT status FROM jobs WHERE idempotency_key='delete-gone'")).rows[0]
+          .status,
+        'done',
       );
     } finally {
       await f.close();
