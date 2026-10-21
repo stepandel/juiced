@@ -30,11 +30,11 @@ export default function Home() {
             <h1 id="headline">
               Claude Code,
               <br />
-              with more <em>juice.</em>
+              <em>always on.</em>
             </h1>
             <p className="intro">
-              Run Claude Code in an isolated cloud workspace. Keep your terminal, your code, and
-              your Claude account.
+              Juiced runs Claude Code in a private cloud workspace that you drive from your
+              terminal. Close your laptop. Claude keeps working.
             </p>
             <InstallCommand command={install} />
             <p className="next mono">
@@ -52,10 +52,6 @@ export default function Home() {
               <div className="command">
                 <span className="dim">~/your-project $</span> juiced claude
               </div>
-              <div>
-                <b>Juiced</b> <span className="dim">· Claude Code on Cantelop</span>
-              </div>
-              <div className="dim">workspace your-project · session 7f3a</div>
               <div className="turn">
                 <span className="green">❯</span> add a settings page with a theme toggle
               </div>
@@ -65,51 +61,63 @@ export default function Home() {
               <div>
                 <span className="green">●</span> Write <span className="dim">app/settings/page.tsx</span>
               </div>
-              <div className="dim indent">⎿ +42 lines</div>
-              <div>
-                <span className="green">●</span> Done. The toggle saves to your account settings.
-              </div>
               <div className="turn">
-                <span className="green">❯</span> <span className="cursor" aria-hidden="true"></span>
+                <span className="green">❯</span> /detach
+              </div>
+              <div className="dim indent">⎿ Detached. Claude is still working.</div>
+              <div className="turn">
+                <span className="dim">~/your-project $</span>{' '}
+                <span className="cursor" aria-hidden="true"></span>
               </div>
             </div>
             <div className="terminal-foot">
-              <span>local terminal</span>
+              <span>your terminal</span>
               <span>
                 <i className="live"></i> cloud workspace
               </span>
             </div>
           </div>
         </section>
-        <section className="features" aria-label="How Juiced works">
+        <section className="features" aria-labelledby="how">
+          <h2 id="how" className="number mono">
+            how it works
+          </h2>
           <article>
-            <span className="number mono">01 / stay in your flow</span>
-            <h2>A familiar place to start.</h2>
+            <span className="number mono">01</span>
+            <h3>A workspace for your project</h3>
             <p>
-              Open your project and use Claude Code from your terminal. Juiced connects your local
-              workflow to a persistent cloud workspace.
+              Your first <code>juiced claude</code> in a repo copies it to a private cloud workspace.
+              Your code, Claude login and conversations stay there between runs.
             </p>
           </article>
           <article>
-            <span className="number mono">02 / make some room</span>
-            <h2>Give your work its own space.</h2>
+            <span className="number mono">02</span>
+            <h3>A sandbox for every session</h3>
             <p>
-              Each account gets an isolated workspace. Projects keep their own files, and
-              conversations keep their context.
+              Claude Code runs in an isolated sandbox attached to that workspace. You drive it from
+              your terminal, and it keeps going when you disconnect.
             </p>
           </article>
           <article>
-            <span className="number mono">03 / bring it home</span>
-            <h2>Your changes, on your terms.</h2>
+            <span className="number mono">03</span>
+            <h3>Shut down when idle</h3>
             <p>
-              Review and approve transfers between your laptop and the cloud. Keep local work safe
-              while bringing completed changes back.
+              Once Claude is done, the sandbox shuts down. Run <code>juiced claude</code> again to
+              pick up the same conversation.
+            </p>
+          </article>
+          <article>
+            <span className="number mono">04</span>
+            <h3>Changes come back on your terms</h3>
+            <p>
+              Pull Claude's commits into your local repo when you're ready. Nothing changes on your
+              laptop until you approve it.
             </p>
           </article>
         </section>
       </main>
       <footer className="mono">
-        <span>juiced · a little more room to build</span>
+        <span>juiced</span>
         <a href="https://cantelop.com">
           powered by cantelop <span aria-hidden="true">↗</span>
         </a>
