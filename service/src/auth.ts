@@ -242,6 +242,18 @@ export async function authenticate(pool: Pool, cfg: Config, request: Request): P
     expiresAt: new Date(row.expires_at).getTime(),
   };
 }
+/** Streams outlive the 300s access token that opened them; they end when the device does. */
+export async function deviceActive(pool: Pool, identity: Identity) {
+  return Boolean(
+    (
+      await pool.query(
+        `SELECT 1 FROM devices d JOIN "user" u ON u.id=d.user_id
+    WHERE d.id=$1 AND d.user_id=$2 AND d.revoked_at IS NULL AND d.expires_at>now()`,
+        [identity.deviceId, identity.userId],
+      )
+    ).rowCount,
+  );
+}
 function list(value: unknown): string[] {
   if (Array.isArray(value)) return value as string[];
   try {

@@ -4,6 +4,7 @@ import { Provisioner } from './provisioning.js';
 import { UsageIngestor } from './usage.js';
 import { TerminalCloser } from './terminals.js';
 import { enqueue } from './accounts.js';
+import { transaction } from './db.js';
 const s = services(process.env, 'worker'),
   cancel = new AbortController();
 process.once('SIGINT', () => cancel.abort());
@@ -31,14 +32,15 @@ try {
     loop('terminals', () => terminals.runOnce(), 2000),
     loop(
       'expiry',
-      async () => {
-        const rows = await s.pool.query(
-          `UPDATE accounts SET entitlement='inactive' WHERE entitlement='active' AND period_end<=now() RETURNING id,period_id`,
-        );
-        for (const a of rows.rows)
-          await enqueue(s.pool, String(a.id), 'suspend', {}, `expired:${a.id}:${a.period_id}`);
-        return false;
-      },
+      () =>
+        transaction(s.pool, async (tx) => {
+          const rows = await tx.query(
+            `UPDATE accounts SET entitlement='inactive' WHERE entitlement='active' AND period_end<=now() RETURNING id,period_id`,
+          );
+          for (const a of rows.rows)
+            await enqueue(tx, String(a.id), 'suspend', {}, `expired:${a.id}:${a.period_id}`);
+          return false;
+        }),
       5000,
     ),
   ]);

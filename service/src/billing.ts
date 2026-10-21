@@ -4,6 +4,15 @@ import { transaction } from './db.js';
 import { id, enqueue, type Account } from './accounts.js';
 import { ServiceError, readText } from './config.js';
 
+/**
+ * Stripe rejects a Checkout expiry under 30 minutes away. An idempotent replay
+ * of a request Stripe already executed returns the saved session instead, so
+ * this rejection means the stored intent never created a session.
+ */
+const neverCreated = (error: unknown) =>
+  (error as { type?: string }).type === 'StripeInvalidRequestError' &&
+  (error as { param?: string }).param === 'expires_at';
+
 export interface BillingConfig {
   price: string;
   credits: number;
@@ -94,7 +103,7 @@ export class Billing {
       await this.pool.query('SELECT subscription_id FROM subscriptions WHERE account_id=$1', [a.id])
     ).rows[0];
     if (existing?.subscription_id) return this.portal(a);
-    const intent = await transaction(this.pool, async (tx) => {
+    let intent = await transaction(this.pool, async (tx) => {
       await tx.query('SELECT id FROM accounts WHERE id=$1 FOR UPDATE', [a.id]);
       const old = (
         await tx.query(
@@ -140,7 +149,20 @@ export class Billing {
         });
         return { url: portal.url };
       }
-      const session = await this.checkoutSession(a.id, customer, intent);
+      let session;
+      try {
+        session = await this.checkoutSession(a.id, customer, intent);
+      } catch (error) {
+        if (!neverCreated(error)) throw error;
+        intent = (
+          await tx.query(
+            `UPDATE checkout_sessions SET intent_id=$3,expires_at=now()+interval '31 minutes' WHERE account_id=$1 AND intent_id=$2 RETURNING *`,
+            [a.id, intent.intent_id, id('checkout')],
+          )
+        ).rows[0];
+        if (!intent) throw new ServiceError('billing_retry_pending', 409);
+        session = await this.checkoutSession(a.id, customer, intent);
+      }
       if (!session.url) throw new ServiceError('billing_unavailable', 503);
       await tx.query(
         'UPDATE checkout_sessions SET url=$3,stripe_id=$4 WHERE account_id=$1 AND intent_id=$2',
@@ -177,9 +199,15 @@ export class Billing {
   }
   private async expireCheckout(account: string, customer: string, intent: Record<string, unknown>) {
     if (new Date(String(intent.expires_at)).getTime() <= Date.now()) return;
-    const checkout = intent.stripe_id
-      ? await this.stripe.checkout.sessions.retrieve(String(intent.stripe_id))
-      : await this.checkoutSession(account, customer, intent);
+    let checkout;
+    try {
+      checkout = intent.stripe_id
+        ? await this.stripe.checkout.sessions.retrieve(String(intent.stripe_id))
+        : await this.checkoutSession(account, customer, intent);
+    } catch (error) {
+      if (!intent.stripe_id && neverCreated(error)) return;
+      throw error;
+    }
     if (checkout.status === 'open') {
       try {
         await this.stripe.checkout.sessions.expire(checkout.id);
@@ -334,6 +362,24 @@ export class Billing {
             await tx.query('SELECT id FROM installations WHERE account_id=$1', [account])
           ).rows[0];
           if (inst) await enqueue(tx, account, 'provision', {}, `renew:${inst.id}:${invoice.id}`);
+        } else if (a.period_id === invoice.id && a.entitlement === 'inactive') {
+          // A transient non-grant (past_due, paused) suspended this epoch; the
+          // same settled invoice restores it. Exhaustion is never undone here.
+          const restored = await tx.query(
+            `UPDATE accounts SET entitlement='active' WHERE id=$1 AND status='active' AND entitlement='inactive' AND period_end>now() RETURNING id`,
+            [account],
+          );
+          const inst = (
+            await tx.query('SELECT id FROM installations WHERE account_id=$1', [account])
+          ).rows[0];
+          if (inst && restored.rowCount)
+            await enqueue(
+              tx,
+              account,
+              'provision',
+              {},
+              `reactivate:${inst.id}:${invoice.id}:${id('transition')}`,
+            );
         }
         grant = true;
       }

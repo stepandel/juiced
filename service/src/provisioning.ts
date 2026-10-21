@@ -3,6 +3,17 @@ import type { Platform } from './platform.js';
 import { Accounts, type Account } from './accounts.js';
 import type { Billing } from './billing.js';
 import { transaction } from './db.js';
+import { ServiceError } from './config.js';
+
+/** Deletion retries must converge once the platform no longer has the installation. */
+async function unlessMissing<T>(work: Promise<T>) {
+  try {
+    return await work;
+  } catch (error) {
+    if (error instanceof ServiceError && error.code === 'platform_not_found') return;
+    throw error;
+  }
+}
 
 export class Provisioner {
   constructor(
@@ -37,7 +48,7 @@ export class Provisioner {
         ).rows[0]!;
         const i = await this.accounts.installation(a.id);
         if (i && (row.kind === 'delete' || a.status === 'deleting'))
-          await this.platform.remove(i.external_key);
+          await unlessMissing(this.platform.remove(i.external_key));
         if (
           i &&
           !i.platform_id &&
@@ -59,9 +70,9 @@ export class Provisioner {
         else if (row.kind === 'delete' || a.status === 'deleting') {
           await this.billing?.cancel(a);
           if (i?.platform_id) {
-            await this.platform.request('DELETE', `installations/${i.platform_id}`);
-            const remote = await this.platform.installation(i.platform_id);
-            done = remote.status === 'deleted';
+            await unlessMissing(this.platform.request('DELETE', `installations/${i.platform_id}`));
+            const remote = await unlessMissing(this.platform.installation(i.platform_id));
+            done = !remote || remote.status === 'deleted';
           } else done = true;
           if (i)
             await tx.query('UPDATE installations SET status=$2 WHERE id=$1', [

@@ -103,6 +103,28 @@ test(
       assert.equal(state.entitlement, 'active');
       assert.equal(state.period_id, 'in_test1');
       await accounts.bootstrap(state, { version: '0.2.0', runtimeId: 'runtime-v1' });
+      // A transient non-grant suspends the epoch; the same paid invoice restores it.
+      subscription = { ...subscription, status: 'past_due' };
+      await event('evt_past_due');
+      await billing.runOnce();
+      assert.equal(
+        (await pool.query('SELECT entitlement FROM accounts WHERE id=$1', [a.id])).rows[0]
+          .entitlement,
+        'inactive',
+      );
+      subscription = { ...subscription, status: 'active' };
+      await event('evt_recovered');
+      await billing.runOnce();
+      assert.equal(
+        (await pool.query('SELECT entitlement FROM accounts WHERE id=$1', [a.id])).rows[0]
+          .entitlement,
+        'active',
+      );
+      assert.equal(
+        (await pool.query("SELECT count(*) FROM jobs WHERE idempotency_key LIKE 'reactivate:%'"))
+          .rows[0].count,
+        '1',
+      );
       await pool.query("UPDATE accounts SET entitlement='exhausted' WHERE id=$1", [a.id]);
       await event('evt_replayed');
       await billing.runOnce();
@@ -227,6 +249,72 @@ test(
         'expire:cs_ambiguous',
         'cancel:sub_paid_before_webhook',
       ]);
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test(
+  'a checkout intent that never reached Stripe is replaced once its expiry is too close',
+  { skip: !process.env.JUICED_TEST_DATABASE_URL },
+  async () => {
+    const f = await testDatabase();
+    try {
+      const accounts = new Accounts(f.pool, {
+          packageId: 'pkg_' + 'a'.repeat(32),
+          runtimeId: 'runtime-1',
+          minimumCli: '0.2.0',
+        }),
+        a = await accounts.ensure(await user(f.pool));
+      await f.pool.query('INSERT INTO subscriptions(account_id,customer_id) VALUES($1,$2)', [
+        a.id,
+        'cus_retry',
+      ]);
+      // The first attempt failed before Stripe executed it, five minutes ago.
+      await f.pool.query(
+        `INSERT INTO checkout_sessions(account_id,intent_id,expires_at) VALUES($1,'checkout-stale',now()+interval '26 minutes')`,
+        [a.id],
+      );
+      const keys: string[] = [];
+      const fake = {
+        checkout: {
+          sessions: {
+            async create(input: { expires_at: number }, options: { idempotencyKey: string }) {
+              keys.push(options.idempotencyKey);
+              if (input.expires_at < Date.now() / 1000 + 30 * 60)
+                throw Object.assign(new Error('expires_at must be at least 30 minutes away'), {
+                  type: 'StripeInvalidRequestError',
+                  param: 'expires_at',
+                });
+              return { id: 'cs_fresh', url: 'https://checkout.stripe.example/cs_fresh' };
+            },
+          },
+        },
+        subscriptions: {
+          async list() {
+            return { data: [], has_more: false };
+          },
+        },
+      } as unknown as Stripe;
+      const billing = new Billing(f.pool, fake, {
+        price: 'price_test',
+        credits: 100000,
+        webhookSecret: 'whsec_test',
+        origin: 'https://juiced.example',
+      });
+      assert.deepEqual(await billing.checkout(a), {
+        url: 'https://checkout.stripe.example/cs_fresh',
+      });
+      assert.equal(keys.length, 2);
+      assert.equal(keys[0], 'checkout-stale');
+      assert.notEqual(keys[1], 'checkout-stale');
+      const stored = (
+        await f.pool.query('SELECT intent_id,stripe_id FROM checkout_sessions WHERE account_id=$1', [
+          a.id,
+        ])
+      ).rows[0];
+      assert.deepEqual(stored, { intent_id: keys[1], stripe_id: 'cs_fresh' });
     } finally {
       await f.close();
     }
