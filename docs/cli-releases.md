@@ -39,6 +39,8 @@ runs that archive with Node and npm absent from PATH.
 2. Push a matching `v<version>` tag. `.github/workflows/release.yml` checks and
    packages Linux x64/arm64 and macOS Intel/Apple Silicon on native runners.
    A manual workflow run builds artifacts without creating a release.
+   Intel macOS runs the same CLI suite with test files executed serially to
+   avoid contention between compiler and native filesystem fixtures.
 3. All four jobs must pass, including installation of their actual archives.
    The workflow creates a **draft** GitHub Release with the four archives,
    `SHA256SUMS` and a copy of `install.sh`. Review and publish the draft when
@@ -50,20 +52,20 @@ runs that archive with Node and npm absent from PATH.
 
 ### Release candidates
 
-Use a SemVer suffix such as `0.2.0-rc.3` for all CLI version fields and the matching
-`v0.2.0-rc.3` tag. The workflow marks the draft as a prerelease automatically.
+Use a SemVer suffix such as `0.2.0-rc.4` for all CLI version fields and the matching
+`v0.2.0-rc.4` tag. The workflow marks the draft as a prerelease automatically.
 Publish it with the prerelease flag retained and without marking it latest.
 Before `/install.sh` is deployed to the website, install the candidate directly:
 
 ```sh
-curl -fsSL https://github.com/stepandel/juiced/releases/download/v0.2.0-rc.3/install.sh | sh -s -- 0.2.0-rc.3
+curl -fsSL https://github.com/stepandel/juiced/releases/download/v0.2.0-rc.4/install.sh | sh -s -- 0.2.0-rc.4
 ```
 
 An RC requires an explicit version; GitHub's stable `latest` endpoint excludes
 prereleases. For managed-account testing, deploy the service's prerelease-aware
-version check and set `JUICED_MINIMUM_CLI=0.2.0-rc.3` alongside the matching
+version check and set `JUICED_MINIMUM_CLI=0.2.0-rc.4` alongside the matching
 qualified package/runtime IDs. A stable minimum of `0.2.0` correctly excludes
-`0.2.0-rc.3`. Publishing the CLI does not activate or deploy account infrastructure.
+`0.2.0-rc.4`. Publishing the CLI does not activate or deploy account infrastructure.
 
 The installer resolves GitHub's latest release to a specific version before
 downloading its checksum manifest and archive. Checksums detect corrupt or

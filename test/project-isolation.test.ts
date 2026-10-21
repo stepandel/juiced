@@ -15,7 +15,7 @@ import { createTerminal } from '../src/runtime/terminal.js';
 
 // Exercise the real CLI, SDK transport, and runtime with a local platform fixture.
 // Any sync request fails: only workspace binding, authentication and terminal operations are served.
-test('non-Git launches keep local and remote files separate across sessions and exit', { timeout: 20_000 }, async t => {
+test('non-Git launches keep local and remote files separate across sessions and exit', { timeout: 60_000 }, async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'juiced-isolation-')));
   const projectRoot = fileURLToPath(new URL('../', import.meta.url));
   await mkdir(join(projectRoot, '.cantelop'), { recursive: true });

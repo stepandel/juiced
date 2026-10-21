@@ -29,7 +29,14 @@ jobs:
           node-version: '24'
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run check
-      - run: npm test
+      - name: CLI tests
+        # Compiler/native filesystem fixtures contend heavily on Intel macOS.
+        run: |
+          if [ "${{ matrix.target }}" = darwin-x64 ]; then
+            npm run test:serial
+          else
+            npm test
+          fi
       - run: npm run build
       - run: npm run build:release
       - name: Install the actual release with no Node or npm on PATH
