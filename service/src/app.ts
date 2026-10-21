@@ -95,7 +95,35 @@ export function application(s: Services) {
       await s.accounts.ensure(user.user.id);
       return devicePage(code);
     }
-    if (method === 'GET' && path === '/account') return accountPage();
+    if (method === 'GET' && path === '/account') {
+      const session = await auth.api.getSession({ headers: request.headers });
+      if (!session) return Response.redirect(new URL('/sign-in', url), 302);
+      const user = session.user.id,
+        account = await s.accounts.ensure(user);
+      const installation = await s.accounts.installation(account.id);
+      const [used, devices, providers] = await Promise.all([
+        s.pool.query(
+          `SELECT coalesce(sum(credits),0)::text AS used FROM usage_events WHERE account_id=$1 AND payload->>'epoch'=$2`,
+          [account.id, account.period_id],
+        ),
+        s.pool.query(
+          'SELECT id,label,created_at,expires_at FROM devices WHERE user_id=$1 AND revoked_at IS NULL AND expires_at>now() ORDER BY created_at DESC',
+          [user],
+        ),
+        s.pool.query('SELECT "providerId" AS provider FROM account WHERE "userId"=$1', [user]),
+      ]);
+      return accountPage({
+        user: session.user,
+        account,
+        installation: installation && {
+          status: installation.desired_package_id ? 'upgrading' : installation.status,
+          error: installation.error_code,
+        },
+        used: used.rows[0]!.used,
+        devices: devices.rows,
+        providers: providers.rows.map((r) => r.provider),
+      });
+    }
     if (method === 'POST' && path === '/webhooks/stripe') {
       if (!s.billing) throw new ServiceError('billing_unavailable', 503);
       const result = await s.billing.webhook(request);
