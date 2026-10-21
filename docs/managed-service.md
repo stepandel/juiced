@@ -140,7 +140,7 @@ References: [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/ne
 2. Set the values in `service/.env.example`. Production requires both OAuth
    providers, PostgreSQL, a Fleet and approved package/runtime IDs. Stripe is
    optional: without `STRIPE_SECRET_KEY`, billing routes and the webhook return
-   `billing_unavailable` and accounts are activated only by operator alpha grants.
+   `billing_unavailable` and accounts use the default free allowance.
    With it, Stripe's fixed-price subscription and portal configuration is required. Remote PostgreSQL uses
    certificate verification. Register OAuth callbacks at
    `https://juiced.codes/api/auth/callback/github` and `/google`.
@@ -226,7 +226,7 @@ compatible package as the desired release to roll back. Existing Cantelop releas
 activation and additive database migration rules still apply; never claim a
 rollback reverses destructive application data changes.
 
-For canaries, deploy the new Next.js app and jobs to a separate alpha Fleet/service origin
+For canaries, deploy the new Next.js app and jobs to a separate staging Fleet/service origin
 first. Pin its package/runtime pair, qualify two accounts, then promote the same
 immutable package in the production Fleet and CLI build. Keep Fleet and host
 capacity limits deliberately small until load/lease-renewal latency is measured.
@@ -238,13 +238,12 @@ Operator commands use the worker database credential:
 
 ```sh
 node --import tsx service/scripts/admin.ts status
-node --import tsx service/scripts/admin.ts grant-alpha acc_... CREDITS ISO_EXPIRY
 node --import tsx service/scripts/admin.ts suspend-all
 node --import tsx service/scripts/admin.ts invalidate-devices
 ```
 
-Alpha grants are explicitly operator funded, integral and expire within seven
-days. Watch pending/stale jobs, billing retries, unreconciled reservations,
+Accounts start with the free allowance automatically. Watch pending/stale jobs,
+billing retries, unreconciled reservations,
 policy/enforced revision lag, principal expiry, purge failures, pool wait times
 and lease-renewal latency. Job diagnostics must not contain credentials, command bodies or terminal content.
 

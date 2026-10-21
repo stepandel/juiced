@@ -13,9 +13,10 @@ Confirmed decisions:
 - One Cantelop App per Juiced account; one personal account per user initially.
   Projects remain Workspaces; conversations remain Sessions.
 - GitHub and Google sign-in in the first production release.
-- A subscription includes a fixed usage allowance with a hard cap. No automatic
-  overage charges. Prices and included quantities are configuration, to be chosen
-  before paid launch.
+- Accounts start free with workspace compute included. Future subscriptions may
+  include a fixed usage allowance with a hard cap and no automatic overage
+  charges. Prices and included quantities are configuration, to be chosen before
+  paid launch.
 
 V1 includes account/device management, isolated provisioning, the existing Claude
 and Git workflows, metering, enforced allowances, billing, upgrades, deletion,
@@ -24,10 +25,9 @@ direct Edge delegation, and multiple concurrent runtime versions within one App
 are later extensions. Model access continues through the user's existing Claude
 login; the Juiced subscription covers infrastructure, not a new model-token plan.
 
-Deliver two milestones: an invitation-only, operator-funded alpha that proves
-isolation and recovery, then paid production. Alpha still requires per-App
-resource limits and a bounded operator budget. Billing is never represented as
-implemented by an entitlement stub.
+Launch free accounts with per-App resource limits and verified isolation and
+recovery. Qualify subscription billing separately before introducing paid plans.
+Billing is never represented as implemented by an entitlement stub.
 
 ## System layout and ownership
 
@@ -383,7 +383,7 @@ the dependency gates before starting dependent implementation.
 | J03 | Juiced: provisioning adapter and reconciliation | J02, C03, C04 | Entitled bootstrap from two devices converges; killed workers resume; pending/failure states actionable; no secrets returned |
 | J04 | Juiced: account-bound relay, managed Git stop endpoint, terminal lifecycle | J03 | All existing workflows routed; cross-account IDs denied; no raw DB credentials; streaming, cancellation and retries preserve protocol semantics |
 | J05 | Juiced CLI: managed commands/context and scoped local state | J02-J04 | Login/logout/whoami, captured account target, self-managed opt-in, no fallback; account switch/reconnect cannot reuse another account's receipts/refs |
-| A01 | All: private-alpha qualification and deployment | C04, J05 | Two real accounts complete the workflow matrix; capped operator-funded entitlements; recovery and rollback demonstrated |
+| A01 | All: free-account qualification and deployment | C04, J05 | Two real accounts complete the workflow matrix; default free allowances and per-App resource limits; recovery and rollback demonstrated |
 | C05 | Cantelop: durable allocation usage and cursor API | C04 | Duplicate/reordered/outage/crash events reconcile once, including detached/idle/auth allocations |
 | C06 | Cantelop: prepaid budget reservations, fenced lease renewal/deadlines | C05, P01 lease proof | Concurrent activation and control outage cannot exceed granted allowance; expiry stops native children; resource and budget denials are actionable |
 | J06 | Juiced: subscription checkout/portal, event inbox, entitlements, usage UI | J03, C05, C06 | Sandbox billing lifecycle, out-of-order/duplicate events, period rollover and exhausted state agree with enforced platform allowance |
@@ -392,11 +392,11 @@ the dependency gates before starting dependent implementation.
 | R03 | Juiced/SDK: npm packaging, supported OS smoke tests, CI and operator documentation | J05, R01 | Fresh-machine packed install works without source/Docker/Cantelop CLI; package contains no server code or secrets; SDK sync helper is available |
 | Q01 | All: paid-production load, isolation, disaster recovery and release gates | C06, J06, R01-R03 | Qualification matrix, enforced hard caps, restores, provider outage behavior, canary and rollback all pass |
 
-The main dependency path is P00/P01 -> C01-C04 + J01/J02 -> J03-J05 -> alpha,
+The main dependency path is P00/P01 -> C01-C04 + J01/J02 -> J03-J05 -> free accounts,
 then C05/C06 + J06 -> release/lifecycle/package qualification -> paid production.
-Alpha is bounded by a fixed invitation count, per-App concurrency/shape quotas
-and a host-enforced campaign expiry; reserve its worst-case resource cost in the
-operator budget. Customer usage-based hard-cap claims wait for C05/C06.
+Free accounts retain per-App concurrency and shape quotas. Keep Fleet and host
+capacity limits bounded while qualifying the launch. Customer usage-based
+hard-cap claims wait for C05/C06.
 No calendar estimates are attached until P00/P01 resolve the version baseline,
 storage enforcement and lease costs; these are the largest current uncertainties.
 
@@ -506,8 +506,8 @@ high-water marks before issuing credit; fail closed if that evidence is missing.
    missing policy; self-managed legacy Apps retain their existing behavior.
 3. Publish/qualify the first immutable Juiced package; provision a staging Fleet
    with two accounts and run the full isolation/recovery harness.
-4. Deploy Juiced auth/API/jobs and distribute a private CLI candidate. Admit only
-   explicit alpha accounts with funded operator allowances and resource limits.
+4. Deploy Juiced auth/API/jobs and distribute the CLI candidate. New accounts use
+   the default free allowance with per-App resource limits.
 5. Add/qualify usage reservations and subscription billing in test mode. Exercise
    cap exhaustion, payment failure, outage, rollover, migration and deletion.
 6. Select the public package name, domain, hosting/secrets, license, price and
