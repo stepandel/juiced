@@ -4,6 +4,8 @@ import { useState } from 'react';
 
 export function InstallCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
+  // Keep the piped shell together when the command wraps.
+  const pipe = command.lastIndexOf(' | ');
   async function copy() {
     try {
       await navigator.clipboard.writeText(command);
@@ -19,7 +21,8 @@ export function InstallCommand({ command }: { command: string }) {
         <span className="prompt" aria-hidden="true">
           ${' '}
         </span>
-        {command}
+        {command.slice(0, pipe + 1)}
+        <span className="nowrap">{command.slice(pipe + 1)}</span>
       </code>
       <button type="button" onClick={copy} aria-label="Copy install command">
         {copied ? 'copied' : 'copy'}

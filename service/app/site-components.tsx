@@ -36,8 +36,11 @@ export function SiteHeader() {
       <nav className="site-nav mono" aria-label="Main navigation">
         <a href="/docs">docs</a>
         <a href="/pricing">pricing</a>
-        <a href={site.github}>
+        <a href={site.github} className="github">
           github <span aria-hidden="true">↗</span>
+        </a>
+        <a href="/docs/getting-started" className="button">
+          get started
         </a>
       </nav>
     </header>
@@ -50,6 +53,7 @@ export function SiteFooter() {
       <nav className="site-nav" aria-label="Footer navigation">
         <a href="/docs">docs</a>
         <a href="/pricing">pricing</a>
+        <a href={site.github}>github</a>
         <a href="/llms.txt">llms.txt</a>
       </nav>
       <a href="https://cantelop.com">

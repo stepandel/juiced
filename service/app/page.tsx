@@ -3,7 +3,6 @@ import { SiteHeader, SiteFooter } from './site-components';
 import { guides } from '../src/guides';
 import { pageMetadata, site } from '../src/site';
 
-// Placeholder until the install script ships.
 const install = 'curl -fsSL https://juiced.codes/install.sh | sh';
 
 export const metadata = pageMetadata(
@@ -113,9 +112,7 @@ export default function Home() {
           </div>
         </section>
         <section className="features" aria-labelledby="how">
-          <h2 id="how" className="number mono">
-            how it works
-          </h2>
+          <h2 id="how">How it works</h2>
           <article>
             <span className="number mono">01</span>
             <h3>A workspace for your project</h3>
