@@ -7,11 +7,7 @@ export const metadata = pageMetadata('Pricing', description, '/pricing');
 
 export default function Pricing() {
   return (
-    <PublicPage
-      title="Simple pricing."
-      intro="Every feature, on both plans."
-      eyebrow={{ label: 'Pricing', href: '/pricing' }}
-    >
+    <PublicPage title="Pricing" eyebrow={null}>
       <div className="pricing-grid">
         <section className="pricing-card" aria-labelledby="free-plan">
           <h2 id="free-plan">Free</h2>
@@ -27,8 +23,8 @@ export default function Pricing() {
         </section>
       </div>
       <p className="pricing-details">
-        One vCPU hour is one virtual CPU running for one hour. Claude Code
-        access is separate.
+        Both plans include every feature. One vCPU hour is one virtual CPU
+        running for one hour. Claude Code access is separate.
       </p>
       <p>
         <a href="/docs/getting-started">Get started</a>

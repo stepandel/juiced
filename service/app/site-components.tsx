@@ -55,19 +55,21 @@ export function PublicPage({
   children,
 }: {
   title: string;
-  intro: string;
-  eyebrow?: { label: string; href: string };
+  intro?: string;
+  eyebrow?: { label: string; href: string } | null;
   children: ReactNode;
 }) {
   return (
     <div className="wrap">
       <SiteHeader />
       <main className="document">
-        <p className="number mono">
-          <a href={eyebrow.href}>{eyebrow.label}</a>
-        </p>
+        {eyebrow && (
+          <p className="number mono">
+            <a href={eyebrow.href}>{eyebrow.label}</a>
+          </p>
+        )}
         <h1>{title}</h1>
-        <p className="lede">{intro}</p>
+        {intro && <p className="lede">{intro}</p>}
         <div className="prose">{children}</div>
       </main>
       <SiteFooter />
