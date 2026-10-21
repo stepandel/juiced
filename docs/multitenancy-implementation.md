@@ -327,9 +327,11 @@ bytes do not vanish when compute stops.
 
 ## Persistence and state transitions
 
-Add reviewed forward migrations; do not alter released migrations. Use foreign
-keys, unique constraints and compare-and-set revisions rather than slug lookup
-as an ownership mechanism.
+Start from the complete service and authentication schema in
+`service/migrations/0001-initial.sql`. After the first deployment, add reviewed
+forward migrations without altering released migrations. Use foreign keys,
+unique constraints and compare-and-set revisions rather than slug lookup as an
+ownership mechanism.
 
 | Database | New record groups and key constraints |
 | --- | --- |

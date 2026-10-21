@@ -69,9 +69,9 @@ The homepage is a static Next.js page and
 `/health` checks the HTTP handler without account credentials. Account routes and
 `/ready` return HTTP 503 until production configuration is supplied. The homepage
 links to public docs and pricing. Free includes 10 vCPU hours; Unlimited
-($25/month) is marked coming soon. Both plans include all features. In the service every account is free: migration
-`0011-free-accounts.sql` starts each account on the `free` epoch with an
-effectively unlimited allowance (10^15 credits until 2100). A paid Stripe
+($25/month) is marked coming soon. Both plans include all features. In the service
+every account starts on the `free` epoch with an effectively unlimited allowance
+(10^15 credits until 2100). A paid Stripe
 invoice replaces that epoch when billing is configured later. See
 [search and AI discovery](search-discovery.md) for verification, sitemap submission,
 and baseline measurement after deployment.
@@ -131,6 +131,12 @@ References: [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/ne
 [trusted request headers](https://vercel.com/docs/headers/request-headers).
 
 ### Account infrastructure
+
+`service/migrations/0001-initial.sql` creates the complete service and
+authentication schema, including free-account defaults. Apply it to an empty
+database for the first deployment. Migration runs are transactional and serialized;
+subsequent runs skip applied migrations and seed the CLI client idempotently.
+After launch, schema changes belong in new forward migrations.
 
 1. Install the pinned registry dependency with `npm ci`. SDK **1.5.0** supplies
    compiled transport rebinding and the public relay validators; its registry

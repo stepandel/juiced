@@ -46,19 +46,7 @@ export async function migrate(pool: Pool) {
     await tx.query(
       'CREATE TABLE IF NOT EXISTS juiced_migrations(id text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())',
     );
-    for (const name of [
-      '0001-service.sql',
-      '0002-auth.sql',
-      '0003-billing-lifecycle.sql',
-      '0004-upgrades.sql',
-      '0005-checkout-cancellation.sql',
-      '0006-billing-retries.sql',
-      '0007-upgrade-intents.sql',
-      '0008-projection-fences.sql',
-      '0009-terminal-retries.sql',
-      '0010-usage-epoch-index.sql',
-      '0011-free-accounts.sql',
-    ]) {
+    for (const name of ['0001-initial.sql']) {
       if ((await tx.query('SELECT 1 FROM juiced_migrations WHERE id=$1', [name])).rowCount)
         continue;
       await tx.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));

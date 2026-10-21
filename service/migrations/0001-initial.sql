@@ -1,3 +1,156 @@
+-- Initial account-service schema.
+-- Free allowances are immutable per Cantelop (App, epoch); 10^15 credits
+-- through 2100 is effectively unlimited under allocated-compute-v1.
+CREATE TABLE accounts (
+  id text PRIMARY KEY,
+  owner_user_id text NOT NULL UNIQUE,
+  status text NOT NULL DEFAULT 'active' CHECK(status IN ('active','suspended','deleting','deleted')),
+  entitlement text NOT NULL DEFAULT 'active' CHECK(entitlement IN ('inactive','active','exhausted')),
+  period_id text DEFAULT 'free',
+  period_start timestamptz,
+  period_end timestamptz DEFAULT '2100-01-01T00:00:00Z',
+  included_credits bigint NOT NULL DEFAULT 1000000000000000 CHECK(included_credits>=0),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE memberships (
+  account_id text REFERENCES accounts(id),
+  user_id text NOT NULL,
+  role text NOT NULL CHECK(role IN ('owner','member')),
+  PRIMARY KEY(account_id,user_id)
+);
+
+CREATE TABLE devices (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  label text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  revoked_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX devices_user ON devices(user_id);
+
+CREATE TABLE device_refresh_tokens (
+  refresh_id text PRIMARY KEY,
+  device_id text NOT NULL REFERENCES devices(id)
+);
+
+CREATE TABLE installations (
+  id text PRIMARY KEY,
+  account_id text NOT NULL UNIQUE REFERENCES accounts(id),
+  external_key text NOT NULL UNIQUE,
+  platform_id text UNIQUE,
+  app_id text UNIQUE,
+  package_id text NOT NULL,
+  runtime_id text NOT NULL,
+  status text NOT NULL CHECK(status IN ('pending','provisioning','ready','failed','deleting','deleted')),
+  error_code text,
+  policy_revision integer NOT NULL DEFAULT 1,
+  entitlement_epoch text,
+  desired_package_id text,
+  desired_runtime_id text,
+  upgrade_generation integer NOT NULL DEFAULT 0,
+  operation_id text,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE SEQUENCE projection_fence;
+CREATE TABLE jobs (
+  id text PRIMARY KEY,
+  account_id text NOT NULL REFERENCES accounts(id),
+  kind text NOT NULL,
+  payload jsonb NOT NULL DEFAULT '{}',
+  status text NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','done','failed')),
+  attempts integer NOT NULL DEFAULT 0,
+  available_at timestamptz NOT NULL DEFAULT now(),
+  lease_until timestamptz,
+  fence integer NOT NULL DEFAULT 0,
+  projection_fence bigint NOT NULL DEFAULT 0,
+  error_code text,
+  idempotency_key text NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX jobs_ready ON jobs(status,available_at);
+
+CREATE TABLE subscriptions (
+  account_id text PRIMARY KEY REFERENCES accounts(id),
+  customer_id text NOT NULL UNIQUE,
+  subscription_id text UNIQUE,
+  status text NOT NULL DEFAULT 'incomplete',
+  reconciled_at timestamptz
+);
+
+CREATE TABLE checkout_sessions (
+  account_id text PRIMARY KEY REFERENCES accounts(id),
+  intent_id text NOT NULL,
+  url text,
+  expires_at timestamptz NOT NULL,
+  stripe_id text
+);
+
+CREATE TABLE billing_events (
+  id text PRIMARY KEY,
+  type text NOT NULL,
+  payload jsonb NOT NULL,
+  processed_at timestamptz,
+  error_code text,
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  attempts integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE entitlement_grants (
+  id text PRIMARY KEY,
+  account_id text NOT NULL REFERENCES accounts(id),
+  credits bigint NOT NULL CHECK(credits>=0),
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE usage_events (
+  id text PRIMARY KEY,
+  account_id text NOT NULL REFERENCES accounts(id),
+  sequence bigint NOT NULL UNIQUE,
+  credits bigint NOT NULL CHECK(credits>=0),
+  payload jsonb NOT NULL
+);
+CREATE INDEX usage_events_epoch ON usage_events(account_id,(payload->>'epoch'));
+
+CREATE TABLE terminal_leases (
+  id text PRIMARY KEY,
+  account_id text NOT NULL REFERENCES accounts(id),
+  device_id text NOT NULL REFERENCES devices(id),
+  installation_id text NOT NULL REFERENCES installations(id),
+  workspace_id text NOT NULL,
+  session_id text NOT NULL,
+  revoked_at timestamptz,
+  expires_at timestamptz NOT NULL,
+  close_after timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX terminal_leases_live ON terminal_leases(device_id,expires_at) WHERE revoked_at IS NULL;
+CREATE INDEX terminal_leases_closure ON terminal_leases(close_after) WHERE revoked_at IS NULL;
+
+CREATE TABLE settings (
+  key text PRIMARY KEY,
+  value text NOT NULL
+);
+
+CREATE TABLE api_limits (
+  key text PRIMARY KEY,
+  bucket bigint NOT NULL,
+  count integer NOT NULL
+);
+
+CREATE TABLE audit (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  account_id text REFERENCES accounts(id),
+  actor text NOT NULL,
+  action text NOT NULL,
+  target text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Authentication tables match the pinned Better Auth and OAuth Provider schema.
 create table "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" boolean not null, "image" text, "createdAt" timestamptz default CURRENT_TIMESTAMP not null, "updatedAt" timestamptz default CURRENT_TIMESTAMP not null);
 
 create table "session" ("id" text not null primary key, "expiresAt" timestamptz not null, "token" text not null unique, "createdAt" timestamptz default CURRENT_TIMESTAMP not null, "updatedAt" timestamptz not null, "ipAddress" text, "userAgent" text, "userId" text not null references "user" ("id") on delete cascade);
