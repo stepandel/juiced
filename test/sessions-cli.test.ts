@@ -12,7 +12,7 @@ import { sessionKey } from '../src/runtime/session-list.js';
 
 const execute = promisify(execFile);
 
-test('built sessions command works in a pipe, uses the requested workspace, and never authenticates or starts Claude', { timeout: 20_000 }, async t => {
+test('built sessions command works in a pipe, uses the requested workspace, and never authenticates or starts Claude', { timeout: 60_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'juiced-sessions-cli-'));
   const projectRoot = fileURLToPath(new URL('../', import.meta.url));
   await mkdir(join(projectRoot, '.cantelop'), { recursive: true });

@@ -1,6 +1,6 @@
 {
   "name": "juiced",
-  "version": "0.2.0",
+  "version": "0.2.0-rc.4",
   "description": "Run Claude Code on Cantelop from your terminal",
   "type": "module",
   "private": false,
@@ -16,9 +16,12 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:release": "node scripts/build-release.mjs",
+    "test:installer": "node scripts/test-installer.mjs",
     "build:runtime": "node scripts/build-runtime.mjs",
     "check": "tsc --noEmit",
     "test": "node --import tsx --import ./test/self-managed-fixtures.ts --test --test-concurrency=4 test/*.test.ts",
+    "test:serial": "node --import tsx --import ./test/self-managed-fixtures.ts --test --test-concurrency=1 test/*.test.ts",
     "test:environment:local": "npm run build && JUICED_MODE=self-managed node scripts/test-environment-local.mjs",
     "test:live": "JUICED_MODE=self-managed node scripts/test-live.mjs",
     "test:agent:live": "JUICED_MODE=self-managed node scripts/test-agent-live.mjs",
