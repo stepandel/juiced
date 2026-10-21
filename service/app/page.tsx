@@ -84,24 +84,35 @@ export default function Home() {
           </h2>
           <article>
             <span className="number mono">01</span>
-            <h3>Start</h3>
+            <h3>A workspace for your project</h3>
             <p>
-              Run <code>juiced claude</code> in a repo. Your code goes to a private cloud
-              workspace, and Claude Code starts there with your Claude account.
+              Your first <code>juiced claude</code> in a repo copies it to a private cloud workspace.
+              Your code, Claude login and conversations stay there between runs.
             </p>
           </article>
           <article>
             <span className="number mono">02</span>
-            <h3>Step away</h3>
+            <h3>A sandbox for every session</h3>
             <p>
-              Detach or close the terminal anytime. Run <code>juiced claude</code> again to pick
-              up where you left off.
+              Claude Code runs in an isolated sandbox attached to that workspace. You drive it from
+              your terminal, and it keeps going when you disconnect.
             </p>
           </article>
           <article>
             <span className="number mono">03</span>
-            <h3>Bring it back</h3>
-            <p>Pull Claude's changes into your local repo when you're ready.</p>
+            <h3>Shut down when idle</h3>
+            <p>
+              Once Claude is done, the sandbox shuts down. Run <code>juiced claude</code> again to
+              pick up the same conversation.
+            </p>
+          </article>
+          <article>
+            <span className="number mono">04</span>
+            <h3>Changes come back on your terms</h3>
+            <p>
+              Pull Claude's commits into your local repo when you're ready. Nothing changes on your
+              laptop until you approve it.
+            </p>
           </article>
         </section>
       </main>
