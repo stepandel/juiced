@@ -23,7 +23,7 @@ export interface Services {
   accounts: Accounts;
   platform: Platform;
   auth?: Auth;
-  billing?: Billing;
+  billing?: Billing | undefined;
   wake?: (delaySeconds?: number) => Promise<void>;
 }
 

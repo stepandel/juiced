@@ -10,7 +10,7 @@ import { wakeJobs } from './queue';
 /** Bounded work on the existing durable records. Duplicate queue deliveries
  * use the same SQL locks, idempotency keys and projection fences as before. */
 type JobServices = Pick<ReturnType<typeof services>, 'pool' | 'accounts' | 'platform'> & {
-  billing: Pick<Billing, 'runOnce' | 'cancel'>;
+  billing?: Pick<Billing, 'runOnce' | 'cancel'> | undefined;
 };
 export async function reconcile(s: JobServices, wake = wakeJobs) {
   await transaction(s.pool, async (tx) => {
@@ -33,7 +33,7 @@ export async function reconcile(s: JobServices, wake = wakeJobs) {
   let more = false;
   for (let round = 0; round < 25 && Date.now() < deadline; round++) {
     const results = await Promise.allSettled([
-      s.billing.runOnce(),
+      s.billing?.runOnce() ?? false,
       usage.runOnce(),
       provision.runOnce(),
       terminals.runOnce(),

@@ -22,18 +22,22 @@ export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'wo
     fetch,
     cfg.development,
   );
-  const billing = new Billing(
-    pool,
-    new Stripe(required(env, 'STRIPE_SECRET_KEY'), { timeout: 15000, maxNetworkRetries: 2 }),
-    {
-      price: required(env, 'STRIPE_PRICE_ID'),
-      credits: Number(required(env, 'JUICED_INCLUDED_CREDITS')),
-      webhookSecret: required(env, 'STRIPE_WEBHOOK_SECRET'),
-      origin: cfg.origin,
-      liveMode: env.STRIPE_LIVE_MODE === 'true',
-      portalConfiguration: required(env, 'STRIPE_PORTAL_CONFIGURATION_ID'),
-    },
-  );
+  // Billing is enabled by STRIPE_SECRET_KEY. Without it, billing routes return
+  // billing_unavailable and accounts are funded only by operator alpha grants.
+  const billing = env.STRIPE_SECRET_KEY
+    ? new Billing(
+        pool,
+        new Stripe(env.STRIPE_SECRET_KEY, { timeout: 15000, maxNetworkRetries: 2 }),
+        {
+          price: required(env, 'STRIPE_PRICE_ID'),
+          credits: Number(required(env, 'JUICED_INCLUDED_CREDITS')),
+          webhookSecret: required(env, 'STRIPE_WEBHOOK_SECRET'),
+          origin: cfg.origin,
+          liveMode: env.STRIPE_LIVE_MODE === 'true',
+          portalConfiguration: required(env, 'STRIPE_PORTAL_CONFIGURATION_ID'),
+        },
+      )
+    : undefined;
   return { cfg, pool, accounts, platform, billing };
 }
 
@@ -47,9 +51,9 @@ export function serviceLoader(
       const s = services(env, role);
       try {
         await s.pool.query('SELECT 1 FROM juiced_migrations LIMIT 1');
-        // Billing jobs need Stripe. Requests check it lazily in Billing, so a
+        // Billing jobs need Stripe when it is configured. Requests check it lazily, so a
         // Stripe outage cannot take down sign-in or runtime access.
-        if (role === 'worker') await s.billing.ready();
+        if (role === 'worker') await s.billing?.ready();
         return s;
       } catch (error) {
         await s.pool.end();
