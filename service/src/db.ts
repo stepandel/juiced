@@ -20,16 +20,24 @@ export function database(raw: string) {
 export type Queryable = Pick<PoolClient, 'query'>;
 export async function transaction<T>(pool: Pool, fn: (tx: PoolClient) => Promise<T>) {
   const tx = await pool.connect();
+  let clientError: Error | undefined;
+  // A timeout or disconnect between queries emits an error on the client.
+  const onError = (error: Error) => {
+    clientError ??= error;
+  };
+  tx.on('error', onError);
   try {
     await tx.query('BEGIN');
     const result = await fn(tx);
+    if (clientError) throw clientError;
     await tx.query('COMMIT');
     return result;
   } catch (error) {
-    await tx.query('ROLLBACK').catch(() => {});
-    throw error;
+    if (!clientError) await tx.query('ROLLBACK').catch(() => {});
+    throw clientError ?? error;
   } finally {
-    tx.release();
+    tx.release(clientError);
+    tx.removeListener('error', onError);
   }
 }
 export async function migrate(pool: Pool) {
