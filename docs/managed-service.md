@@ -143,7 +143,11 @@ References: [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/ne
 3. `service/deploy/production-env.sh` performs this step and writes the
    generated role URLs, auth secret, OAuth and Fleet values to Vercel production
    without echoing them; run it per section (`auth`, `database`, `oauth`,
-   `cantelop`). Manually: run `npm run migrate:service` as the schema owner. Apply
+   `cantelop`). The `cantelop` section uses the `cantelop login` owner credential
+   to create or reuse the `juiced` Fleet, registers the active `juiced` App
+   release as the package (its runtime must match this CLI build; otherwise run
+   `cantelop deploy` first) and issues separate API and worker principals. The
+   short-lived publisher principal is revoked after registration. Manually: run `npm run migrate:service` as the schema owner. Apply
    `service/deploy/roles.sql` after migrations and provision login secrets outside
    source control. The API role cannot update paid periods, included credits,
    usage or immutable grants. Use separate database credentials and Fleet
