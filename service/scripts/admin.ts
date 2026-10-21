@@ -1,7 +1,7 @@
 /** Operator-only utility. Run with the worker DB role; never exposed over HTTP. */
-import { database, transaction } from '../src/db.js';
-import { required } from '../src/config.js';
-import { enqueue, id } from '../src/accounts.js';
+import { database, transaction } from '../src/db';
+import { required } from '../src/config';
+import { enqueue, id } from '../src/accounts';
 const [action, account, amount, until] = process.argv.slice(2),
   pool = database(required(process.env, 'JUICED_WORKER_DATABASE_URL'));
 try {

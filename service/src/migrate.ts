@@ -1,8 +1,8 @@
 import { getMigrations } from 'better-auth/db/migration';
 import { writeFile } from 'node:fs/promises';
-import { authentication, authOptions, seedClient } from './auth.js';
-import { config } from './config.js';
-import { database, migrate } from './db.js';
+import { authentication, authOptions, seedClient } from './auth';
+import { config } from './config';
+import { database, migrate } from './db';
 
 const cfg = config(),
   pool = database(cfg.databaseUrl);

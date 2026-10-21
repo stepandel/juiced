@@ -44,44 +44,64 @@ sessions, Git refs and publication receipts.
 account deletion. Providers are never implicitly linked solely by email. Native
 Claude authentication remains a separate, per-Workspace action.
 
-## Service processes and configuration
+## Service configuration
 
-`service/` contains separate API/web and worker entry points, SQL migrations,
-provider-backed authentication and durable jobs. `contracts/` is shared with the
-packaged CLI. The npm package includes CLI assets; private service code stays out.
+`service/` is the Next.js app. It serves the website and account API and contains
+one private Vercel Queue consumer plus one cron endpoint. There is no standalone
+server or continuously running worker. `contracts/` stays shared with the CLI;
+the npm package includes CLI assets and excludes private service code.
 
-### Vercel website and API
+### Vercel deployment
 
-The Vercel project is `stepandels-projects/juiced`, connected to
-`stepandel/juiced`. Its project root is the repository root and its production
-branch is `main`. `vercel.json` selects Hono, Node 24 is configured on the project,
-and `server.ts` exports the web application. Vercel builds run the service's
-TypeScript check; they do not publish the CLI or compile a Cantelop runtime.
-The production website is `https://juiced.codes`; the Vercel-assigned production
-domain is `https://juiced-eight.vercel.app`.
+The project is `stepandels-projects/juiced`, connected to `stepandel/juiced` with
+production branch `main`, root directory `service`, framework Next.js and Node 24.
+Source files outside the root directory must be enabled for shared contracts and
+the workspace lockfile. `service/vercel.json` declares the private `juiced-jobs`
+queue trigger and the once-per-minute `/api/cron` schedule. Vercel builds run
+`next build`; they do not publish the CLI or compile a Cantelop runtime.
 
-The homepage and `/health` work without account infrastructure. Account pages,
-authentication, billing and API routes remain unavailable with HTTP 503 until
-their production configuration is supplied. `/ready` checks account-service
-initialization and the database. The homepage labels the release as a private
-preview and links to source instructions while npm publication is deferred.
+The website is `https://juiced.codes`, also available at
+`https://juiced-eight.vercel.app`. The homepage is a static Next.js page and
+`/health` checks the HTTP handler without account credentials. Account routes and
+`/ready` return HTTP 503 until production configuration is supplied. The homepage
+labels the release as a private preview while CLI publication is deferred.
 
-Set the API's values from `service/.env.example` as Vercel production environment
-variables. Keep `JUICED_SERVICE_URL=https://juiced.codes` and
-`JUICED_ADMISSION_ENABLED=false` until qualification. Store the worker database
-credentials and worker Fleet token only on the worker host. Never add them to the
-Vercel API project. The Vercel adapter uses Vercel's overwritten
-`x-vercel-forwarded-for` header for rate limits and strips a visitor's private IP
-header; the standalone Node server continues using its socket/proxy rules.
+Set the values in `service/.env.example` in the Vercel project. The API uses the
+limited `JUICED_DATABASE_URL` role and `CANTELOP_FLEET_TOKEN`; the private job
+consumer uses `JUICED_WORKER_DATABASE_URL` and `CANTELOP_WORKER_FLEET_TOKEN`. Keep
+`JUICED_SERVICE_URL=https://juiced.codes` and `JUICED_ADMISSION_ENABLED=false` until
+qualification. A random `CRON_SECRET` protects the cron endpoint; Vercel sends it
+as an Authorization bearer token. Queue authentication uses Vercel OIDC and its
+consumer is not accessible through a public HTTP URL.
 
-The durable worker in `service/src/worker.ts` still needs a separate continuously
-running process. Do not start it inside a Vercel request or replace its short
-reconciliation loops with minute-level cron. It handles provisioning, billing,
-usage, account expiry and revocation cleanup. The request relay uses streaming;
-Vercel invocations are limited to 300 seconds and the CLI reconnects using its
-existing replay cursor. Qualify real hosted reconnects before enabling admission.
+Account bootstrap, deletion, device revocation and verified Stripe webhooks
+publish a queue wake-up after their database writes commit. Native-auth terminals
+also schedule a wake-up for their expiry. Queue messages carry no credentials or
+account payloads: Postgres retains authoritative jobs, billing events, retry
+schedules, usage and fencing. Each invocation runs a bounded batch and schedules
+short pending retries through delayed queue delivery. Duplicate delivery uses the
+existing SQL locks and idempotency keys. If publishing fails after a commit, the
+request reports failure and a caller retry or the minute cron recovers the durable
+record. Cron also recovers jobs after message expiry and deployment changes.
 
-For manual deployments from a clean, committed checkout:
+Usage and canonical Stripe reconciliation run with these batches, including the
+minute cron. Settled usage display can lag by a minute; hard budgets continue to
+be enforced independently by Cantelop's prepaid host grants. API authorization
+still checks entitlement and device expiry on each request, and streams recheck
+revocation every five seconds. The relay preserves streaming and cancellation;
+its 300-second Vercel invocation limit uses the CLI's existing replay reconnect.
+Qualify these hosted flows before enabling admission.
+
+For local development or a production build:
+
+```sh
+npm ci
+npm run dev:service
+npm run build:service
+npm run start:service
+```
+
+For manual deployments from the repository root:
 
 ```sh
 vercel link --yes --project juiced --scope stepandels-projects
@@ -89,15 +109,15 @@ vercel deploy --scope stepandels-projects
 vercel deploy --prod --scope stepandels-projects
 ```
 
-`public/` is served by Vercel's CDN. `.vercelignore` excludes local environment
-files, tests and diagnostics from uploads. The local `.vercel/` link and downloaded
-`.env.local` credentials are ignored by Git. Attach `juiced.codes` to this project
-and use the DNS record returned by `vercel domains inspect juiced.codes` at the
-registrar; adding the domain in Vercel does not update external DNS.
+`service/public/` is served by Vercel's CDN. `.vercelignore` excludes local
+environment files, tests, build outputs and diagnostics. The local `.vercel/` link
+and `.env.local` credentials are ignored by Git. External DNS for `juiced.codes`
+must point to the records returned by `vercel domains inspect juiced.codes`.
 
-Hosting references: [Hono on Vercel](https://vercel.com/docs/frameworks/backend/hono),
-[trusted request headers](https://vercel.com/docs/headers/request-headers), and
-[function duration limits](https://vercel.com/docs/functions/limitations).
+References: [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/nextjs),
+[Vercel Queues](https://vercel.com/docs/queues/quickstart),
+[cron security](https://vercel.com/docs/cron-jobs/manage-cron-jobs), and
+[trusted request headers](https://vercel.com/docs/headers/request-headers).
 
 ### Account infrastructure
 
@@ -115,11 +135,11 @@ Hosting references: [Hono on Vercel](https://vercel.com/docs/frameworks/backend/
    `service/deploy/roles.sql` after migrations and provision login secrets outside
    source control. The API role cannot update paid periods, included credits,
    usage or immutable grants. Use separate database credentials and Fleet
-   principals for API and worker; only the worker may provision or change policy.
-4. Start `npm run start:service` and `npm run worker:service`, or build
-   `service/deploy/Dockerfile` and run its Compose example behind TLS. Keep the API
-   port private. `/health` checks process liveness; `/ready` checks database access.
-   Run reviewed grants again when later migrations introduce tables.
+   principals for API handlers and queue jobs; only jobs may provision or change policy.
+4. Deploy the Next.js app, queue consumer and cron together through Vercel.
+   `/health` checks HTTP liveness; `/ready` checks initialized services and database
+   access. Check that unauthenticated `/api/cron` requests are denied and the queue
+   route has no public ingress. Run reviewed grants again for later migrations.
 5. Configure Stripe's webhook URL `/webhooks/stripe`, subscribing to customer,
    subscription, invoice and Checkout events. Events are signature checked and
    durably stored before acknowledgement. Use test keys until qualification.
@@ -127,10 +147,9 @@ Hosting references: [Hono on Vercel](https://vercel.com/docs/frameworks/backend/
    The portal must disable subscription price changes. Configure payment methods,
    invoice access and cancellation there; no metered items or automatic overages
    are created by Juiced.
-6. Supply only actual reverse-proxy CIDRs in `JUICED_TRUSTED_PROXY_CIDRS`. The Node
-   server derives the client IP from its socket, strips the incoming private IP
-   header, and interprets forwarding chains only from trusted peers. Limit auth
-   traffic at the public ingress as well. The provider also persists rate limits.
+6. Vercel overwrites `x-vercel-forwarded-for`; the handler validates that address
+   and strips visitor-supplied private IP headers. Limit authentication traffic at
+   public ingress as well. The provider also persists rate limits.
 
 Do not enable `JUICED_ADMISSION_ENABLED` until the deployment has passed the
 qualification below. Setting it to `false` closes new API work. To stop existing
@@ -159,11 +178,11 @@ blocks raw database credentials and arbitrary private routes, pins account and
 installation, and forwards streams with backpressure and cancellation. Environment
 mutations and native-auth mutations require an owner. Stream authorization is
 rechecked every five seconds; single-use auth terminals are recorded and closed
-by a worker after device revocation. Git cleanup uses a typed server operation
+by a queue job after device revocation. Git cleanup uses a typed server operation
 that retires observed checkout tokens after stopping the Session.
 
 Paid invoices grant immutable allowance epochs. Duplicate or delayed webhooks
-cannot refill an exhausted epoch. The worker fetches canonical Stripe state;
+cannot refill an exhausted epoch. Queue jobs fetch canonical Stripe state;
 reconciliation also polls to repair missed events. Expired/delinquent accounts
 cannot start work. Bounded credit reservations are bound to host boot identities;
 only durable final host evidence returns unused credits. Ambiguous or lost-host
@@ -174,7 +193,7 @@ Policy projections include a monotonic job fence, so a worker that lost its
 database lock cannot undo a newer suspension. External-key tombstones serialize
 deletion with ambiguous or still-running App creation.
 
-Account deletion first revokes devices and records a durable intent. The worker
+Account deletion first revokes devices and records a durable intent. A queue job
 expires outstanding Checkout sessions (recovering ambiguous creation by its
 Stripe idempotency key), cancels subscriptions, closes App admission and waits for
 filesystem/database purges. It then removes memberships and authentication
@@ -191,7 +210,7 @@ compatible package as the desired release to roll back. Existing Cantelop releas
 activation and additive database migration rules still apply; never claim a
 rollback reverses destructive application data changes.
 
-For canaries, deploy the new API/worker to a separate alpha Fleet/service origin
+For canaries, deploy the new Next.js app and jobs to a separate alpha Fleet/service origin
 first. Pin its package/runtime pair, qualify two accounts, then promote the same
 immutable package in the production Fleet and CLI build. Keep Fleet and host
 capacity limits deliberately small until load/lease-renewal latency is measured.
@@ -211,10 +230,9 @@ node --import tsx service/scripts/admin.ts invalidate-devices
 Alpha grants are explicitly operator funded, integral and expire within seven
 days. Watch pending/stale jobs, billing retries, unreconciled reservations,
 policy/enforced revision lag, principal expiry, purge failures, pool wait times
-and lease-renewal latency. Worker diagnostics use fixed error codes and contain
-no credentials, command bodies or terminal content.
+and lease-renewal latency. Job diagnostics must not contain credentials, command bodies or terminal content.
 
-After a database restore, keep admission and worker renewal disabled. Stop old
+After a database restore, keep admission closed and queue/cron processing disabled. Stop old
 hosts or verify their watchdogs killed all funded VMs, invalidate browser/CLI
 sessions, restore the accounting ledger from authoritative WAL/backups, reconcile
 host evidence and Stripe, and conservatively charge ambiguous reservations.
@@ -233,9 +251,9 @@ canonical billing replay/renewal, crash recovery, stream forwarding/cancellation
 private package contents and clean installation. They use disposable PostgreSQL
 and local transport fixtures.
 
-The production origin is selected, but GitHub/Google app registrations, Stripe
-product/portal/webhook configuration and a managed-service host have not been
-configured or deployed by this change. Before paid launch, run the full two-account workflow with real OAuth,
+The Next.js website and job infrastructure deploy on Vercel. Production
+PostgreSQL, GitHub/Google app registrations, Stripe product/portal/webhook
+configuration and Cantelop Fleet/package credentials still require setup. Before paid launch, run the full two-account workflow with real OAuth,
 Stripe test payments, independent secrets, Claude state, identical project names,
 Git transfers, file sync, and interrupted/reconnected sessions. On a Linux/KVM
 managed host, prove native writes hit filesystem/database limits; freeze the

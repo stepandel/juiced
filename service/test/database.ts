@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { migrate } from '../src/db.js';
+import { migrate } from '../src/db';
 export async function testDatabase() {
   const url = process.env.JUICED_TEST_DATABASE_URL;
   if (!url) throw new Error('JUICED_TEST_DATABASE_URL required');

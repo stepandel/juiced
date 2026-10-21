@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { testDatabase, user } from './database.js';
-import { Accounts } from '../src/accounts.js';
+import { testDatabase, user } from './database';
+import { Accounts } from '../src/accounts';
 
 test(
   'deployment roles allow API lifecycle intents but reserve allowance and job projections for the worker',

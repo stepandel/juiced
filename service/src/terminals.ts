@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
-import type { Platform } from './platform.js';
-import { ServiceError } from './config.js';
+import type { Platform } from './platform';
+import { ServiceError } from './config';
 
 export async function runtimeJSON(
   platform: Platform,

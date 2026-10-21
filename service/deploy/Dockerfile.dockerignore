@@ -1,8 +1,0 @@
-.git
-**/node_modules
-.cantelop
-.ci-sdk
-dist
-**/.env
-**/.env.*
-!**/.env.example

@@ -7,9 +7,9 @@ import {
 } from '@better-auth/oauth-provider';
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool } from 'pg';
-import type { Config } from './config.js';
-import { ServiceError, readText } from './config.js';
-import { transaction } from './db.js';
+import type { Config } from './config';
+import { ServiceError, readText } from './config';
+import { transaction } from './db';
 
 export const CLIENT_ID = 'juiced-cli';
 export const tokenHash = (token: string, type: string) =>

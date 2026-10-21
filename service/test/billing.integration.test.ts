@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import Stripe from 'stripe';
-import { testDatabase, user } from './database.js';
-import { Accounts } from '../src/accounts.js';
-import { Billing } from '../src/billing.js';
+import { testDatabase, user } from './database';
+import { Accounts } from '../src/accounts';
+import { Billing } from '../src/billing';
 
 test(
   'signed billing inbox reconciles authoritative paid invoices once, including replay and renewal',

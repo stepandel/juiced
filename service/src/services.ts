@@ -1,13 +1,9 @@
-import { pathToFileURL } from 'node:url';
-import { clientIP } from './client-ip.js';
-import { serve } from '@hono/node-server';
 import Stripe from 'stripe';
-import { config, required } from './config.js';
-import { database } from './db.js';
-import { Accounts } from './accounts.js';
-import { Platform } from './platform.js';
-import { Billing } from './billing.js';
-import { application } from './app.js';
+import { config, required } from './config';
+import { database } from './db';
+import { Accounts } from './accounts';
+import { Platform } from './platform';
+import { Billing } from './billing';
 
 export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'worker' = 'api') {
   const cfg = config(env),
@@ -40,29 +36,27 @@ export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'wo
   );
   return { cfg, pool, accounts, platform, billing };
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const s = services();
-  await s.billing.check();
-  const { app } = application(s);
-  const server = serve({
-    fetch: (request, env) => {
-      const headers = new Headers(request.headers),
-        ip = clientIP(
-          env.incoming.socket.remoteAddress,
-          headers.get('x-forwarded-for'),
-          s.cfg.trustedProxies,
-        );
-      headers.delete('x-juiced-peer-ip');
-      if (ip) headers.set('x-juiced-peer-ip', ip);
-      return app.fetch(new Request(request, { headers }));
-    },
-    hostname: '0.0.0.0',
-    port: s.cfg.port,
-  });
-  const shutdown = () => {
-    server.close(() => void s.pool.end());
-    setTimeout(() => process.exit(1), 10000).unref();
+
+export function serviceLoader(
+  role: 'api' | 'worker' = 'api',
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  let pending: Promise<ReturnType<typeof services>> | undefined;
+  return () => {
+    pending ??= (async () => {
+      const s = services(env, role);
+      try {
+        await s.pool.query('SELECT 1 FROM juiced_migrations LIMIT 1');
+        await s.billing.check();
+        return s;
+      } catch (error) {
+        await s.pool.end();
+        throw error;
+      }
+    })().catch((error: unknown) => {
+      pending = undefined;
+      throw error;
+    });
+    return pending;
   };
-  process.once('SIGINT', shutdown);
-  process.once('SIGTERM', shutdown);
 }

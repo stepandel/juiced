@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Pool } from 'pg';
-import { relay, boundedBody } from '../src/relay.js';
-import { Platform } from '../src/platform.js';
-import { Accounts, type Account, type Installation } from '../src/accounts.js';
-import { config } from '../src/config.js';
+import { relay, boundedBody } from '../src/relay';
+import { Platform } from '../src/platform';
+import { Accounts, type Account, type Installation } from '../src/accounts';
+import { config } from '../src/config';
 const cfg = config({
   NODE_ENV: 'test',
   JUICED_SERVICE_URL: 'http://127.0.0.1:3000',

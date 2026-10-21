@@ -1,7 +1,7 @@
 import { CantelopClient } from '@cantelop/sdk';
-import type { Platform } from './platform.js';
-import type { Installation } from './accounts.js';
-import { ServiceError } from './config.js';
+import type { Platform } from './platform';
+import type { Installation } from './accounts';
+import { ServiceError } from './config';
 
 /** No generic SQL endpoint. Snapshot tokens before stop and retire only that attachment. */
 export async function stopGitSession(

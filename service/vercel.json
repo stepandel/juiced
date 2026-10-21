@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "npm ci --ignore-scripts --no-audit",
+  "functions": {
+    "app/api/jobs/route.ts": {
+      "experimentalTriggers": [
+        { "type": "queue/v2beta", "topic": "juiced-jobs", "retryAfterSeconds": 10 }
+      ]
+    }
+  },
+  "crons": [ { "path": "/api/cron", "schedule": "* * * * *" } ]
+}

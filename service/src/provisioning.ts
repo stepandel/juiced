@@ -1,9 +1,9 @@
 import type { Pool } from 'pg';
-import type { Platform } from './platform.js';
-import { Accounts, type Account } from './accounts.js';
-import type { Billing } from './billing.js';
-import { transaction } from './db.js';
-import { ServiceError } from './config.js';
+import type { Platform } from './platform';
+import { Accounts, type Account } from './accounts';
+import type { Billing } from './billing';
+import { transaction } from './db';
+import { ServiceError } from './config';
 
 /** Deletion retries must converge once the platform no longer has the installation. */
 async function unlessMissing<T>(work: Promise<T>) {

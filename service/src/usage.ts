@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
-import type { Platform } from './platform.js';
-import { transaction } from './db.js';
-import { enqueue } from './accounts.js';
+import type { Platform } from './platform';
+import { transaction } from './db';
+import { enqueue } from './accounts';
 
 export class UsageIngestor {
   constructor(

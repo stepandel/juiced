@@ -1,8 +1,8 @@
 import Stripe from 'stripe';
 import type { Pool, PoolClient } from 'pg';
-import { transaction } from './db.js';
-import { id, enqueue, type Account } from './accounts.js';
-import { ServiceError, readText } from './config.js';
+import { transaction } from './db';
+import { id, enqueue, type Account } from './accounts';
+import { ServiceError, readText } from './config';
 
 /**
  * Stripe rejects a Checkout expiry under 30 minutes away. An idempotent replay

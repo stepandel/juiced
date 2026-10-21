@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { testDatabase, user } from './database.js';
-import { Accounts } from '../src/accounts.js';
-import { TerminalCloser } from '../src/terminals.js';
-import type { Platform } from '../src/platform.js';
+import { testDatabase, user } from './database';
+import { Accounts } from '../src/accounts';
+import { TerminalCloser } from '../src/terminals';
+import type { Platform } from '../src/platform';
 
 test(
   'terminal revocation retries an unavailable installation without starving other devices',
