@@ -30,7 +30,7 @@ export default function Home() {
             <h1 id="headline">
               Claude Code,
               <br />
-              <em>always on.</em>
+              with more <em>juice.</em>
             </h1>
             <p className="intro">
               Juiced runs Claude Code in a private cloud workspace that you drive from your
