@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Juiced — Claude Code, always on.',
+  title: 'Juiced — Claude Code, with more juice.',
   description:
     'Juiced runs Claude Code in a private cloud workspace that you drive from your terminal. Close your laptop. Claude keeps working.',
   icons: { icon: '/favicon.svg' },
