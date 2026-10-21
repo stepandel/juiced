@@ -27,7 +27,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: stepandel/cantelop-sdk
-          ref: e8e94d9e88681dbf28dbf7a3c017870b73bb2722
+          ref: 96f9ff3593a198c42f4e745c057a2a43d0fa844a
           path: .ci-sdk
       - uses: actions/setup-go@v5
         with:
