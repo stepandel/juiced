@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 const execute = promisify(execFile),
   directory = await mkdtemp(join(tmpdir(), 'juiced-install-'));
+const { version: packageVersion } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 let server;
 try {
   const env = {
@@ -92,7 +93,7 @@ try {
     env,
     timeout: 10000,
   });
-  assert.match(version.stdout, /juiced 0\.2\.0/);
+  assert.equal(version.stdout.trim(), `juiced ${packageVersion}`);
   const help = await execute(process.execPath, [bin, '--help'], {
     cwd: directory,
     env,

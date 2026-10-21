@@ -48,6 +48,23 @@ runs that archive with Node and npm absent from PATH.
    `public/install.sh` at `/install.sh`. Then check the public installation from
    a clean user directory before advertising it on the homepage.
 
+### Release candidates
+
+Use a SemVer suffix such as `0.2.0-rc.1` for all CLI version fields and the matching
+`v0.2.0-rc.1` tag. The workflow marks the draft as a prerelease automatically.
+Publish it with the prerelease flag retained and without marking it latest.
+Before `/install.sh` is deployed to the website, install the candidate directly:
+
+```sh
+curl -fsSL https://github.com/stepandel/juiced/releases/download/v0.2.0-rc.1/install.sh | sh -s -- 0.2.0-rc.1
+```
+
+An RC requires an explicit version; GitHub's stable `latest` endpoint excludes
+prereleases. For managed-account testing, deploy the service's prerelease-aware
+version check and set `JUICED_MINIMUM_CLI=0.2.0-rc.1` alongside the matching
+qualified package/runtime IDs. A stable minimum of `0.2.0` correctly excludes
+`0.2.0-rc.1`. Publishing the CLI does not activate or deploy account infrastructure.
+
 The installer resolves GitHub's latest release to a specific version before
 downloading its checksum manifest and archive. Checksums detect corrupt or
 mismatched downloads; they are fetched over HTTPS from the same release and are

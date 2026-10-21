@@ -4,6 +4,7 @@ import type { Pool, PoolClient } from 'pg';
 import { ServiceError } from './config.js';
 import { transaction } from './db.js';
 import type { Identity } from './auth.js';
+import { cliVersionAtLeast } from './cli-version.js';
 
 export const id = (prefix: string) => `${prefix}_${randomUUID().replaceAll('-', '')}`;
 export interface Account {
@@ -97,7 +98,7 @@ export class Accounts {
       );
     if (
       typeof input.version !== 'string' ||
-      compareVersion(input.version, this.release.minimumCli) < 0 ||
+      !cliVersionAtLeast(input.version, this.release.minimumCli) ||
       input.runtimeId !== this.release.runtimeId
     )
       throw new ServiceError('cli_upgrade_required', 409);
@@ -171,11 +172,4 @@ export async function enqueue(
     'INSERT INTO jobs(id,account_id,kind,payload,idempotency_key) VALUES($1,$2,$3,$4,$5) ON CONFLICT(idempotency_key) DO NOTHING',
     [id('job'), account, kind, JSON.stringify(payload), key],
   );
-}
-function compareVersion(a: string, b: string) {
-  if (!/^\d+\.\d+\.\d+$/.test(a) || !/^\d+\.\d+\.\d+$/.test(b)) return -1;
-  const x = a.split('.').map(Number),
-    y = b.split('.').map(Number);
-  for (let n = 0; n < 3; n++) if (x[n] !== y[n]) return x[n]! > y[n]! ? 1 : -1;
-  return 0;
 }

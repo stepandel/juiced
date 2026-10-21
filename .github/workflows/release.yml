@@ -60,5 +60,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           cat dist/releases/*.sha256 > dist/releases/SHA256SUMS
-          gh release create "$RELEASE_TAG" --verify-tag --draft --generate-notes \
+          release_flags=(--draft)
+          if [[ "$RELEASE_TAG" == *-* ]]; then release_flags+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" --verify-tag --generate-notes "${release_flags[@]}" \
             dist/releases/*.tar.gz dist/releases/SHA256SUMS public/install.sh

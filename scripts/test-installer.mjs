@@ -132,6 +132,14 @@ test('installer also verifies downloads using sha256sum when available', async t
   assert.equal((await f.installed(['--version'])).stdout.trim(), 'juiced 0.2.0');
 });
 
+test('release candidates install only when their version is selected explicitly', async t => {
+  const f = await fixture(t);
+  await f.archive('0.2.0-rc.1');
+  await f.run(['v0.2.0-rc.1']);
+  assert.equal((await f.installed(['--version'])).stdout.trim(), 'juiced 0.2.0-rc.1');
+  assert.doesNotMatch(await readFile(f.env.FIXTURE_REQUESTS, 'utf8'), /\/latest/);
+});
+
 test('unsupported hosts, invalid versions and existing unrelated commands fail clearly', async t => {
   const f = await fixture(t);
   await assert.rejects(f.run([], { FIXTURE_OS: 'Windows_NT' }), error => /Supported systems/.test(error.stderr));
