@@ -22,27 +22,10 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
-      # Until SDK 1.5.0 is published, qualify the immutable SDK PR source.
-      # Replace this bootstrap with npm ci after recording registry integrity.
-      - uses: actions/checkout@v6
-        with:
-          repository: stepandel/cantelop-sdk
-          ref: 96f9ff3593a198c42f4e745c057a2a43d0fa844a
-          path: .ci-sdk
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: .ci-sdk/native/go.mod
-      - run: corepack enable
-      - name: Build the pinned SDK dependency
-        working-directory: .ci-sdk
-        run: |
-          pnpm install --frozen-lockfile --ignore-scripts
-          npm run prepare
-          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
-      - run: npm install --ignore-scripts --no-save --package-lock=false "$RUNNER_TEMP/cantelop-sdk-1.5.0.tgz"
+      - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm run check:service
       - run: npm test
       - run: npm run test:service
       - name: Fresh public package installation
-        run: CANTELOP_SDK_TARBALL="$RUNNER_TEMP/cantelop-sdk-1.5.0.tgz" npm run check:package
+        run: npm run check:package

@@ -50,12 +50,11 @@ Claude authentication remains a separate, per-Workspace action.
 provider-backed authentication and durable jobs. `contracts/` is shared with the
 packaged CLI. The npm package includes CLI assets; private service code stays out.
 
-1. Publish SDK **1.5.0** from the SDK PR before releasing Juiced. It adds compiled
-   transport rebinding and the public relay validators. The current lock declares
-   the pending registry tarball without a fabricated integrity hash. After SDK
-   publication, run `npm install --package-lock-only --ignore-scripts`, record the
-   registry integrity, and rerun `npm ci` and `npm run check:package`. Local/CI
-   qualification can install a tarball built from the pinned SDK commit.
+1. Install the pinned registry dependency with `npm ci`. SDK **1.5.0** supplies
+   compiled transport rebinding and the public relay validators; its registry
+   integrity is recorded in the lockfile. `npm run check:package` verifies a fresh
+   CLI tarball installation against that dependency. CLI npm publication remains
+   deferred until a package name and production launch are ready.
 2. Set the values in `service/.env.example`. Production requires both OAuth
    providers, PostgreSQL, a Fleet, approved package/runtime IDs and Stripe's
    fixed-price subscription and portal configuration. Remote PostgreSQL uses
