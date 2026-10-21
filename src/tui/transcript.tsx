@@ -6,8 +6,10 @@ import { Markdown } from './markdown.js';
 const mascot = [' ▐▛███▜▌ ', '▝▜█████▛▘', '  ▘▘ ▝▝  '];
 /** The site's --green, so the intro ends on the header's exact color. */
 const juice = '#4eba65';
+const fizz = '#b4f0c1', sipping = '#7ee695', glass = '#a9c4bf', lime = '#c5e86c', stripe = '#e5484d';
 const claude = [0xd9, 0x77, 0x57], green = [0x4e, 0xba, 0x65];
 const blend = (t: number) => `#${claude.map((from, i) => Math.round(from + (green[i]! - from) * t).toString(16).padStart(2, '0')).join('')}`;
+const clamp = (value: number) => Math.min(1, Math.max(0, value));
 
 export function Header({ workspace, session }: { workspace: string; session: string }) {
   return <Box flexDirection="column" marginBottom={1}>
@@ -21,20 +23,30 @@ export function Header({ workspace, session }: { workspace: string; session: str
 export function Intro({ done }: { done(): void }) {
   const [tick, setTick] = useState(0);
   useEffect(() => { const timer = setInterval(() => setTick(value => value + 1), 70); return () => clearInterval(timer); }, []);
-  useEffect(() => { if (tick === 26) done(); }, [tick]);
-  const sip = Math.min(1, Math.max(0, (tick - 4) / 14));
+  useEffect(() => { if (tick === 29) done(); }, [tick]);
+  const sip = clamp((tick - 6) / 14);
   // Four half rows of juice across the glass's two rows.
   const level = Math.ceil(4 * (1 - sip));
   const color = blend(sip * sip * (3 - 2 * sip));
   const full = (row: number) => level >= 4 - 2 * row;
-  const cell = (row: number) => <Text color={juice}>{full(row) ? '█' : level === 3 - 2 * row ? '▄' : ' '}</Text>;
-  const glass = (row: number) => <> <Text dimColor>▕</Text>{cell(row)}<Text color="white" {...(full(row) ? { backgroundColor: juice } : {})}>│</Text>{cell(row)}<Text dimColor>▏</Text></>;
+  // Straw segments count from the bottom of the glass up to the mouth. Juice
+  // climbs it before the glass drains and leaves it once the glass is empty.
+  const wet = (segment: number) => segment < (tick - 2) * 2 && segment >= (tick - 20) * 3;
+  const straw = (segment: number, glyph: string, background?: string) => <Text key={`straw-${segment}`} color={wet(segment) ? sipping : segment % 2 ? stripe : 'white'} {...(background ? { backgroundColor: background } : {})} underline={segment === 0}>{glyph}</Text>;
+  // The glass's bottom row is underlined to draw its base.
+  const cell = (row: number, column: number) => {
+    if (column === 2) return straw(1 - row, '┃', full(row) ? juice : undefined);
+    const bubble = tick < 20 && (column === 0 || column === 3) && Math.floor(tick / 3 + column) % 2 === 1 - row;
+    return full(row) ? <Text key={column} color={fizz} backgroundColor={juice} underline={row === 1}>{bubble ? (row ? '∘' : '°') : ' '}</Text>
+      : <Text key={column} color={level === 3 - 2 * row ? juice : glass} underline={row === 1}>{level === 3 - 2 * row ? '▄' : ' '}</Text>;
+  };
+  const cup = (row: number) => <> <Text color={glass}>▕</Text>{[0, 1, 2, 3].map(column => cell(row, column))}<Text color={glass}>▏</Text></>;
   const sparkle = (on: boolean) => <Text color={juice}>{on ? (tick % 2 ? '✦' : '✧') : ' '}</Text>;
-  return <Box flexDirection="column" marginBottom={1}>{tick < 20
+  return <Box flexDirection="column" marginBottom={1}>{tick < 23
     ? <>
-      <Text wrap="truncate-end"><Text color={color}>{mascot[0]!.trimEnd()}</Text><Text color="white">────╮</Text></Text>
-      <Text wrap="truncate-end"><Text color={color}>{mascot[1]}</Text>{glass(0)}</Text>
-      <Text wrap="truncate-end"><Text color={color}>{mascot[2]}</Text>{glass(1)}</Text>
+      <Text wrap="truncate-end"><Text color={color}>{mascot[0]!.trimEnd()}</Text>{[7, 6, 5, 4, 3].map(segment => straw(segment, '━'))}{straw(2, '┓')} <Text color={lime}>◗</Text></Text>
+      <Text wrap="truncate-end"><Text color={color}>{mascot[1]}</Text>{cup(0)}</Text>
+      <Text wrap="truncate-end"><Text color={color}>{mascot[2]}</Text>{cup(1)}</Text>
     </>
     : mascot.map((row, i) => <Text key={i} wrap="truncate-end"><Text color={juice}>{row}</Text> {sparkle(i !== 1)} {sparkle(i === 1)}</Text>)}
   </Box>;
