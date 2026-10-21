@@ -92,21 +92,30 @@ oauth() {
 
 cantelop() {
   echo "Cantelop Fleet"
-  local fleet api worker
-  fleet=$(secret 'Fleet ID (flt_...)')
-  [[ $fleet =~ ^flt_[a-f0-9]{32}$ ]] || { echo "Invalid Fleet ID" >&2; exit 1; }
-  api=$(secret 'API principal token (credentials:read, installations:read)')
-  worker=$(secret 'Worker principal token (installations:read/write, policy:write, usage:read, credentials:read)')
-  for token in "$api" "$worker"; do
-    [[ $token =~ ^fsp_[a-f0-9]{32}\.[a-f0-9]{64}$ ]] || { echo "Invalid Fleet token" >&2; exit 1; }
-  done
-  [[ $api != "$worker" ]] || { echo "Use separate API and worker principals" >&2; exit 1; }
+  # Creates real Fleet principals, so DRY_RUN would only strand them.
+  [[ -z ${DRY_RUN:-} ]] || { echo "  skipped in a dry run"; return; }
+  local release version runtime values name value
+  # The package must carry the runtime this CLI version was built with.
+  npm run --silent build:runtime >/dev/null
+  runtime=$(node -e '
+    const m = require("./dist/cantelop/juiced/runtime/cantelop-runtime.json");
+    process.stdout.write(m.session_runtime_id);')
+  # CANTELOP_RELEASE selects a release; the App's active one is the default.
+  # Package versions are immutable, so each App release gets its own.
+  read -r release version < <(cantelop releases --json | CANTELOP_RELEASE=${CANTELOP_RELEASE:-} node -e '
+    let s = ""; process.stdin.on("data", (c) => (s += c)).on("end", () => {
+      const d = JSON.parse(s), rs = Array.isArray(d) ? d : d.releases ?? d.items;
+      const want = process.env.CANTELOP_RELEASE;
+      const r = rs.find((r) => (want ? r.id === want : r.status === "active"));
+      if (!r) throw new Error("Release not found");
+      console.log(r.id, `${require("./package.json").version}-r${r.version}`);
+    });')
+  echo "  release $release, package version $version, runtime $runtime"
+  values=$(JUICED_FLEET_SETUP=1 node service/deploy/cantelop-fleet.mjs "$release" "$version" "$runtime")
   put CANTELOP_API_URL https://cantelop.com
-  put CANTELOP_FLEET_ID "$fleet"
-  put CANTELOP_FLEET_TOKEN "$api"
-  put CANTELOP_WORKER_FLEET_TOKEN "$worker"
-  put JUICED_PACKAGE_ID "$(secret 'Approved package ID')"
-  put JUICED_RUNTIME_ID "$(secret 'Runtime ID')"
+  while IFS='=' read -r name value; do
+    [[ -n $name ]] && put "$name" "$value"
+  done <<<"$values"
   existing JUICED_MINIMUM_CLI || put JUICED_MINIMUM_CLI 0.2.0
 }
 
