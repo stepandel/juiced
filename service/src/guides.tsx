@@ -27,10 +27,9 @@ export const guides: {
           </li>
         </ul>
         <p>
-          Managed access is in preview. Check{' '}
-          <a href="/pricing">pricing and availability</a> before signing in. For
-          building the CLI from source or configuring a self-managed deployment,
-          follow the{' '}
+          See <a href="/pricing">pricing</a> for managed access. For building
+          the CLI from source or configuring a self-managed deployment, follow
+          the{' '}
           <a href="https://github.com/stepandel/juiced#readme">
             repository setup guide
           </a>
@@ -302,8 +301,8 @@ export const guides: {
         <h2>Do I need a Claude subscription?</h2>
         <p>
           You bring your own Claude Code access and sign in inside the
-          workspace. Juiced’s compute allowance covers infrastructure; Claude
-          model access and usage remain separate. Check{' '}
+          workspace. Juiced provides the infrastructure; Claude model access and
+          usage remain separate. Check{' '}
           <a href="https://code.claude.com/docs/en/authentication">
             Anthropic’s current account requirements
           </a>{' '}
@@ -396,7 +395,7 @@ export const guides: {
           .
         </p>
         <p>
-          Review <a href="/pricing">Juiced pricing and availability</a> and the{' '}
+          Review <a href="/pricing">Juiced pricing</a> and the{' '}
           <a href="/docs/getting-started">getting started guide</a>.
         </p>
       </>

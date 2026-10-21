@@ -7,7 +7,7 @@ ordering and production qualification. The account-service origin is
 `https://juiced.codes`; builds use it by default. The website and account backend use Next.js on
 Vercel; [juiced-eight.vercel.app](https://juiced-eight.vercel.app) redirects to the
 canonical domain. Public [documentation](https://juiced.codes/docs) and
-[pricing](https://juiced.codes/pricing) describe the product and planned tiers.
+[pricing](https://juiced.codes/pricing) describe the product and plans.
 Background work uses one Vercel Queue consumer and a reconciliation cron.
 Account-service activation still requires production configuration and qualification. CLI npm publication remains deferred.
 

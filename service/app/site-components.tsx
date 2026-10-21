@@ -51,10 +51,12 @@ export function SiteFooter() {
 export function PublicPage({
   title,
   intro,
+  eyebrow = { label: 'Juiced documentation', href: '/docs' },
   children,
 }: {
   title: string;
   intro: string;
+  eyebrow?: { label: string; href: string };
   children: ReactNode;
 }) {
   return (
@@ -62,7 +64,7 @@ export function PublicPage({
       <SiteHeader />
       <main className="document">
         <p className="number mono">
-          <a href="/docs">Juiced documentation</a>
+          <a href={eyebrow.href}>{eyebrow.label}</a>
         </p>
         <h1>{title}</h1>
         <p className="lede">{intro}</p>
