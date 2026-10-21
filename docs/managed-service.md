@@ -60,7 +60,8 @@ production branch `main`, root directory `service`, framework Next.js and Node 2
 Source files outside the root directory must be enabled for shared contracts and
 the workspace lockfile. `service/vercel.json` declares the private `juiced-jobs`
 queue trigger and the once-per-minute `/api/cron` schedule. Vercel builds run
-`next build`; they do not publish the CLI or compile a Cantelop runtime.
+`npm run migrate && next build`, migrating with the Neon integration's owner
+`DATABASE_URL`; they do not publish the CLI or compile a Cantelop runtime.
 
 The website is `https://juiced.codes`.
 `https://juiced-eight.vercel.app` redirects to the canonical domain.

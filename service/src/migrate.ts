@@ -4,8 +4,9 @@ import { authentication, authOptions, seedClient } from './auth';
 import { config } from './config';
 import { database, migrate } from './db';
 
+// DATABASE_URL is the Neon owner connection; the app roles cannot run DDL.
 const cfg = config(),
-  pool = database(cfg.databaseUrl);
+  pool = database(process.env.DATABASE_URL ?? cfg.databaseUrl);
 try {
   if (process.argv.includes('--generate-auth')) {
     const plan = await getMigrations(authOptions(pool, cfg, true));
