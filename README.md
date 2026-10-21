@@ -4,8 +4,10 @@ Managed mode is the default. Users sign in to a Juiced account, with isolated
 Cantelop infrastructure and subscription billing managed by Juiced. See
 [managed setup and operations](docs/managed-service.md) for configuration, release
 ordering and production qualification. The account-service origin is
-`https://juiced.codes`; builds use it by default. The public service and npm CLI
-publication remain pending deployment configuration and qualification.
+`https://juiced.codes`; builds use it by default. The public website is hosted on
+Vercel, also available at [juiced-eight.vercel.app](https://juiced-eight.vercel.app).
+Account-service activation still requires production configuration and
+qualification. CLI npm publication remains deferred.
 
 The [architecture](docs/multitenancy.md) and
 [implementation plan](docs/multitenancy-implementation.md) describe the design.

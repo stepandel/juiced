@@ -57,6 +57,8 @@ The Vercel project is `stepandels-projects/juiced`, connected to
 branch is `main`. `vercel.json` selects Hono, Node 24 is configured on the project,
 and `server.ts` exports the web application. Vercel builds run the service's
 TypeScript check; they do not publish the CLI or compile a Cantelop runtime.
+The production website is `https://juiced.codes`; the Vercel-assigned production
+domain is `https://juiced-eight.vercel.app`.
 
 The homepage and `/health` work without account infrastructure. Account pages,
 authentication, billing and API routes remain unavailable with HTTP 503 until
