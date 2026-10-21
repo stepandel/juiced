@@ -7,9 +7,19 @@ export default function Home() {
   return (
     <div className="wrap">
       <main>
-        <pre className="mark" aria-hidden="true">
-          {' ▐▛███▜▌\n▝▜█████▛▘\n  ▘▘ ▝▝'}
-        </pre>
+        <div className="brand">
+          <svg className="mark" viewBox="0 0 26 30" fill="none" aria-hidden="true">
+            <path d="M5 10h16l-2 16H7L5 10Z" fill="currentColor" />
+            <path
+              d="m14 3-2 7M5 7h16"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+            />
+            <path d="m14 14-4 6h4l-1 4 5-7h-4l1-3Z" fill="var(--bg)" />
+          </svg>
+          juiced
+        </div>
         <h1>
           Claude Code, with more <em>juice.</em>
         </h1>
