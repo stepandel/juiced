@@ -8,6 +8,7 @@ export function page(title: string, body: string, script = '') {
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
+        'X-Robots-Tag': 'noindex, nofollow',
         'Content-Security-Policy': `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'`,
         'Referrer-Policy': 'no-referrer',
         'X-Content-Type-Options': 'nosniff',

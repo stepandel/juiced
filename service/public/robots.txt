@@ -1,7 +1,9 @@
 User-agent: *
 Allow: /
-Disallow: /account
-Disallow: /sign-in
-Disallow: /device
 Disallow: /api/
 Disallow: /v1/
+Disallow: /webhooks/
+Disallow: /health
+Disallow: /ready
+
+Sitemap: https://juiced.codes/sitemap.xml

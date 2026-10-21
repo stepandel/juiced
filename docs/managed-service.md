@@ -60,11 +60,15 @@ the workspace lockfile. `service/vercel.json` declares the private `juiced-jobs`
 queue trigger and the once-per-minute `/api/cron` schedule. Vercel builds run
 `next build`; they do not publish the CLI or compile a Cantelop runtime.
 
-The website is `https://juiced.codes`, also available at
-`https://juiced-eight.vercel.app`. The homepage is a static Next.js page and
+The website is `https://juiced.codes`.
+`https://juiced-eight.vercel.app` redirects to the canonical domain.
+The homepage is a static Next.js page and
 `/health` checks the HTTP handler without account credentials. Account routes and
 `/ready` return HTTP 503 until production configuration is supplied. The homepage
-labels the release as a private preview while CLI publication is deferred.
+links to public docs and pricing. Free includes 10 vCPU hours; Unlimited is
+$25/month. Both plans include all features. See
+[search and AI discovery](search-discovery.md) for verification, sitemap submission,
+and baseline measurement after deployment.
 
 Set the values in `service/.env.example` in the Vercel project. The API uses the
 limited `JUICED_DATABASE_URL` role and `CANTELOP_FLEET_TOKEN`; the private job
