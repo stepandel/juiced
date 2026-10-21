@@ -8,11 +8,16 @@ Cantelop workflow explicitly.
 
 ## Install and sign in
 
-There is no public service URL yet. Until one is selected and deployed:
+The account-service origin is `https://juiced.codes`. CLI publication is deferred;
+the unscoped npm name `juiced` is reserved by npm, so do not install its unrelated
+registry placeholder. Build and link this repository while the public service is
+being configured:
 
 ```sh
-npm install --global juiced
-juiced --service https://YOUR-SERVICE login
+npm install
+npm run build
+npm link
+juiced login
 juiced whoami
 juiced claude
 juiced logout                  # revoke this CLI device
@@ -20,8 +25,8 @@ juiced logout --all            # revoke every CLI device for this user
 ```
 
 The service choice is remembered after login. `JUICED_SERVICE_URL` overrides it.
-A release can bake in an HTTPS origin with `JUICED_DEFAULT_SERVICE_URL` during
-`npm run build`. Headless setup uses `login --no-browser`; ordinary commands
+Builds default to `https://juiced.codes`; `JUICED_DEFAULT_SERVICE_URL` overrides
+that build-time default. Headless setup uses `login --no-browser`; ordinary commands
 never prompt for account login when stdin is not a terminal. Help/version work
 offline. Account selection uses a leading `--account acc_...`.
 
@@ -55,7 +60,7 @@ packaged CLI. The npm package includes CLI assets; private service code stays ou
    providers, PostgreSQL, a Fleet, approved package/runtime IDs and Stripe's
    fixed-price subscription and portal configuration. Remote PostgreSQL uses
    certificate verification. Register OAuth callbacks at
-   `https://YOUR-SERVICE/api/auth/callback/github` and `/google`.
+   `https://juiced.codes/api/auth/callback/github` and `/google`.
 3. Run `npm run migrate:service` as the schema owner. Apply
    `service/deploy/roles.sql` after migrations and provision login secrets outside
    source control. The API role cannot update paid periods, included credits,
@@ -178,9 +183,9 @@ canonical billing replay/renewal, crash recovery, stream forwarding/cancellation
 private package contents and clean installation. They use disposable PostgreSQL
 and local transport fixtures.
 
-A production URL, GitHub/Google app registrations, Stripe product/portal/webhook
-configuration and live infrastructure have not been supplied or deployed by this
-change. Before paid launch, run the full two-account workflow with real OAuth,
+The production origin is selected, but GitHub/Google app registrations, Stripe
+product/portal/webhook configuration and a managed-service host have not been
+configured or deployed by this change. Before paid launch, run the full two-account workflow with real OAuth,
 Stripe test payments, independent secrets, Claude state, identical project names,
 Git transfers, file sync, and interrupted/reconnected sessions. On a Linux/KVM
 managed host, prove native writes hit filesystem/database limits; freeze the

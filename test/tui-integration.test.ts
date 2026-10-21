@@ -219,7 +219,7 @@ test('permission UI preselects Yes, ignores early and pasted keys, offers rememb
     const offset = output.length;
     agent.approvals.set(id, { id, tool: 'Bash', input: { command: 'printf OK' }, description: '', ...extra });
     agent.emit('approvals');
-    await wait(() => stripVTControlCharacters(output.slice(offset)).includes(extra.local ? 'in your local checkout?' : 'Bash command'));
+    await wait(() => stripVTControlCharacters(output.slice(offset)).includes(extra.upload ? 'from your laptop to the remote workspace?' : extra.local ? 'in your local checkout?' : 'Bash command'));
     return offset;
   };
   try {
@@ -255,6 +255,10 @@ test('permission UI preselects Yes, ignores early and pasted keys, offers rememb
     assert.equal(agent.answers.length, 3, 'Pasted text cannot approve a local publication');
     stdin.write('\r'); await wait(() => agent.answers.length === 4);
     assert.deepEqual(agent.answers[3], { allow: false }, 'Local publication defaults to No');
+    await ask('local-upload', { local: true, upload: true, tool: 'Upload local changes', input: { commit: 'abc123', files: 1, paths: ['README.md'] } });
+    await delay(320);
+    stdin.write('\r'); await wait(() => agent.answers.length === 5);
+    assert.deepEqual(agent.answers[4], { allow: false }, 'Sending laptop files also defaults to No');
   } finally { lifetime.abort(); await running; }
   assert.equal(stdin.isRaw, false);
 });

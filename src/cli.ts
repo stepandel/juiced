@@ -19,6 +19,7 @@ import { syncFiles } from './file-sync.js';
 import { prepareAgentSession } from './session-state.js';
 import { terminalIdentity, usesTerminalSession } from './terminal-session.js';
 import { listSessions } from './list-sessions.js';
+import { LocalUploader } from './local-upload.js';
 import { LocalPublisher } from './local-publish.js';
 
 const controller = new AbortController();
@@ -223,6 +224,7 @@ try {
                     ? {
                         localPublish: {
                           head: repository.head,
+                          upload: new LocalUploader(workspace, project, repository),
                           apply: (publication, signal) => publisher.apply(publication, signal),
                         },
                       }

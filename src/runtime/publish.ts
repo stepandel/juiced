@@ -6,22 +6,23 @@ import { join } from 'node:path';
 import type { SessionHarnessContext } from '@cantelop/sdk/session';
 import { git, gitText } from '../git.js';
 import { validOid, validTransferId } from '../git-protocol.js';
-import { PUBLISH_TIMEOUT_MS, publishSucceeded, validatePublishResult, type Publication, type PublishCommand, type PublishResult } from '../publish-protocol.js';
+import { PUBLISH_TIMEOUT_MS, publishSucceeded, validatePublishResult, type LocalTransfer, type PublishCommand, type PublishResult, type UploadRequest } from '../publish-protocol.js';
 import type { TerminalEvent } from '../protocol.js';
 import { atomicJSON, createGitRuntime, projectPaths, readBinding } from './git.js';
+import { applyLocalUpload } from './local-upload.js';
 import { publishMcpConfiguration } from './publish-mcp.js';
 
-type Pending = { publication: Publication; owner?: string; completion?: { fingerprint: string; work: Promise<void> }; resolve(result: PublishResult): void };
+type Pending = { publication: LocalTransfer; controller: AbortController; owner?: string; completion?: { fingerprint: string; work: Promise<PublishResult> }; resolve(result: PublishResult): void };
 
 /** Remote stdio tools use a private Unix socket; only authenticated SDK clients can claim/apply. */
 export async function createPublishBridge(context: SessionHarnessContext, options: {
-  workspace: string; directoryName: string; binding: string; known: string;
+  workspace: string; directoryName: string; binding: string; known: string; relativeDirectory?: string;
   send(event: TerminalEvent): Promise<void>;
 }) {
   const directory = await mkdtemp(join(tmpdir(), 'jp-'));
   const socketPath = join(directory, 'mcp');
   const pending = new Map<string, Pending>();
-  const finished = new Map<string, { owner: string; fingerprint: string }>();
+  const finished = new Map<string, { owner: string; fingerprint: string; result: PublishResult }>();
   const sockets = new Set<Socket>();
   const controller = new AbortController();
   const signal = AbortSignal.any([context.signal, controller.signal]);
@@ -33,10 +34,10 @@ export async function createPublishBridge(context: SessionHarnessContext, option
   let closed = false, preparing = false;
   const release = async (id: string) => { await db.execute({ sql: 'DELETE FROM juiced_publication_leases WHERE project = ? AND id = ?', args: [options.directoryName, id] }); };
 
-  async function publish(request: { name: string; summary: string; head?: string }, connection: Socket): Promise<PublishResult> {
+  async function publish(request: { name: string; summary: string; head?: string; includeUncommitted?: boolean }, connection: Socket): Promise<PublishResult> {
     if (closed || preparing || pending.size) throw new Error('Another local publication is still pending.');
-    if (!request || !['publish_commits', 'publish_snapshot'].includes(request.name) || typeof request.summary !== 'string' || !request.summary.trim() || request.summary.length > 2000 ||
-        Object.keys(request).some(key => !['name', 'summary', 'head'].includes(key)) || request.head !== undefined && (request.name !== 'publish_commits' || !validOid(request.head))) throw new Error('Invalid publication request.');
+    if (!request || !['publish_commits', 'publish_snapshot', 'pull_local_changes'].includes(request.name) || typeof request.summary !== 'string' || !request.summary.trim() || request.summary.length > 2000 ||
+        Object.keys(request).some(key => !['name', 'summary', 'head', 'includeUncommitted'].includes(key)) || request.head !== undefined && (request.name !== 'publish_commits' || !validOid(request.head)) || request.includeUncommitted !== undefined && (request.name !== 'pull_local_changes' || typeof request.includeUncommitted !== 'boolean')) throw new Error('Invalid publication request.');
     preparing = true;
     const id = randomUUID(), expiresAt = Date.now() + PUBLISH_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -45,23 +46,34 @@ export async function createPublishBridge(context: SessionHarnessContext, option
       const lease = await db.execute({ sql: 'INSERT INTO juiced_publication_leases(project, id, expires) VALUES (?, ?, ?) ON CONFLICT(project) DO UPDATE SET id = excluded.id, expires = excluded.expires WHERE juiced_publication_leases.expires < ? RETURNING id', args: [options.directoryName, id, expiresAt, Date.now()] });
       if (!lease.rows.length) throw new Error('Another session is publishing this project. Wait for it to finish.');
       acquired = true;
-      const kind = request.name === 'publish_commits' ? 'commits' : 'snapshot';
-      const head = request.head ?? await gitText(paths.target, ['rev-parse', 'HEAD']);
-      const exported = await runtime.handle({ type: 'git', directoryName: options.directoryName, binding: options.binding, action: 'export', id, known: options.known, head, ...(kind === 'snapshot' ? { snapshot: true } : {}) });
-      const manifest = exported.manifest!;
-      const before = manifest.snapshot?.baseTree ?? options.known;
-      const after = manifest.snapshot?.tree ?? head;
-      const changed = (await git(paths.target, ['diff', '--name-only', '--no-renames', '-z', before, after, '--'], { signal: context.signal })).toString().split('\0').filter(Boolean);
-      if (kind === 'snapshot' && (changed.length > 4096 || Buffer.byteLength(changed.join('\0')) > 128 * 1024)) throw new Error('This snapshot has too many changed paths. Publish a smaller change.');
-      const publication: Publication = { id, kind, summary: request.summary, manifest, expiresAt, fileCount: changed.length, paths: changed.slice(0, 20).map(path => path.slice(0, 200)) };
+      let publication: LocalTransfer;
+      if (request.name === 'pull_local_changes') {
+        const binding = await readBinding(paths.metadata);
+        if (!binding || binding.binding !== options.binding) throw new Error('The workspace binding changed.');
+        const upload: UploadRequest = { id, kind: 'upload', summary: request.summary, expiresAt,
+          head: await gitText(paths.target, ['rev-parse', 'HEAD']), sourceBranch: binding.sourceBranch,
+          includeUncommitted: request.includeUncommitted ?? true };
+        publication = upload;
+      } else {
+        const kind = request.name === 'publish_commits' ? 'commits' : 'snapshot';
+        const head = request.head ?? await gitText(paths.target, ['rev-parse', 'HEAD']);
+        const exported = await runtime.handle({ type: 'git', directoryName: options.directoryName, binding: options.binding, action: 'export', id, known: options.known, head, ...(kind === 'snapshot' ? { snapshot: true } : {}) });
+        const manifest = exported.manifest!;
+        const before = manifest.snapshot?.baseTree ?? options.known;
+        const after = manifest.snapshot?.tree ?? head;
+        const changed = (await git(paths.target, ['diff', '--name-only', '--no-renames', '-z', before, after, '--'], { signal: context.signal })).toString().split('\0').filter(Boolean);
+        if (kind === 'snapshot' && (changed.length > 4096 || Buffer.byteLength(changed.join('\0')) > 128 * 1024)) throw new Error('This snapshot has too many changed paths. Publish a smaller change.');
+        publication = { id, kind, summary: request.summary, manifest, expiresAt, fileCount: changed.length, paths: changed.slice(0, 20).map(path => path.slice(0, 200)) };
+      }
       if (closed || connection.destroyed || Date.now() >= expiresAt) throw new Error('The publication expired before it could be offered locally.');
       return await new Promise<PublishResult>((resolve, reject) => {
-        const cancel = () => resolve({ status: 'failed', message: 'Publication cancelled or disconnected. Check the local checkout before retrying.' });
-        const finish = (result: PublishResult) => { connection.off('close', cancel); resolve(result); };
-        pending.set(id, { publication, resolve: finish });
+        const controller = new AbortController();
+        const cancel = () => finish({ status: 'failed', message: 'Transfer cancelled or disconnected. Check the destination checkout before retrying.' });
+        const finish = (result: PublishResult) => { controller.abort(); connection.off('close', cancel); resolve(result); };
+        pending.set(id, { publication, controller, resolve: finish });
         connection.once('close', cancel);
         timer = setTimeout(() => finish({ status: 'failed', message: 'No local application was confirmed before the publication deadline. Reconnect Juiced and check the local checkout before retrying.' }), Math.max(1, expiresAt - Date.now()));
-        void options.send({ type: 'local-publish', publication }).catch(reject);
+        void options.send(publication.kind === 'upload' ? { type: 'local-upload', request: publication } : { type: 'local-publish', publication }).catch(reject);
       });
     } finally {
       if (timer) clearTimeout(timer);
@@ -99,13 +111,13 @@ export async function createPublishBridge(context: SessionHarnessContext, option
 
   return {
     configuration: publishMcpConfiguration(socketPath),
-    async input(command: PublishCommand): Promise<void> {
+    async input(command: PublishCommand): Promise<PublishResult | undefined> {
       if (!validTransferId(command.id)) throw new Error('Invalid publication identity.');
       if (command.type === 'publish-result') {
         const previous = finished.get(command.id);
         if (previous) {
           if (previous.owner !== command.client || previous.fingerprint !== JSON.stringify(command.result)) throw new Error('Conflicting publication result retry.');
-          return;
+          return previous.result;
         }
       }
       const item = pending.get(command.id);
@@ -116,10 +128,17 @@ export async function createPublishBridge(context: SessionHarnessContext, option
       if (command.type === 'publish-claim') { item.owner = command.client; return; }
       if (item.owner !== command.client) throw new Error('Claim the publication before returning its result.');
       validatePublishResult(command.result);
+      if (command.result.uploadId !== undefined && item.publication.kind !== 'upload') throw new Error('Unexpected local upload result.');
       const fingerprint = JSON.stringify(command.result);
       if (item.completion && item.completion.fingerprint !== fingerprint) throw new Error('Conflicting publication result retry.');
       item.completion ??= { fingerprint, work: (async () => {
-        if (publishSucceeded(command.result)) {
+        let result = command.result;
+        if (item.publication.kind === 'upload' && publishSucceeded(result)) {
+          try {
+            if (!result.uploadId) throw new Error('The local client did not prepare an upload. Rebuild the CLI.');
+            result = await applyLocalUpload(context, options, item.publication, result.uploadId, AbortSignal.any([signal, item.controller.signal, AbortSignal.timeout(Math.max(1, item.publication.expiresAt - Date.now()))]));
+          } catch (error) { result = { status: 'conflict', message: error instanceof Error ? error.message : 'Remote application failed. Inspect the workspace before retrying.' }; }
+        } else if (item.publication.kind !== 'upload' && publishSucceeded(command.result)) {
           // Fence the short acknowledgment transaction against another session
           // acquiring an expired project lease while metadata is being written.
           const now = Date.now();
@@ -132,11 +151,12 @@ export async function createPublishBridge(context: SessionHarnessContext, option
           await git(paths.target, ['update-ref', `refs/juiced/baselines/${publishBase.tree}`, publishBase.tree], { signal });
           await atomicJSON(join(paths.metadata, 'binding.json'), { ...binding, publishBase });
         }
-        finished.set(command.id, { owner: command.client, fingerprint });
+        finished.set(command.id, { owner: command.client, fingerprint, result });
         if (finished.size > 128) finished.delete(finished.keys().next().value!);
-        item.resolve(command.result);
+        item.resolve(result);
+        return result;
       })() };
-      try { await item.completion.work; }
+      try { return await item.completion.work; }
       catch (error) { delete item.completion; throw error; }
     },
     async close() {

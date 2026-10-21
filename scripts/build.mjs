@@ -6,7 +6,7 @@ const { version } = JSON.parse(await readFile(new URL('../package.json', import.
 
 await build({
   define: {
-    JUICED_DEFAULT_SERVICE_URL: JSON.stringify(process.env.JUICED_DEFAULT_SERVICE_URL ?? ''),
+    JUICED_DEFAULT_SERVICE_URL: JSON.stringify(process.env.JUICED_DEFAULT_SERVICE_URL ?? 'https://juiced.codes'),
     JUICED_VERSION: JSON.stringify(version),
   },
   entryPoints: ['src/cli.ts'],

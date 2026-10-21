@@ -14,6 +14,7 @@ function request(approval: Approval): { title: string; question: string; body: R
   const dashed = (children: React.ReactNode) => <Box flexDirection="column" borderStyle={dashes} borderLeft={false} borderRight={false} borderDimColor>{children}</Box>;
   const json = plain(JSON.stringify(input, null, 2));
   const raw = <Text>{json.length > 12_000 ? json.slice(0, 12_000) + '\n[preview truncated]' : json}</Text>;
+  if (approval.upload) return { title: 'Send local changes to the remote workspace', question: 'Send this snapshot from your laptop to the remote workspace?', body: raw };
   if (approval.local) return { title: 'Apply to your local checkout', question: 'Do you want to apply these changes in your local checkout?', body: raw };
   if (approval.tool === 'Bash') return { title: 'Bash command', question: 'Do you want to proceed?', body: <Box flexDirection="column" paddingLeft={2}>
     <Text>{plain(input.command)}</Text>

@@ -65,8 +65,7 @@ export function createTerminal(
     switch (command.type) {
       case 'publish-status': case 'publish-claim': case 'publish-result':
         if (!publisher) throw new Error('The local publication bridge is unavailable.');
-        await publisher.input(command);
-        break;
+        { const result = await publisher.input(command); return { ok: true, ...(result ? { publication: result } : {}) }; }
       case 'input':
         await write(child.stdin, decodeInput(command.data));
         break;
@@ -150,7 +149,7 @@ export function createTerminal(
     const binary = options.binary ?? context.env.CLAUDE_PATH ?? '/usr/local/bin/claude';
     let argv = command.argv;
     if (command.localPublish && command.git && command.directoryName) {
-      publisher = await createPublishBridge(context, { workspace, directoryName: command.directoryName, binding: command.git.binding, known: command.localPublish, send: event => work.output.send(event) });
+      publisher = await createPublishBridge(context, { workspace, directoryName: command.directoryName, binding: command.git.binding, known: command.localPublish, relativeDirectory: command.git.relativeDirectory, send: event => work.output.send(event) });
       argv = [...argv, '--mcp-config', publisher.configuration];
     }
     tty = command.tty;

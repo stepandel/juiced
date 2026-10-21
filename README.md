@@ -3,8 +3,9 @@
 Managed mode is the default. Users sign in to a Juiced account, with isolated
 Cantelop infrastructure and subscription billing managed by Juiced. See
 [managed setup and operations](docs/managed-service.md) for configuration, release
-ordering and production qualification. No public service URL has been selected;
-use `juiced --service https://YOUR-SERVICE login` during setup.
+ordering and production qualification. The account-service origin is
+`https://juiced.codes`; builds use it by default. The public service and npm CLI
+publication remain pending deployment configuration and qualification.
 
 The [architecture](docs/multitenancy.md) and
 [implementation plan](docs/multitenancy-implementation.md) describe the design.
@@ -267,6 +268,26 @@ for the workflow, retained artifacts, and limitations.
 Build and deploy the updated CLI and runtime together. Existing conversations
 gain the tools when their native Claude process next starts; `/exit` followed by
 `juiced claude` in the same tab restarts it while retaining the conversation.
+
+## Send laptop changes from a conversation
+
+Ask Claude: **Pull my latest laptop changes into this workspace.** The built-in
+`juiced-local` MCP tool `pull_local_changes` requests an upload from the attached
+local Juiced client. It includes commits and uncommitted edits by default; Claude
+can set `include_uncommitted: false` to send commits only.
+
+Juiced captures a fixed local snapshot and shows its commit, changed paths, and
+transfer size in a local approval prompt, with **No** selected. Nothing leaves
+your laptop before approval. The remote checkout updates in place, preserving
+the conversation and the local staging distinction. Later laptop edits are not
+part of that approved snapshot.
+
+The remote checkout must be clean, its HEAD must be an ancestor of the laptop's
+HEAD, and no other Claude session may use the checkout. Commit or reconcile
+remote work first; stop background tools that write files before requesting the
+upload. Build/install the CLI and deploy the matching runtime, then restart
+existing Claude processes to expose the new tool. See
+[local publication](docs/local-publication.md).
 
 ## Inspect a workspace
 

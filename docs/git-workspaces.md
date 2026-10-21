@@ -61,6 +61,14 @@ inclusion. Tracked files are included even if their names match the old file-syn
 exclusions. The local index and working tree remain untouched. The staging
 distinction is preserved remotely; transferring a snapshot creates no commit.
 
+During an interactive conversation, ask Claude to **pull laptop changes into this
+workspace**. The `juiced-local` tool `pull_local_changes` captures local commits
+and optional uncommitted edits for approval on your laptop. It updates the remote
+checkout in place while the requesting conversation stays open; other sessions
+must be closed, and remote work must be clean and able to fast-forward to the
+captured local commit. See [local publication](local-publication.md). The CLI
+upload commands above continue to require all sessions to be closed.
+
 Use the snapshot command before the first launch to initialize a workspace with
 uncommitted work. Existing remote checkouts must be clean, with history that can
 advance to the local commit. Commit or reconcile remote work before sending

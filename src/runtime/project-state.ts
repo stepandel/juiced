@@ -37,14 +37,17 @@ export const CHECKOUT_LEASES_TABLE = `CREATE TABLE IF NOT EXISTS juiced_checkout
   )`;
 
 /** Shared SQL is the authority across independent Session sandboxes. */
-export async function acquireCheckout(db: LeaseDatabase, project: string, session: string, kind: 'session' | 'maintenance', onLost: (error: Error) => void) {
+export async function acquireCheckout(db: LeaseDatabase, project: string, session: string, kind: 'session' | 'maintenance', onLost: (error: Error) => void, allowOwnSession = false) {
   await busyRetry(() => db.execute(CHECKOUT_LEASES_TABLE));
   const token = randomUUID();
   await busyRetry(async () => {
     const tx = await db.transaction('write');
     try {
       const result = await tx.execute({ sql: 'SELECT token, session, kind, expires FROM juiced_checkout_leases WHERE project = ?', args: [project] });
-      const conflicts = result.rows.filter(row => kind === 'maintenance' || row.kind === 'maintenance');
+      // A waiting MCP call can update its own checkout in place. Every other
+      // session and maintenance owner still fences that operation.
+      const conflicts = result.rows.filter(row => (kind === 'maintenance' || row.kind === 'maintenance') &&
+        !(allowOwnSession && kind === 'maintenance' && row.kind === 'session' && row.session === session));
       if (conflicts.length) {
         const stale = conflicts.filter(row => Number(row.expires) < Date.now()).map(row => ({ token: String(row.token), session: String(row.session) }));
         throw new CheckoutBusy(stale, conflicts.every(row => row.kind === 'maintenance') ? 'maintenance' : 'sessions');

@@ -98,25 +98,30 @@ export class GitWorkspaceClient {
     if (initializeOnly && status.initialized) { await this.call({ action: 'configure', configuration }); return; }
     const upload = await createUpload(this.repository, includeUncommitted, status.head, this.signal);
     try {
-      if (upload.manifest.files.reduce((sum, file) => sum + file.size, 0) > MAX_TRANSFER_BYTES) throw new Error('Git transfer exceeds the 512 MiB limit');
-      await this.call({ action: 'begin', id: upload.id, manifest: upload.manifest });
-      for (const info of upload.manifest.files) {
-        const file = await open(join(upload.directory, info.name), 'r');
-        try {
-          const bytes = Buffer.alloc(UPLOAD_CHUNK_BYTES);
-          for (let offset = 0; offset < info.size;) {
-            const { bytesRead } = await file.read(bytes, 0, Math.min(bytes.length, info.size - offset), offset);
-            if (!bytesRead) throw new Error('The prepared Git transfer was truncated');
-            const result = await this.call({ action: 'chunk', id: upload.id, file: info.name, offset, data: bytes.subarray(0, bytesRead).toString('base64') });
-            offset += bytesRead;
-            if (result.offset !== offset) throw new Error('The remote Git upload returned an unexpected offset');
-          }
-        } finally { await file.close(); }
-      }
+      await this.uploadPrepared(upload);
       await this.call({ action: 'apply', id: upload.id, initializeOnly });
       await this.call({ action: 'configure', configuration });
       await this.call({ action: 'cleanup', id: upload.id });
     } finally { await upload.close(); }
+  }
+
+  /** Send immutable bytes only; the waiting MCP bridge validates/applies them. */
+  async uploadPrepared(upload: Awaited<ReturnType<typeof createUpload>>) {
+    if (upload.manifest.files.reduce((sum, file) => sum + file.size, 0) > MAX_TRANSFER_BYTES) throw new Error('Git transfer exceeds the 512 MiB limit');
+    await this.call({ action: 'begin', id: upload.id, manifest: upload.manifest });
+    for (const info of upload.manifest.files) {
+      const file = await open(join(upload.directory, info.name), 'r');
+      try {
+        const bytes = Buffer.alloc(UPLOAD_CHUNK_BYTES);
+        for (let offset = 0; offset < info.size;) {
+          const { bytesRead } = await file.read(bytes, 0, Math.min(bytes.length, info.size - offset), offset);
+          if (!bytesRead) throw new Error('The prepared Git transfer was truncated');
+          const result = await this.call({ action: 'chunk', id: upload.id, file: info.name, offset, data: bytes.subarray(0, bytesRead).toString('base64') });
+          offset += bytesRead;
+          if (result.offset !== offset) throw new Error('The remote Git upload returned an unexpected offset');
+        }
+      } finally { await file.close(); }
+    }
   }
 
   private async download(id: string, path: string, info: FileInfo, selected: 'bundle' | 'snapshot' = 'bundle') {

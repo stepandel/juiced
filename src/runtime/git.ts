@@ -1,14 +1,14 @@
-import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { cp, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
 import { applyRemoteConfiguration, validateRemoteConfiguration, type GitRemoteConfiguration } from '../git-remotes.js';
-import { ancestor, cleanRepository, fileInfo, git, gitText } from '../git.js';
+import { cleanRepository, fileInfo, git, gitText } from '../git.js';
 import { DOWNLOAD_CHUNK_BYTES, MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, validTransferId, type ExportManifest, type GitCommand, type GitEvent, type GitResult, type UploadManifest } from '../git-protocol.js';
 import { validProjectName } from '../project-name.js';
 import { acquireCheckout, reapCheckout } from './project-state.js';
 import { workingTree } from '../working-tree.js';
+import { prepareUploadCandidate, validateUploadManifest } from './git-upload.js';
 import { isENOENT, writeFileAtomic } from '../fs-util.js';
 import { BASE64 } from '../protocol.js';
 
@@ -44,30 +44,6 @@ export async function readBinding(metadata: string): Promise<Binding | undefined
 }
 
 export const atomicJSON = (path: string, value: unknown) => writeFileAtomic(path, JSON.stringify(value));
-
-/** GNU cp is several times faster than fs.cp on large checkouts and keeps mtimes, so Git's stat cache stays useful. */
-async function copyTree(source: string, destination: string, signal: AbortSignal) {
-  // The runtime image is Debian; other platforms (local tests) keep the portable copy.
-  if (process.platform !== 'linux') return cp(source, destination, { recursive: true, verbatimSymlinks: true });
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn('cp', ['-a', '--reflink=auto', '-T', '--', source, destination], { signal, stdio: ['ignore', 'ignore', 'pipe'] });
-    let diagnostic = '';
-    child.stderr.on('data', (chunk: Buffer) => { diagnostic = (diagnostic + chunk.toString()).slice(-4000); });
-    child.once('error', reject);
-    child.once('close', code => code === 0 ? resolve() : reject(new Error(`Copying the remote checkout failed: ${diagnostic.trim() || `cp exited with code ${code}`}`)));
-  });
-}
-
-function validateManifest(value: UploadManifest) {
-  if (!value || value.version !== 1 || !validOid(value.head) || !['sha1', 'sha256'].includes(value.objectFormat) ||
-      (value.branch !== null && (typeof value.branch !== 'string' || value.branch.length > 1024)) ||
-      !value.author || [value.author.name, value.author.email].some(item => typeof item !== 'string' || item.length > 1024 || /[\0\r\n]/.test(item)) ||
-      !Array.isArray(value.files) || value.files.length < 1 || value.files.length > 3 || !value.files.some(file => file.name === 'bundle') ||
-      new Set(value.files.map(file => file.name)).size !== value.files.length ||
-      value.files.some(file => !['bundle', 'staged', 'unstaged'].includes(file.name) || !Number.isSafeInteger(file.size) || file.size < 0 || file.size > MAX_TRANSFER_BYTES || !/^[a-f0-9]{64}$/.test(file.sha256)) || value.files.reduce((sum, file) => sum + file.size, 0) > MAX_TRANSFER_BYTES) {
-    throw new Error('Invalid Git transfer manifest');
-  }
-}
 
 export function createGitRuntime(context: SessionHarnessContext, workspace = process.cwd()) {
   async function handle(command: GitCommand, output?: SessionOutput<GitEvent>, operationSignal = context.signal): Promise<GitResult> {
@@ -149,7 +125,7 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
         await reapCheckout(await context.database(), project, command.leases);
         return {};
       case 'begin': {
-        validateManifest(command.manifest);
+        validateUploadManifest(command.manifest);
         if (command.manifest.branch) await run(paths.root, ['check-ref-format', '--branch', command.manifest.branch]);
         await mkdir(transfer!, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
         const manifestPath = join(transfer!, 'upload.json');
@@ -185,7 +161,7 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
           const binding = await readBinding(paths.metadata);
           if (command.initializeOnly && binding) return {};
           const manifest = JSON.parse(await readFile(join(transfer!, 'upload.json'), 'utf8')) as UploadManifest;
-          validateManifest(manifest);
+          validateUploadManifest(manifest);
           for (const expected of manifest.files) {
             const actual = await fileInfo(join(transfer!, expected.name), expected.name);
             if (actual.size !== expected.size || actual.sha256 !== expected.sha256) throw new Error('Incomplete or corrupt Git transfer. Retry the upload.');
@@ -193,44 +169,7 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
           if (!binding && await exists(paths.target) && (await readdir(paths.target)).length) throw new Error('This workspace contains older synced files. Select a fresh --workspace; the existing files were preserved.');
           if (binding && binding.sourceBranch !== manifest.branch) throw new Error('The local branch changed. Select a fresh --workspace for that branch.');
           if (binding && !await cleanRepository(paths.target)) throw new Error('The remote checkout has uncommitted changes. Commit or resolve them before syncing to it.');
-          const candidate = join(transfer!, 'candidate');
-          await rm(candidate, { recursive: true, force: true });
-          if (binding) await copyTree(paths.target, candidate, signal);
-          else { await mkdir(candidate); await git(candidate, ['init', `--object-format=${manifest.objectFormat}`], { signal }); }
-          // A copied core.worktree setting must never redirect staging operations
-          // into the live checkout.
-          const candidateGit = (args: string[]) => git(candidate, args, { signal, env: { GIT_DIR: join(candidate, '.git'), GIT_WORK_TREE: candidate } });
-          await candidateGit(['bundle', 'verify', join(transfer!, 'bundle')]);
-          const refs = (await gitText(candidate, ['bundle', 'list-heads', join(transfer!, 'bundle')])).split('\n');
-          if (!refs.some(line => line === `${manifest.head} refs/juiced/transfers/${command.id}`)) throw new Error('The bundle does not contain its declared commit');
-          await candidateGit(['fetch', '--no-tags', join(transfer!, 'bundle'), `refs/juiced/transfers/${command.id}:refs/juiced/incoming`]);
-          if (binding) {
-            const previous = await gitText(candidate, ['rev-parse', 'HEAD']);
-            if (!await ancestor(candidate, previous, manifest.head)) throw new Error('Local and remote histories diverged. Import remote commits before reconciling them.');
-            await candidateGit(['merge', '--ff-only', '--no-overwrite-ignore', 'refs/juiced/incoming']);
-          } else if (manifest.branch) await candidateGit(['checkout', '-b', manifest.branch, manifest.head]);
-          else await candidateGit(['checkout', '--detach', manifest.head]);
-          for (const name of ['staged', 'unstaged'] as const) {
-            if (manifest.files.some(file => file.name === name)) {
-              const patch = join(transfer!, name);
-              // The candidate has a copied index whose stat cache describes the
-              // original files. --index can reject identical contents on copies
-              // or NFS. Validate/apply each side independently before publication.
-              await candidateGit(['apply', '--check', patch]);
-              if (name === 'staged') {
-                await candidateGit(['apply', '--cached', '--check', patch]);
-                await candidateGit(['apply', '--cached', '--whitespace=nowarn', patch]);
-              }
-              await candidateGit(['apply', '--whitespace=nowarn', patch]);
-            }
-          }
-          await candidateGit(['config', 'user.name', manifest.author.name]);
-          await candidateGit(['config', 'user.email', manifest.author.email]);
-          await candidateGit(['config', 'commit.gpgSign', 'false']);
-          await candidateGit(['update-ref', '-d', 'refs/juiced/incoming']);
-          signal.throwIfAborted();
-          const tree = await workingTree(candidate, signal);
-          await candidateGit(['update-ref', `refs/juiced/baselines/${tree}`, tree]);
+          const { tree } = await prepareUploadCandidate(paths.target, transfer!, command.id, manifest, Boolean(binding), signal);
           await atomicJSON(join(paths.metadata, 'journal.json'), { id: command.id, binding: { version: 1, binding: command.binding, sourceBranch: manifest.branch, publishBase: { head: manifest.head, tree } }, hadOriginal: await exists(paths.target) } satisfies Journal);
           await recover();
           return {};

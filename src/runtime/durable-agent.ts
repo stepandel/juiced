@@ -242,7 +242,7 @@ export function createDurableAgent(context: SessionHarnessContext, factory: () =
                 if (event.channel === 'stdout') await stdout(raw);
                 else await bytes('stderr', raw);
               } else if (event.type === 'ready') { await record({ type: 'state', state: 'ready' }); armIdle(); }
-              else if (event.type === 'local-publish' || event.type === 'local-publish-done') await record(event);
+              else if (event.type === 'local-publish' || event.type === 'local-upload' || event.type === 'local-publish-done') await record(event);
               else if (event.type === 'error') await bytes('stderr', Buffer.from(event.message + '\n'));
             } } });
           } catch (error) {
