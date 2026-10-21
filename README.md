@@ -16,8 +16,12 @@ and pick up where you left off.
 
 ## Features
 
+- **A session in every tab** — each terminal tab gets its own Claude session.
+  Open another tab and run `juiced claude` to work on something else in
+  parallel, with as many sessions going at once as you need.
 - **Persistent sessions** — detach with `/detach` or just close the terminal;
-  work continues remotely. Run `juiced claude` again to reconnect.
+  work continues remotely. Run `juiced claude` again in the same tab to pick up
+  where you left off.
 - **One workspace per project** — your current directory picks the workspace, so
   each project keeps its own files, Claude login, and conversations.
 - **Explicit code transfer** — Git repositories start from your local `HEAD`.
@@ -93,7 +97,7 @@ juiced claude fast-forward             # apply them to your branch
 
 | Command | What it does |
 | --- | --- |
-| `juiced claude` | Start or reconnect to this tab's session |
+| `juiced claude` | Start or reconnect to this tab's session (open more tabs for more sessions) |
 | `juiced claude --new` | Start a fresh session |
 | `juiced claude sessions` | List saved conversations |
 | `juiced claude --session <id>` | Reopen a specific conversation |

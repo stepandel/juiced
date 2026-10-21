@@ -55,9 +55,11 @@ juiced claude -p "Summarize the project" > summary.txt
 
 ## Sessions
 
-Rerunning `juiced claude` in the same terminal tab, project, and workspace
-reconnects to that tab's session. The session ID is displayed in the session
-header.
+Each terminal tab has its own session. Run `juiced claude` in a new tab to start
+another session alongside the ones you already have; there's no need to finish
+or detach one before opening the next. Rerunning `juiced claude` in the same
+tab, project, and workspace reconnects to that tab's session. The session ID is
+displayed in the session header.
 
 Terminal bindings use a terminal session ID, a tmux/screen pane ID, or the parent
 shell's PID and start time. Each tab, local project directory, and canonical
