@@ -67,8 +67,8 @@ The website is `https://juiced.codes`.
 The homepage is a static Next.js page and
 `/health` checks the HTTP handler without account credentials. Account routes and
 `/ready` return HTTP 503 until production configuration is supplied. The homepage
-links to public docs and pricing. Free includes 10 vCPU hours; Unlimited is
-$25/month. Both plans include all features. See
+links to public docs and pricing. Free includes 10 vCPU hours; Unlimited
+($25/month) is marked coming soon. Both plans include all features. See
 [search and AI discovery](search-discovery.md) for verification, sitemap submission,
 and baseline measurement after deployment.
 `service/public/install.sh` is served at `/install.sh` by Vercel's CDN.

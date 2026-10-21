@@ -2,7 +2,7 @@ import { PublicPage } from '../site-components';
 import { pageMetadata } from '../../src/site';
 
 const description =
-  'Every Juiced feature on both plans. Free includes 10 vCPU hours. Get unlimited compute for $25 per month. Claude Code access is separate.';
+  'Start free with every Juiced feature and 10 vCPU hours. Unlimited compute for $25 per month is coming soon. Claude Code access is separate.';
 export const metadata = pageMetadata('Pricing', description, '/pricing');
 
 export default function Pricing() {
@@ -14,8 +14,10 @@ export default function Pricing() {
           <p className="price">$0</p>
           <p>10 vCPU hours.</p>
         </section>
-        <section className="pricing-card" aria-labelledby="paid-plan">
-          <h2 id="paid-plan">Unlimited</h2>
+        <section className="pricing-card soon" aria-labelledby="paid-plan">
+          <h2 id="paid-plan">
+            Unlimited <span className="badge mono">coming soon</span>
+          </h2>
           <p className="price">
             $25 <span>/ month</span>
           </p>
