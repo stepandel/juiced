@@ -154,14 +154,35 @@ export default function Home() {
             Learn how to start a workspace, leave Claude running, and bring your
             changes home.
           </p>
-          <p>Requires Node.js 22 or later and your own Claude Code access.</p>
-          <nav className="guide-links" aria-label="Learn about Juiced">
-            {guides.map(({ slug, title }) => (
-              <a key={slug} href={`/docs/${slug}`}>
-                {title}
+          <div className="guide-grid">
+            {guides.map(({ slug, title, description }) => (
+              <a key={slug} href={`/docs/${slug}`} className="guide-card">
+                <h3>{title}</h3>
+                <p>{description}</p>
+                <span className="mono" aria-hidden="true">
+                  read →
+                </span>
               </a>
             ))}
-          </nav>
+            <a href="/docs" className="guide-card all">
+              <h3>All documentation</h3>
+              <p>Every guide in one place, from setup to Git transfers.</p>
+              <span className="mono" aria-hidden="true">
+                browse docs →
+              </span>
+            </a>
+          </div>
+        </section>
+        <section className="cta" aria-labelledby="cta">
+          <h2 id="cta">
+            Close your laptop.
+            <br />
+            <em>Claude keeps working.</em>
+          </h2>
+          <InstallCommand command={install} />
+          <p className="mono">
+            Requires Node.js 22+ and your own Claude Code access.
+          </p>
         </section>
       </main>
       <SiteFooter />
