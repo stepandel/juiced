@@ -16,6 +16,7 @@ export interface Account {
   period_id: string | null;
   period_end: Date | null;
   included_credits: string;
+  created_at: Date;
 }
 export interface Installation {
   id: string;
