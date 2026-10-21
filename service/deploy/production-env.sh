@@ -50,7 +50,23 @@ database() {
   echo "Database"
   command -v psql >/dev/null || { echo "psql is required" >&2; exit 1; }
   local owner api worker
-  owner=$(secret 'Owner PostgreSQL URL (used here only, never stored in Vercel)')
+  if [[ -n ${OWNER_FROM_VERCEL:-} ]]; then
+    # The Neon resource connected to the development environment only, as
+    # `vercel integration resource connect juiced-db juiced -e development
+    # --prefix JUICED_OWNER_`. Disconnect it afterwards.
+    local pulled
+    pulled=$(mktemp -d)
+    vercel env pull "$pulled/.env" --environment development --yes \
+      --project "$PROJECT" --scope "$SCOPE" >/dev/null 2>&1
+    owner=$(PULLED="$pulled/.env" node -e '
+      const line = require("fs").readFileSync(process.env.PULLED, "utf8")
+        .split("\n").find((l) => l.startsWith("JUICED_OWNER_DATABASE_URL="));
+      if (line) process.stdout.write(JSON.parse(line.slice(line.indexOf("=") + 1)));')
+    rm -rf "$pulled"
+    [[ -n $owner ]] || { echo "JUICED_OWNER_DATABASE_URL not found in development" >&2; exit 1; }
+  else
+    owner=$(secret 'Owner PostgreSQL URL (used here only, never stored in Vercel)')
+  fi
   JUICED_DATABASE_URL=$owner JUICED_SERVICE_URL=$SERVICE_URL NODE_ENV=development \
     JUICED_AUTH_SECRET=$(openssl rand -hex 32) npm run --silent migrate:service
   api=$(openssl rand -hex 24)
@@ -92,21 +108,30 @@ oauth() {
 
 cantelop() {
   echo "Cantelop Fleet"
-  local fleet api worker
-  fleet=$(secret 'Fleet ID (flt_...)')
-  [[ $fleet =~ ^flt_[a-f0-9]{32}$ ]] || { echo "Invalid Fleet ID" >&2; exit 1; }
-  api=$(secret 'API principal token (credentials:read, installations:read)')
-  worker=$(secret 'Worker principal token (installations:read/write, policy:write, usage:read, credentials:read)')
-  for token in "$api" "$worker"; do
-    [[ $token =~ ^fsp_[a-f0-9]{32}\.[a-f0-9]{64}$ ]] || { echo "Invalid Fleet token" >&2; exit 1; }
-  done
-  [[ $api != "$worker" ]] || { echo "Use separate API and worker principals" >&2; exit 1; }
+  # Creates real Fleet principals, so DRY_RUN would only strand them.
+  [[ -z ${DRY_RUN:-} ]] || { echo "  skipped in a dry run"; return; }
+  local release version runtime values name value
+  # The package must carry the runtime this CLI version was built with.
+  npm run --silent build:runtime >/dev/null
+  runtime=$(node -e '
+    const m = require("./dist/cantelop/juiced/runtime/cantelop-runtime.json");
+    process.stdout.write(m.session_runtime_id);')
+  # CANTELOP_RELEASE selects a release; the App's active one is the default.
+  # Package versions are immutable, so each App release gets its own.
+  read -r release version < <(command cantelop releases --json | CANTELOP_RELEASE=${CANTELOP_RELEASE:-} node -e '
+    let s = ""; process.stdin.on("data", (c) => (s += c)).on("end", () => {
+      const d = JSON.parse(s), rs = Array.isArray(d) ? d : d.releases ?? d.items;
+      const want = process.env.CANTELOP_RELEASE;
+      const r = rs.find((r) => (want ? r.id === want : r.status === "active"));
+      if (!r) throw new Error("Release not found");
+      console.log(r.id, `${require("./package.json").version}-r${r.version}`);
+    });')
+  echo "  release $release, package version $version, runtime $runtime"
+  values=$(JUICED_FLEET_SETUP=1 node service/deploy/cantelop-fleet.mjs "$release" "$version" "$runtime")
   put CANTELOP_API_URL https://cantelop.com
-  put CANTELOP_FLEET_ID "$fleet"
-  put CANTELOP_FLEET_TOKEN "$api"
-  put CANTELOP_WORKER_FLEET_TOKEN "$worker"
-  put JUICED_PACKAGE_ID "$(secret 'Approved package ID')"
-  put JUICED_RUNTIME_ID "$(secret 'Runtime ID')"
+  while IFS='=' read -r name value; do
+    [[ -n $name ]] && put "$name" "$value"
+  done <<<"$values"
   existing JUICED_MINIMUM_CLI || put JUICED_MINIMUM_CLI 0.2.0
 }
 
