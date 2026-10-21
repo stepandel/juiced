@@ -1,3 +1,5 @@
+import { isCliVersion } from './cli-version.ts';
+
 /** Wire contract shared by the packaged CLI and the managed service. */
 export interface InstallationMetadata {
   id: string;
@@ -27,7 +29,7 @@ export function readInstallation(v: unknown): InstallationMetadata {
     v.runtimeId.length < 1 ||
     v.runtimeId.length > 256 ||
     typeof v.minimumCli !== 'string' ||
-    !/^\d+\.\d+\.\d+$/.test(v.minimumCli) ||
+    !isCliVersion(v.minimumCli) ||
     typeof v.operationId !== 'string' ||
     v.operationId.length > 256 ||
     (v.error !== null && (typeof v.error !== 'string' || !/^[a-z0-9_]{1,64}$/.test(v.error)))

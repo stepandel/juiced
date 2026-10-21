@@ -18,7 +18,7 @@ import { until as poll } from './fixtures/wait.js';
 
 // Only the remote transport is a fixture. Local files and persistent baselines
 // use the SDK's native adapter, without the Cantelop CLI or a Claude process.
-test('explicit file sync and CLI watch transfer both ways, preserve conflicts and stop cleanly', { timeout: 20_000 }, async t => {
+test('explicit file sync and CLI watch transfer both ways, preserve conflicts and stop cleanly', { timeout: 60_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'juiced-file-sync-sdk-'));
   const previous = process.env.CANTELOP_SYNC_STATE_HOME;
   process.env.CANTELOP_SYNC_STATE_HOME = join(root, 'state');

@@ -8,10 +8,12 @@ Cantelop workflow explicitly.
 
 ## Install and sign in
 
-The account-service origin is `https://juiced.codes`. CLI publication is deferred;
-the unscoped npm name `juiced` is reserved by npm, so do not install its unrelated
-registry placeholder. Build and link this repository while the public service is
-being configured:
+The account-service origin is `https://juiced.codes`. Public CLI releases use the
+[shell installer](cli-releases.md), with bundled Node and dependencies; npm
+publication is not required. The installer needs the first public GitHub Release
+and a website deployment before its public URL is usable. The unscoped npm name
+`juiced` is reserved by npm, so do not install its unrelated registry placeholder.
+Build and link this repository while the public service is being configured:
 
 ```sh
 npm install
@@ -69,6 +71,7 @@ links to public docs and pricing. Free includes 10 vCPU hours; Unlimited is
 $25/month. Both plans include all features. See
 [search and AI discovery](search-discovery.md) for verification, sitemap submission,
 and baseline measurement after deployment.
+`service/public/install.sh` is served at `/install.sh` by Vercel's CDN.
 
 Set the values in `service/.env.example` in the Vercel project. The API uses the
 limited `JUICED_DATABASE_URL` role and `CANTELOP_FLEET_TOKEN`; the private job
@@ -128,8 +131,8 @@ References: [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/ne
 1. Install the pinned registry dependency with `npm ci`. SDK **1.5.0** supplies
    compiled transport rebinding and the public relay validators; its registry
    integrity is recorded in the lockfile. `npm run check:package` verifies a fresh
-   CLI tarball installation against that dependency. CLI npm publication remains
-   deferred until a package name and production launch are ready.
+   CLI tarball installation against that dependency. Public CLI distribution uses
+   [GitHub Release archives](cli-releases.md), independently of npm publication.
 2. Set the values in `service/.env.example`. Production requires both OAuth
    providers, PostgreSQL, a Fleet, approved package/runtime IDs and Stripe's
    fixed-price subscription and portal configuration. Remote PostgreSQL uses
