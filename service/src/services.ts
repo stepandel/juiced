@@ -47,7 +47,9 @@ export function serviceLoader(
       const s = services(env, role);
       try {
         await s.pool.query('SELECT 1 FROM juiced_migrations LIMIT 1');
-        await s.billing.check();
+        // Billing jobs need Stripe. Requests check it lazily in Billing, so a
+        // Stripe outage cannot take down sign-in or runtime access.
+        if (role === 'worker') await s.billing.ready();
         return s;
       } catch (error) {
         await s.pool.end();

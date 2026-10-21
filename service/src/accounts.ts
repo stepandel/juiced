@@ -2,7 +2,7 @@ import { readInstallation } from '../../contracts/account';
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { ServiceError } from './config';
-import { transaction } from './db';
+import { transaction, type Queryable } from './db';
 import type { Identity } from './auth';
 
 export const id = (prefix: string) => `${prefix}_${randomUUID().replaceAll('-', '')}`;
@@ -73,11 +73,9 @@ export class Accounts {
     if (!row) throw new ServiceError('not_found', 404);
     return row;
   }
-  async installation(account: string) {
+  async installation(account: string, db: Queryable = this.pool) {
     return (
-      await this.pool.query<Installation>('SELECT * FROM installations WHERE account_id=$1', [
-        account,
-      ])
+      await db.query<Installation>('SELECT * FROM installations WHERE account_id=$1', [account])
     ).rows[0];
   }
   entitled(a: Account) {

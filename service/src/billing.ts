@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
 import type { Pool, PoolClient } from 'pg';
-import { transaction } from './db';
+import { transaction, type Queryable } from './db';
 import { id, enqueue, type Account } from './accounts';
 import { ServiceError, readText } from './config';
 
@@ -22,6 +22,7 @@ export interface BillingConfig {
   portalConfiguration?: string;
 }
 export class Billing {
+  private checked: Promise<void> | undefined;
   constructor(
     private pool: Pool,
     private stripe: Stripe,
@@ -35,6 +36,13 @@ export class Billing {
       !cfg.webhookSecret.startsWith('whsec_')
     )
       throw new Error('Invalid billing configuration');
+  }
+  /** Verify the Stripe configuration once; a failure is retried on the next call. */
+  ready() {
+    return (this.checked ??= this.check().catch((error: unknown) => {
+      this.checked = undefined;
+      throw error;
+    }));
   }
   async check() {
     const price = await this.stripe.prices.retrieve(this.cfg.price);
@@ -96,6 +104,7 @@ export class Billing {
   }
   async checkout(a: Account) {
     if (a.status !== 'active') throw new ServiceError('account_suspended', 403);
+    await this.ready();
     const customer = await this.customer(a);
     // A paid or unfinished subscription is managed through the portal; never
     // create a second subscription for an existing entitlement.
@@ -189,6 +198,7 @@ export class Billing {
   }
 
   async portal(a: Account) {
+    await this.ready();
     const customer = await this.customer(a),
       session = await this.stripe.billingPortal.sessions.create({
         customer,
@@ -217,15 +227,14 @@ export class Billing {
       }
     }
   }
-  async cancel(a: Account) {
-    const binding = (
-      await this.pool.query('SELECT * FROM subscriptions WHERE account_id=$1', [a.id])
-    ).rows[0];
+  /** Pass the caller's transaction so cancellation does not take a second connection. */
+  async cancel(a: Account, db: Queryable = this.pool) {
+    const binding = (await db.query('SELECT * FROM subscriptions WHERE account_id=$1', [a.id]))
+      .rows[0];
     if (!binding) return;
     const customer = String(binding.customer_id);
-    const intent = (
-      await this.pool.query('SELECT * FROM checkout_sessions WHERE account_id=$1', [a.id])
-    ).rows[0];
+    const intent = (await db.query('SELECT * FROM checkout_sessions WHERE account_id=$1', [a.id]))
+      .rows[0];
     if (intent) await this.expireCheckout(a.id, customer, intent);
     const list = await this.stripe.subscriptions.list({ customer, status: 'all', limit: 100 });
     if (list.has_more) throw new ServiceError('billing_reconciliation_required', 503);

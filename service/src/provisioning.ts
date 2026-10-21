@@ -4,6 +4,7 @@ import { Accounts, type Account } from './accounts';
 import type { Billing } from './billing';
 import { transaction } from './db';
 import { ServiceError } from './config';
+import { logError } from './log';
 
 /** Deletion retries must converge once the platform no longer has the installation. */
 async function unlessMissing<T>(work: Promise<T>) {
@@ -46,7 +47,7 @@ export class Provisioner {
         const a = (
           await tx.query<Account>('SELECT * FROM accounts WHERE id=$1 FOR UPDATE', [row.account_id])
         ).rows[0]!;
-        const i = await this.accounts.installation(a.id);
+        const i = await this.accounts.installation(a.id, tx);
         if (i && (row.kind === 'delete' || a.status === 'deleting'))
           await unlessMissing(this.platform.remove(i.external_key));
         if (
@@ -68,7 +69,7 @@ export class Provisioner {
         let done = false;
         if (a.status === 'deleted') done = true;
         else if (row.kind === 'delete' || a.status === 'deleting') {
-          await this.billing?.cancel(a);
+          await this.billing?.cancel(a, tx);
           if (i?.platform_id) {
             await unlessMissing(this.platform.request('DELETE', `installations/${i.platform_id}`));
             const remote = await unlessMissing(this.platform.installation(i.platform_id));
@@ -220,7 +221,12 @@ export class Provisioner {
           [row.id, row.fence, done ? 'done' : 'pending'],
         );
       });
-    } catch {
+    } catch (error) {
+      logError('provisioning_failed', error, {
+        job: row.id,
+        kind: row.kind,
+        account: row.account_id,
+      });
       await this.pool.query(
         `UPDATE jobs SET status='pending',error_code='provisioning_retry_pending',lease_until=NULL,available_at=now()+interval '10 seconds' WHERE id=$1 AND fence=$2`,
         [row.id, row.fence],
