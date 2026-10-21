@@ -1,0 +1,9 @@
+.env*
+**/.env*
+.cantelop/
+node_modules/
+dist/
+diagnostics/
+test/
+service/test/
+*.tgz

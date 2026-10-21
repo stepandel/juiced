@@ -50,6 +50,55 @@ Claude authentication remains a separate, per-Workspace action.
 provider-backed authentication and durable jobs. `contracts/` is shared with the
 packaged CLI. The npm package includes CLI assets; private service code stays out.
 
+### Vercel website and API
+
+The Vercel project is `stepandels-projects/juiced`, connected to
+`stepandel/juiced`. Its project root is the repository root and its production
+branch is `main`. `vercel.json` selects Hono, Node 24 is configured on the project,
+and `server.ts` exports the web application. Vercel builds run the service's
+TypeScript check; they do not publish the CLI or compile a Cantelop runtime.
+
+The homepage and `/health` work without account infrastructure. Account pages,
+authentication, billing and API routes remain unavailable with HTTP 503 until
+their production configuration is supplied. `/ready` checks account-service
+initialization and the database. The homepage labels the release as a private
+preview and links to source instructions while npm publication is deferred.
+
+Set the API's values from `service/.env.example` as Vercel production environment
+variables. Keep `JUICED_SERVICE_URL=https://juiced.codes` and
+`JUICED_ADMISSION_ENABLED=false` until qualification. Store the worker database
+credentials and worker Fleet token only on the worker host. Never add them to the
+Vercel API project. The Vercel adapter uses Vercel's overwritten
+`x-vercel-forwarded-for` header for rate limits and strips a visitor's private IP
+header; the standalone Node server continues using its socket/proxy rules.
+
+The durable worker in `service/src/worker.ts` still needs a separate continuously
+running process. Do not start it inside a Vercel request or replace its short
+reconciliation loops with minute-level cron. It handles provisioning, billing,
+usage, account expiry and revocation cleanup. The request relay uses streaming;
+Vercel invocations are limited to 300 seconds and the CLI reconnects using its
+existing replay cursor. Qualify real hosted reconnects before enabling admission.
+
+For manual deployments from a clean, committed checkout:
+
+```sh
+vercel link --yes --project juiced --scope stepandels-projects
+vercel deploy --scope stepandels-projects
+vercel deploy --prod --scope stepandels-projects
+```
+
+`public/` is served by Vercel's CDN. `.vercelignore` excludes local environment
+files, tests and diagnostics from uploads. The local `.vercel/` link and downloaded
+`.env.local` credentials are ignored by Git. Attach `juiced.codes` to this project
+and use the DNS record returned by `vercel domains inspect juiced.codes` at the
+registrar; adding the domain in Vercel does not update external DNS.
+
+Hosting references: [Hono on Vercel](https://vercel.com/docs/frameworks/backend/hono),
+[trusted request headers](https://vercel.com/docs/headers/request-headers), and
+[function duration limits](https://vercel.com/docs/functions/limitations).
+
+### Account infrastructure
+
 1. Install the pinned registry dependency with `npm ci`. SDK **1.5.0** supplies
    compiled transport rebinding and the public relay validators; its registry
    integrity is recorded in the lockfile. `npm run check:package` verifies a fresh
