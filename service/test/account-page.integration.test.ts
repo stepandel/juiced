@@ -67,9 +67,48 @@ test(
       assert.match(html, /GitHub<\/div><span class="ok-text">Connected/);
       assert.match(html, /data-provider="google">Connect/);
       assert.ok(html.includes('Not created yet'));
+      assert.ok(html.includes('CLI sign-ins'));
+      assert.ok(html.includes('Sign out all CLI sessions'), 'bulk sign-out is available even with one CLI session');
+      assert.ok(html.includes('Sign out of browser'));
+
+      const otherUser = await context.internalAdapter.createUser(
+        { name: 'Other user', email: `${crypto.randomUUID()}@example.com`, emailVerified: true },
+        { method: 'admin' },
+      );
+      await pool.query(
+        `INSERT INTO devices(id,user_id,label,expires_at) VALUES('dev_second',$1,'Second computer',now()+interval '30 days'),
+        ('dev_foreign',$2,'Other account',now()+interval '30 days')`,
+        [user.id, otherUser.id],
+      );
+      const logoutAll = await handle(new Request(`${cfg.origin}/v1/logout`, {
+        method: 'POST',
+        headers: { Cookie: cookie, Origin: cfg.origin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      }));
+      assert.equal(logoutAll.status, 200);
+      const remaining = (await pool.query('SELECT id FROM devices WHERE revoked_at IS NULL AND expires_at>now()')).rows;
+      assert.deepEqual(remaining.map((row) => row.id), ['dev_foreign']);
+      const afterLogoutAll = await get({ Cookie: cookie });
+      assert.equal(afterLogoutAll.status, 200, 'CLI sign-out keeps the browser signed in');
+      assert.match(await afterLogoutAll.text(), /No CLI sessions are signed in/);
 
       await pool.query(`UPDATE accounts SET status='deleting' WHERE id=$1`, [account.id]);
       assert.ok((await (await get({ Cookie: cookie })).text()).includes('deletion is in progress'));
+
+      await pool.query(
+        `INSERT INTO devices(id,user_id,label,expires_at) VALUES('dev_keep',$1,'Still signed in',now()+interval '30 days')`,
+        [user.id],
+      );
+      const logoutBrowser = await handle(new Request(`${cfg.origin}/api/auth/sign-out`, {
+        method: 'POST',
+        headers: { Cookie: cookie, Origin: cfg.origin, 'Content-Type': 'application/json' },
+        body: '{}',
+      }));
+      assert.equal(logoutBrowser.status, 200, await logoutBrowser.text());
+      const afterLogoutBrowser = await get({ Cookie: cookie });
+      assert.equal(afterLogoutBrowser.status, 302);
+      assert.equal(afterLogoutBrowser.headers.get('location'), `${cfg.origin}/sign-in`);
+      assert.equal((await pool.query("SELECT revoked_at FROM devices WHERE id='dev_keep'")).rows[0]!.revoked_at, null);
     } finally {
       await fixture.close();
     }

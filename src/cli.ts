@@ -57,7 +57,9 @@ try {
       }
       if (failure)
         throw new Error('Local credentials removed; server revocation could not be confirmed.');
-      process.stderr.write('Signed out of Juiced.\n');
+      process.stderr.write(
+        invocation.all ? 'Signed out of all Juiced CLI sessions.\n' : 'Signed out of Juiced on this computer.\n',
+      );
     }
   } else {
     const args = parseArguments(invocation.args);

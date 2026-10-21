@@ -96,11 +96,11 @@ function host(i: AccountView['installation']) {
 }
 export function accountPage(view: AccountView) {
   const { user, account } = view;
-  const nav = `<div class="who"><div class="avatar" aria-hidden="true">${escape((user.name || user.email).trim().charAt(0).toUpperCase())}</div><span>${escape(user.email)}</span><button id="sign-out">Sign out</button></div>`;
+  const nav = `<div class="who"><div class="avatar" aria-hidden="true">${escape((user.name || user.email).trim().charAt(0).toUpperCase())}</div><span>${escape(user.email)}</span><button data-sign-out>Sign out</button></div>`;
   const script = `const status=document.querySelector('#status');
 async function api(path,method='GET',body){const r=await fetch(path,{method,headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'request_failed');return d;}
 function act(b,run){if(b)b.onclick=async()=>{b.disabled=true;status.textContent='';try{await run();}catch(e){status.textContent='That did not work ('+e.message+'). Refresh and try again.';b.disabled=false;}};}
-act(document.querySelector('#sign-out'),async()=>{await api('/api/auth/sign-out','POST',{});location.assign('/');});`;
+document.querySelectorAll('[data-sign-out]').forEach(b=>act(b,async()=>{await api('/api/auth/sign-out','POST',{});location.assign('/');}));`;
   if (account.status === 'deleting' || account.status === 'deleted')
     return page(
       'Your Juiced account',
@@ -119,8 +119,8 @@ act(document.querySelector('#sign-out'),async()=>{await api('/api/auth/sign-out'
           ? ['bad', 'Allowance used']
           : ['bad', 'Inactive'];
   const devices = view.devices.length
-    ? `<ul class="rows">${view.devices.map((d) => `<li><div>${escape(d.label)}<small>Signed in ${day(d.created_at)} · expires ${day(d.expires_at)}</small></div><button data-device="${escape(d.id)}">Sign out</button></li>`).join('')}</ul>${view.devices.length > 1 ? '<button id="logout-all" class="danger">Sign out all terminals</button>' : ''}`
-    : '<p>No terminals are signed in. Run <code>juiced login</code> to connect one.</p>';
+    ? `<ul class="rows">${view.devices.map((d) => `<li><div>${escape(d.label)}<small>Signed in ${day(d.created_at)} · expires ${day(d.expires_at)}</small></div><button data-device="${escape(d.id)}">Sign out</button></li>`).join('')}</ul><button id="logout-all" class="danger">Sign out all CLI sessions</button>`
+    : '<p>No CLI sessions are signed in. Run <code>juiced login</code> to connect this computer.</p>';
   const providers = `<ul class="rows">${Object.entries(providerNames)
     .map(([id, name]) =>
       view.providers.includes(id)
@@ -130,16 +130,17 @@ act(document.querySelector('#sign-out'),async()=>{await api('/api/auth/sign-out'
     .join('')}</ul>`;
   return page(
     'Your console',
-    `<p>Your Juiced account, workspace host and the terminals signed in to it.</p>
+    `<p>Your Juiced account, workspace host and CLI sign-ins.</p>
 <div class="grid"><section class="card"><h3>Plan</h3><p class="big"><span class="dot ${plan[0]}"></span>${plan[1]}</p><p>${free ? 'Workspace compute is included.' : account.period_end ? `Renews ${day(account.period_end)}.` : ''} ${BigInt(view.used).toLocaleString('en-US')} credits used${free ? '' : ' this period'}. Recent usage can take a few minutes to appear.</p></section>
 <section class="card"><h3>Workspace host</h3><p class="big"><span class="dot ${tone}"></span>${label}</p><p>${detail}</p></section></div>
 <p>Account <code>${escape(account.id)}</code> · member since ${day(account.created_at)}</p>
-<h2>Signed-in terminals</h2>${devices}
+<h2>CLI sign-ins</h2><p>Sign in once per computer. All terminal windows for the same user share that sign-in. Run <code>juiced logout</code> to sign out on this computer.</p>${devices}
 <h2>Sign-in methods</h2>${providers}
-<h2>Delete account</h2><p>Deleting signs out every terminal, stops compute and deletes workspace files and databases. This cannot be undone.</p><button id="delete" class="danger" data-account="${escape(account.id)}">Delete my account</button>`,
+<h2>Sign out</h2><p>Sign out of this browser. Your CLI sessions stay signed in.</p><button data-sign-out>Sign out of browser</button>
+<h2>Delete account</h2><p>Deleting signs out all CLI sessions, stops compute and deletes workspace files and databases. This cannot be undone.</p><button id="delete" class="danger" data-account="${escape(account.id)}">Delete my account</button>`,
     `${script}
 document.querySelectorAll('[data-device]').forEach(b=>act(b,async()=>{await api('/v1/devices/'+encodeURIComponent(b.dataset.device),'DELETE');location.reload();}));
-const all=document.querySelector('#logout-all');act(all,async()=>{if(!confirm('Sign out every terminal? Each one will need juiced login again.')){all.disabled=false;return;}await api('/v1/logout','POST',{all:true});location.reload();});
+const all=document.querySelector('#logout-all');act(all,async()=>{if(!confirm('Sign out all CLI sessions? Run juiced login again on each computer to reconnect.')){all.disabled=false;return;}await api('/v1/logout','POST',{all:true});location.reload();});
 document.querySelectorAll('[data-provider]').forEach(b=>act(b,async()=>{const d=await api('/api/auth/link-social','POST',{provider:b.dataset.provider,callbackURL:'/account'});if(d.url)location.assign(d.url);}));
 const del=document.querySelector('#delete');act(del,async()=>{const id=del.dataset.account;if(!confirm('Permanently delete your account and all Juiced workspaces?')){del.disabled=false;return;}await api('/v1/accounts/'+id,'DELETE',{confirmation:id});location.reload();});`,
     { wide: true, nav },

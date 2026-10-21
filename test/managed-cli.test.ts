@@ -62,6 +62,7 @@ test(
  if(u.origin==='https://api.github.com')return Response.json({login:'octocat'});
  assert.equal(u.origin,${JSON.stringify(origin)});assert.equal(r.headers.get('authorization'),'Bearer '+'a'.repeat(40));
  if(u.pathname==='/v1/me')return Response.json({userId:'user',deviceId:'device',accounts:[{id:${JSON.stringify(account)},status:'active',entitlement:'active'},{id:${JSON.stringify(other)},status:'active',entitlement:'active'}]});
+ if(u.pathname==='/v1/logout'){const body=await r.json();calls.push({type:'logout',all:body.all});return process.env.TEST_LOGOUT_FAILURE?Response.json({error:'service_unavailable'},{status:503}):Response.json({revoked:true});}
  const selected=u.pathname.split('/')[3],installation='jin_'+(selected===${JSON.stringify(account)}?'a':'b').repeat(32);
  if(u.pathname.endsWith('/bootstrap')){const body=await r.json();runtime=body.runtimeId;assert.equal(typeof runtime,'string');assert.ok(runtime.length>20);return Response.json({id:installation,status:'ready',runtimeId:runtime,minimumCli:'0.2.0',error:null,operationId:'provision:'+installation});}
  assert.equal(r.headers.get('x-juiced-installation'),installation);assert.equal(r.headers.get('x-cantelop-session-runtime'),runtime);
@@ -83,5 +84,29 @@ test(
       assert.equal(calls[0]!.installation, 'jin_' + (selected === account ? 'a' : 'b').repeat(32));
       assert.doesNotMatch(result.stderr, /fixture-token|aaaaaaaaaaaaaaaaaaaa/);
     }
+    await t.test('login reuses the computer sign-in and logout removes it for other terminals', async () => {
+      const login = await execute(process.execPath, [bootstrap, 'login', '--no-browser'], { cwd: root, env, timeout: 6000 });
+      assert.match(login.stderr, /Already signed in to Juiced/);
+      assert.match(login.stderr, /juiced logout/);
+      assert.equal((await store.read())?.account, account);
+
+      for (const all of [false, true]) {
+        await store.write({ origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000, account });
+        const logout = await execute(process.execPath, [bootstrap, 'logout', ...(all ? ['--all'] : [])], { cwd: root, env, timeout: 6000 });
+        assert.deepEqual(JSON.parse(logout.stdout), [{ type: 'logout', all }]);
+        assert.match(logout.stderr, all ? /Signed out of all Juiced CLI sessions/ : /Signed out of Juiced on this computer/);
+        assert.equal(await new CredentialStore(origin, env).read(), undefined);
+      }
+
+      await store.write({ origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000, account });
+      await assert.rejects(
+        execute(process.execPath, [bootstrap, 'logout'], { cwd: root, env: { ...env, TEST_LOGOUT_FAILURE: '1' }, timeout: 6000 }),
+        (error) => {
+          assert.match((error as { stderr: string }).stderr, /Local credentials removed; server revocation could not be confirmed/);
+          return true;
+        },
+      );
+      assert.equal(await store.read(), undefined);
+    });
   },
 );

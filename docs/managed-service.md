@@ -22,9 +22,15 @@ npm link
 juiced login
 juiced whoami
 juiced claude
-juiced logout                  # revoke this CLI device
-juiced logout --all            # revoke every CLI device for this user
+juiced logout                  # sign out on this computer, across terminal windows
+juiced logout --all            # sign out every CLI session for this user
 ```
+
+Juiced sign-in is shared by terminal windows for the same user on a computer.
+Running `juiced login` again reuses a valid sign-in, including when multiple
+terminals run it at once. To switch accounts, run `juiced logout` first.
+The account console lists CLI sign-ins and can revoke one or all of them.
+Its **Sign out of browser** button ends the browser session; CLI sessions stay signed in.
 
 The service choice is remembered after login. `JUICED_SERVICE_URL` overrides it.
 Builds default to `https://juiced.codes`; `JUICED_DEFAULT_SERVICE_URL` overrides

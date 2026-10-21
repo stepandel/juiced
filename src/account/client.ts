@@ -151,6 +151,30 @@ export class AccountClient {
     });
   }
   async login(signal: AbortSignal, noBrowser = false) {
+    // Browser approval can take minutes. Serialize logins separately so commands
+    // in other terminals can still read and refresh the shared credentials.
+    await this.store.locked(signal, async () => {
+      if (await this.store.read()) {
+        let signedIn = false;
+        try {
+          await this.me(signal);
+          signedIn = true;
+        } catch (error) {
+          if (!(error instanceof ManagedError && (error.status === 401 || error.code === 'not_signed_in')))
+            throw error;
+        }
+        if (signedIn) {
+          await rememberOrigin(this.origin, this.env);
+          process.stderr.write(
+            'Already signed in to Juiced. All terminal windows share this sign-in.\nTo switch accounts, run juiced logout first.\n',
+          );
+          return;
+        }
+      }
+      await this.deviceLogin(signal, noBrowser);
+    }, 'login');
+  }
+  private async deviceLogin(signal: AbortSignal, noBrowser: boolean) {
     const started = await this.json<{
       device_code: string;
       user_code: string;

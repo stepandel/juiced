@@ -139,10 +139,14 @@ export class CredentialStore {
     }
     await rm(this.path, { force: true });
   }
-  async locked<T>(signal: AbortSignal, action: () => Promise<T>): Promise<T> {
+  async locked<T>(
+    signal: AbortSignal,
+    action: () => Promise<T>,
+    purpose: 'credentials' | 'login' = 'credentials',
+  ): Promise<T> {
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-    const path = this.path + '.lock';
-    const until = Date.now() + 30000;
+    const path = this.path + (purpose === 'login' ? '.login.lock' : '.lock');
+    const until = Date.now() + (purpose === 'login' ? 600000 : 30000);
     for (;;) {
       signal.throwIfAborted();
       try {
@@ -180,7 +184,9 @@ export class CredentialStore {
             await rm(path + '.reap', { force: true });
           }
         if (Date.now() > until)
-          throw new Error('Another Juiced process is refreshing credentials. Retry shortly.');
+          throw new Error(
+            `Another Juiced process is ${purpose === 'login' ? 'signing in' : 'refreshing credentials'}. Retry shortly.`,
+          );
         await delay(100, undefined, { signal });
       }
     }
