@@ -1,0 +1,74 @@
+import type { ReactNode } from 'react';
+import { site } from '../src/site';
+
+export function SiteHeader() {
+  return (
+    <header>
+      <a href="/" className="brand" aria-label="Juiced home">
+        <svg
+          className="mark"
+          viewBox="0 0 26 30"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path d="M5 10h16l-2 16H7L5 10Z" fill="currentColor" />
+          <path
+            d="m14 3-2 7M5 7h16"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+          />
+          <path d="m14 14-4 6h4l-1 4 5-7h-4l1-3Z" fill="var(--bg)" />
+        </svg>
+        juiced
+      </a>
+      <nav className="site-nav mono" aria-label="Main navigation">
+        <a href="/docs">docs</a>
+        <a href="/pricing">pricing</a>
+        <a href={site.github}>
+          github <span aria-hidden="true">↗</span>
+        </a>
+      </nav>
+    </header>
+  );
+}
+
+export function SiteFooter() {
+  return (
+    <footer className="mono">
+      <nav className="site-nav" aria-label="Footer navigation">
+        <a href="/docs">docs</a>
+        <a href="/pricing">pricing</a>
+        <a href="/llms.txt">llms.txt</a>
+      </nav>
+      <a href="https://cantelop.com">
+        powered by cantelop <span aria-hidden="true">↗</span>
+      </a>
+    </footer>
+  );
+}
+
+export function PublicPage({
+  title,
+  intro,
+  children,
+}: {
+  title: string;
+  intro: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="wrap">
+      <SiteHeader />
+      <main className="document">
+        <p className="number mono">
+          <a href="/docs">Juiced documentation</a>
+        </p>
+        <h1>{title}</h1>
+        <p className="lede">{intro}</p>
+        <div className="prose">{children}</div>
+      </main>
+      <SiteFooter />
+    </div>
+  );
+}

@@ -5,7 +5,9 @@ Cantelop infrastructure and subscription billing managed by Juiced. See
 [managed setup and operations](docs/managed-service.md) for configuration, release
 ordering and production qualification. The account-service origin is
 `https://juiced.codes`; builds use it by default. The website and account backend use Next.js on
-Vercel, also available at [juiced-eight.vercel.app](https://juiced-eight.vercel.app).
+Vercel; [juiced-eight.vercel.app](https://juiced-eight.vercel.app) redirects to the
+canonical domain. Public [documentation](https://juiced.codes/docs) and
+[pricing](https://juiced.codes/pricing) describe the product and planned tiers.
 Background work uses one Vercel Queue consumer and a reconciliation cron.
 Account-service activation still requires production configuration and qualification. CLI npm publication remains deferred.
 
@@ -63,7 +65,8 @@ juiced claude
 `juiced claude login` prints Claude's sign-in URL and asks for the returned authorization code. The native Claude login runs inside Cantelop; credentials persist in the workspace. Interactive `juiced claude` also starts this login flow when needed. Piped commands require an existing login.
 
 Commands that use a harness's runtime and authentication live under its name.
-Claude sign-in is `juiced claude login`; there is no top-level `juiced login`.
+Claude sign-in is `juiced claude login`. In managed mode, `juiced login` signs in
+to your Juiced account separately; see [managed setup](docs/managed-service.md).
 
 `juiced claude --version` and `juiced claude --help` work before Claude sign-in and can verify connectivity to the deployed runtime.
 

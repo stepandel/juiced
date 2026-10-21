@@ -1,0 +1,29 @@
+# Juiced
+
+> Juiced runs Claude Code in a private cloud workspace that you drive from your terminal. Close your laptop while a remote turn continues, then reconnect to review the result.
+
+Canonical website: https://juiced.codes
+Source repository: https://github.com/stepandel/juiced
+
+## Documentation
+
+- [Overview](https://juiced.codes/docs): Start here for Juiced's cloud workspace and terminal workflow.
+- [Getting started](https://juiced.codes/docs/getting-started): Node.js 22+, Juiced account sign-in, separate Claude login, and a first workspace.
+- [Workspaces and sessions](https://juiced.codes/docs/workspaces-and-sessions): Project isolation, persistent state, detach, reconnect, and idle shutdown.
+- [Syncing code](https://juiced.codes/docs/syncing-code): Initial Git checkout, explicit uploads, importing commits, and fast-forwarding locally.
+- [Remote Claude Code](https://juiced.codes/docs/remote-claude-code): Running a turn with your laptop closed, permission pauses, and Claude access requirements.
+- [Juiced vs a VPS](https://juiced.codes/docs/juiced-vs-vps): Compare managed project workspaces with operating your own server.
+- [Pricing and availability](https://juiced.codes/pricing): Planned Free tier with 100 compute hours; $25/month for more compute. All Juiced features on both. Managed access is in preview. The free allowance period and paid compute limit are not yet confirmed. Claude model usage is separate.
+
+## Product facts
+
+- The local CLI requires Node.js 22 or later. Claude Code and its tools run remotely on Cantelop infrastructure.
+- Managed Juiced account login is `juiced login`. Claude login is `juiced claude login`, scoped to the selected workspace.
+- Each project selects a persistent workspace. Workspace files, Claude login, and saved conversations remain between runs.
+- `/detach` or closing the terminal disconnects while the remote turn continues. Permission requests, errors, and compute limits can pause or stop work. Idle compute shuts down.
+- `juiced claude` reconnects in the same terminal tab, project, and workspace. `juiced claude sessions` lists conversations for explicit selection with `--session`.
+- Git repositories initialize from local HEAD once. Subsequent launches do not automatically synchronize files. Local uncommitted files require an explicit snapshot transfer.
+- `juiced claude sync --from-workspace` imports commits without updating local working files. `juiced claude fast-forward` explicitly applies results when local state and history permit.
+- Users bring their own Claude Code access. Juiced plans cover infrastructure, not Claude model usage.
+
+The linked public pages are the source of truth. This index does not grant additional crawler permissions; robots.txt controls crawling.

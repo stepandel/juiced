@@ -3,6 +3,16 @@ import { fileURLToPath } from 'node:url';
 
 const config: NextConfig = {
   outputFileTracingRoot: fileURLToPath(new URL('..', import.meta.url)),
+  async redirects() {
+    return [
+      {
+        source: '/:path*',
+        has: [{ type: 'host' as const, value: 'juiced-eight.vercel.app' }],
+        destination: 'https://juiced.codes/:path*',
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {
@@ -16,6 +26,19 @@ const config: NextConfig = {
           },
         ],
       },
+      ...[
+        'account',
+        'sign-in',
+        'device',
+        'api',
+        'v1',
+        'webhooks',
+        'health',
+        'ready',
+      ].map((path) => ({
+        source: `/${path}/:path*`,
+        headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow' }],
+      })),
     ];
   },
 };

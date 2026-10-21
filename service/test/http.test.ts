@@ -16,6 +16,7 @@ test('unconfigured account routes fail closed without exposing configuration', a
   }
   const response = await handle(new Request('https://juiced.codes/sign-in'));
   assert.equal(response.status, 503);
+  assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow');
   assert.match(await response.text(), /Account access is not available yet/);
   assert.equal((await handle(new Request('https://juiced.codes/health'))).status, 200);
 });
