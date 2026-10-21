@@ -16,6 +16,7 @@ import { syncFiles } from './file-sync.js';
 import { prepareAgentSession } from './session-state.js';
 import { terminalIdentity, usesTerminalSession } from './terminal-session.js';
 import { listSessions } from './list-sessions.js';
+import { LocalUploader } from './local-upload.js';
 import { LocalPublisher } from './local-publish.js';
 
 /** package.json version, injected by scripts/build.mjs; unbundled runs have none. */
@@ -105,7 +106,7 @@ try {
         const git = repository ? { binding: repository.binding, relativeDirectory: repository.relativeDirectory } : undefined;
         const publisher = repository && localTui ? new LocalPublisher(workspace, project, repository) : undefined;
         process.exitCode = localTui
-          ? await runLocalTui(new RemoteAgent(session, { ...(directoryName ? { directoryName } : {}), ...(git ? { git } : {}), ...(publisher && repository ? { localPublish: { head: repository.head, apply: (publication, signal) => publisher.apply(publication, signal) } } : {}) }), args.argv, project.workspace, process, controller.signal)
+          ? await runLocalTui(new RemoteAgent(session, { ...(directoryName ? { directoryName } : {}), ...(git ? { git } : {}), ...(publisher && repository ? { localPublish: { head: repository.head, upload: new LocalUploader(workspace, project, repository), apply: (publication, signal) => publisher.apply(publication, signal) } } : {}) }), args.argv, project.workspace, process, controller.signal)
           : await runRemoteTerminal(session, args.argv, process, { ...(directoryName ? { directoryName } : {}), ...(git ? { git } : {}), signal: controller.signal, term: process.env.TERM ?? 'xterm-256color' });
       }
     }

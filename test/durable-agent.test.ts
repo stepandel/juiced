@@ -15,7 +15,7 @@ import type { createTerminal } from '../src/runtime/terminal.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
 import { prepareAgentSession } from '../src/session-state.js';
 import { commandMenu } from '../src/tui/command-menus.js';
-import type { Publication } from '../src/publish-protocol.js';
+import type { Publication, UploadRequest } from '../src/publish-protocol.js';
 import { until } from './fixtures/wait.js';
 
 async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 'test', agentOptions: ConstructorParameters<typeof RemoteAgent>[1] = {}) {
@@ -158,6 +158,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   agent.on('frame', value => received.push(value));
   t.after(async () => { await agent.close(false); lifetime.abort(); await activity; await Promise.allSettled(replayWork); await service.dispose(); await rm(root, { recursive: true, force: true }); });
   return { root, agent, session, service, frame, raw, prompts, promptModes, launches, requests, requestIds, replays, stored, received, views,
+    async upload(request: UploadRequest) { publications.set(request.id, undefined); await currentOutput.send({ type: 'local-upload', request }); },
     async publish(publication: Publication, active = true) { if (active) publications.set(publication.id, undefined); await currentOutput.send({ type: 'local-publish', publication }); },
     onReplay(hook: typeof replayHook) { replayHook = hook; },
     onOutput(hook: typeof outputHook) { outputHook = hook; },
@@ -214,6 +215,30 @@ test('local publication requires its own explicit approval and denial never call
   await delay(50); // Negative check: give the replayed offer time to (wrongly) reach the writer.
   assert.equal(writes, 1, 'Replaying a completed publication must never apply it again');
   assert.equal(f.agent.approvals.size, 0);
+});
+
+test('reattachment recaptures pending uploads and a completed upload is never replayed', async t => {
+  let captures = 0, sends = 0, discarded = 0;
+  const options = { localPublish: { head: 'a'.repeat(40), async apply() { throw new Error('Not a publication'); }, upload: {
+    async prepare() { captures++; return { files: 1, paths: ['README.md'] }; },
+    async send() { sends++; return { status: 'applied' as const, message: 'Uploaded', uploadId: randomUUID() }; },
+    async discard() { discarded++; },
+  } } };
+  const f = await fixture(t, 60_000, 'upload-resume', options); await f.agent.start();
+  const request: UploadRequest = { id: randomUUID(), kind: 'upload', summary: 'Pull laptop edits', expiresAt: Date.now() + 60_000,
+    head: 'a'.repeat(40), sourceBranch: 'main', includeUncommitted: true };
+  await f.upload(request); await until(() => f.agent.approvals.has(request.id));
+  assert.equal(captures, 1); assert.equal(sends, 0);
+  await f.agent.close(false);
+  assert.ok(discarded > 0, 'A detached client removes its unapproved snapshot');
+  const resumed = new RemoteAgent(f.session, options);
+  t.after(() => resumed.close(false));
+  await resumed.start(); await until(() => resumed.approvals.has(request.id));
+  assert.equal(captures, 2, 'Reattachment captures a new preview requiring fresh approval');
+  await resumed.answer(request.id, true);
+  assert.equal(sends, 1);
+  f.expireStream(); await until(() => f.replays.length > 1);
+  assert.equal(sends, 1);
 });
 
 test('reattachment restores a live publication offer and ignores historical or expired offers', async t => {

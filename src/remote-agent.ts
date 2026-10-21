@@ -390,6 +390,8 @@ export class RemoteAgent extends EventEmitter {
       this.approvals.delete(event.id); this.emit('approvals');
     } else if (event.type === 'local-publish') {
       this.publications.offer(event.publication);
+    } else if (event.type === 'local-upload') {
+      this.publications.offer(event.request);
     } else if (event.type === 'local-publish-done') {
       this.publications.done(event.id);
     } else if (event.type === 'reset') {

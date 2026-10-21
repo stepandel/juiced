@@ -3,13 +3,14 @@ import type { InspectionCommand, InspectionEvent } from './inspection-protocol.j
 import type { SavedSettings } from './settings.js';
 import type { ClaudeFrame } from './agent-protocol.js';
 import type { SessionListCommand, SessionListPage } from './session-list-protocol.js';
-import type { Publication, PublishCommand } from './publish-protocol.js';
+import type { Publication, PublishCommand, PublishResult, UploadRequest } from './publish-protocol.js';
 
 export type AgentJournalEvent =
   | { type: 'bytes'; channel: 'stdout' | 'stderr'; data: string }
   | { type: 'user'; id: string; data: string; final: boolean }
   | { type: 'approval-answer'; id: string }
   | { type: 'local-publish'; publication: Publication }
+  | { type: 'local-upload'; request: UploadRequest }
   | { type: 'local-publish-done'; id: string }
   | { type: 'reset'; epoch: string; interrupted: boolean }
   | { type: 'state'; state: 'ready' | 'working' | 'sleeping' | 'interrupted' };
@@ -40,11 +41,12 @@ export type TerminalEvent =
   | { type: 'exit'; code: number }
   | { type: 'error'; message: string }
   | { type: 'local-publish'; publication: Publication }
+  | { type: 'local-upload'; request: UploadRequest }
   | { type: 'local-publish-done'; id: string }
   | GitEvent
   | InspectionEvent;
 
-export type TerminalReply = { ok: true; git?: GitResult; agent?: AgentConnection; replay?: { entries: AgentJournalEntry[]; latest: number }; sessions?: SessionListPage } | { ok: false; error: string; stale?: StaleLease[]; busy?: 'sessions' | 'maintenance' };
+export type TerminalReply = { ok: true; git?: GitResult; agent?: AgentConnection; replay?: { entries: AgentJournalEntry[]; latest: number }; sessions?: SessionListPage; publication?: PublishResult } | { ok: false; error: string; stale?: StaleLease[]; busy?: 'sessions' | 'maintenance' };
 
 export const MAX_INPUT_BYTES = 16 * 1024;
 export const MAX_BUFFERED_INPUT = 1024 * 1024;

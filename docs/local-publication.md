@@ -1,9 +1,56 @@
 # Local publication from Claude
 
-Interactive `juiced claude` Git sessions expose two tools through the built-in
+Interactive `juiced claude` Git sessions expose three tools through the built-in
 `juiced-local` MCP server. A standalone Claude plugin is not required. Juiced
 injects the server at native process startup through `--mcp-config`; it does not
 edit the project's `.mcp.json` or install a user-wide server.
+
+`publish_commits` and `publish_snapshot` transfer remote work to the laptop.
+`pull_local_changes` transfers laptop work into the remote checkout. All three
+require a separate local approval, even if Claude's tool permissions allow them.
+
+## Pull laptop work into the remote checkout
+
+Ask Claude: **Pull my latest laptop changes into this workspace.**
+`pull_local_changes` takes a `summary` and optional `include_uncommitted` boolean
+(default `true`). The attached client captures an immutable upload before showing
+its local directory, commit, changed-path preview and byte count. Approval starts
+the upload; denial sends no snapshot bytes. Subsequent laptop edits are excluded.
+Local files, HEAD and staging remain unchanged. The full repository is transferred
+even when the conversation starts in a subdirectory, using the existing pairing.
+
+The remote HEAD is pinned when the request begins. Application requires a clean
+remote checkout whose HEAD has not changed and is an ancestor of the captured
+local HEAD. The local source branch must match the original workspace pairing.
+Another session's checkout lease blocks application, including an expired lease;
+this tool never stops another session automatically. The requesting session can
+remain open because its native process is waiting for the MCP result.
+
+The runtime validates a candidate checkout and applies a checked Git binary patch
+in place, preserving Claude's working directory and local staged/unstaged changes.
+An upload that would remove or replace the session's working directory is refused.
+Ignored files remain excluded unless tracked, and collisions with ignored remote
+files are refused. The tool reports success only after remote files, HEAD, index,
+and the shared publication baseline have been updated. Claude can then continue
+working and publish its follow-up edits back to the laptop.
+
+Do not run concurrent tools or background jobs that write to this checkout during
+application. Git owns its index/ref locks; unrelated file writers do not take
+Juiced's checkout lease. Dirty work and divergent histories require explicit
+reconciliation; the tool never merges, stashes, resets, or deletes that work.
+Uploads retain immutable refs under `refs/juiced/uploads/<transfer-id>/` and
+artifacts under `/workspace/.juiced/<project>/transfers/<transfer-id>/`. If a
+process or filesystem failure interrupts the multi-step in-place update, inspect
+the checkout and retained `live.patch`/`live-started.json` before retrying. A
+started transfer without a completion receipt is never automatically applied again.
+The same five-minute deadline and transfer/path limits described below apply.
+
+An offline client can review an unexpired request after reconnecting; it captures
+a new local snapshot for fresh approval. Detaching discards its unapproved local
+snapshot. Build/install the updated CLI and deploy the matching runtime together;
+restart existing native Claude processes to load the new MCP tool.
+
+## Publish remote work to the laptop
 
 For example, ask Claude:
 
