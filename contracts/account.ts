@@ -1,4 +1,4 @@
-import { isCliVersion } from './cli-version.js';
+import { isCliVersion } from './cli-version.ts';
 
 /** Wire contract shared by the packaged CLI and the managed service. */
 export interface InstallationMetadata {
