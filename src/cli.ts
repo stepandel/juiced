@@ -273,7 +273,7 @@ try {
       code === 'app_not_configured'
     ) {
       process.stderr.write(
-        'juiced: Cantelop app credentials are missing or invalid. Configure the SDK integration profile or set CANTELOP_APP_SLUG, CANTELOP_INTEGRATION_TOKEN, and optionally CANTELOP_EDGE_URL. See README.md for deployment setup.\n',
+        'juiced: Cantelop app credentials are missing or invalid. Configure the SDK integration profile or set CANTELOP_APP_SLUG, CANTELOP_INTEGRATION_TOKEN, and optionally CANTELOP_EDGE_URL. See docs/self-managed.md for deployment setup.\n',
       );
     } else if (code === 'managed_admission_closed') {
       process.stderr.write(`juiced: ${new ManagedError(code).message}\n`);
