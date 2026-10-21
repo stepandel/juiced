@@ -15,6 +15,7 @@ import { stopGitSession } from './git-stop';
 import type { Billing } from './billing';
 import { transaction } from './db';
 import { signIn, devicePage, accountPage } from './pages';
+import { logError } from './log';
 
 export interface Services {
   pool: Pool;
@@ -62,6 +63,7 @@ export function application(s: Services) {
     if (method === 'GET' && path === '/health') return Response.json({ status: 'ok' });
     if (method === 'GET' && path === '/ready') {
       await s.pool.query('SELECT 1 FROM juiced_migrations LIMIT 1');
+      await s.billing?.ready();
       return Response.json({ status: 'ready' });
     }
     if (method === 'GET' && path === '/v1/config')
@@ -248,11 +250,18 @@ export function application(s: Services) {
     return new Response('Not found', { status: 404 });
   }
   return async (request: Request) => {
+    const requestId = crypto.randomUUID();
     let response: Response;
     try {
       response = await dispatch(request);
     } catch (error) {
       const known = error instanceof ServiceError;
+      if (!known || error.status >= 500)
+        logError('request_failed', error, {
+          requestId,
+          method: request.method,
+          path: new URL(request.url).pathname,
+        });
       response = Response.json(
         { error: known ? error.code : 'service_unavailable' },
         {
@@ -266,7 +275,7 @@ export function application(s: Services) {
     }
     const headers = new Headers(response.headers);
     headers.set('Cache-Control', 'no-store');
-    headers.set('X-Request-ID', crypto.randomUUID());
+    headers.set('X-Request-ID', requestId);
     if (s.cfg.origin.startsWith('https:'))
       headers.set('Strict-Transport-Security', 'max-age=31536000');
     return new Response(request.method === 'HEAD' ? null : response.body, {

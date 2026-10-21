@@ -3,6 +3,7 @@ import { application } from './app';
 import { serviceLoader } from './services';
 import { page } from './pages';
 import { wakeJobs } from './queue';
+import { logError } from './log';
 
 /** Only Vercel ingress may supply the authentication rate-limit identity. */
 export function vercelRequest(request: Request, env: Record<string, string | undefined>) {
@@ -31,7 +32,8 @@ export function requestHandler(env: NodeJS.ProcessEnv = process.env) {
     try {
       handle ??= application({ ...(await load()), wake: wakeJobs });
       return await handle(vercelRequest(request, env));
-    } catch {
+    } catch (error) {
+      logError('service_unavailable', error, { method: request.method, path: url.pathname });
       const headers = { 'Cache-Control': 'no-store', 'X-Juiced-Error': '1', 'Retry-After': '60' };
       if (request.method === 'GET' && ['/sign-in', '/account', '/device'].includes(url.pathname)) {
         const response = page(

@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { serviceLoader } from './services';
 import { wakeJobs } from './queue';
+import { logError } from './log';
 
 export function cronHandler(
   env: NodeJS.ProcessEnv = process.env,
@@ -22,7 +23,8 @@ export function cronHandler(
         { queued: true },
         { status: 202, headers: { 'Cache-Control': 'no-store' } },
       );
-    } catch {
+    } catch (error) {
+      logError('cron_failed', error);
       return Response.json(
         { error: 'service_unavailable' },
         { status: 503, headers: { 'Cache-Control': 'no-store' } },

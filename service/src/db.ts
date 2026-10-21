@@ -6,8 +6,18 @@ export function database(raw: string) {
     throw new Error('A PostgreSQL database URL is required');
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))
     url.searchParams.set('sslmode', 'verify-full');
-  return new Pool({ connectionString: url.toString(), max: 15, connectionTimeoutMillis: 5000 });
+  return new Pool({
+    connectionString: url.toString(),
+    max: 15,
+    connectionTimeoutMillis: 5000,
+    // Serverless instances freeze or die mid-request. Release idle clients and
+    // let Postgres end a transaction left open by a stalled function.
+    idleTimeoutMillis: 10_000,
+    idle_in_transaction_session_timeout: 120_000,
+  });
 }
+/** A pool or a transaction client: work that may run inside a caller's transaction. */
+export type Queryable = Pick<PoolClient, 'query'>;
 export async function transaction<T>(pool: Pool, fn: (tx: PoolClient) => Promise<T>) {
   const tx = await pool.connect();
   try {

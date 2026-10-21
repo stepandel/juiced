@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { Platform } from './platform';
 import { ServiceError } from './config';
+import { logError } from './log';
 
 export async function runtimeJSON(
   platform: Platform,
@@ -64,7 +65,8 @@ export class TerminalCloser {
           if (reply?.type !== 'closed' || reply.terminalId !== t.id)
             throw new ServiceError('terminal_close_pending', 503);
           await this.pool.query('UPDATE terminal_leases SET revoked_at=now() WHERE id=$1', [t.id]);
-        } catch {
+        } catch (error) {
+          logError('terminal_close_failed', error, { terminal: t.id });
           await this.pool.query(
             "UPDATE terminal_leases SET close_after=now()+interval '5 seconds' WHERE id=$1",
             [t.id],

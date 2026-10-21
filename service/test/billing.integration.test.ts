@@ -278,6 +278,18 @@ test(
       );
       const keys: string[] = [];
       const fake = {
+        prices: {
+          async retrieve() {
+            return {
+              active: true,
+              type: 'recurring',
+              recurring: { usage_type: 'licensed' },
+              billing_scheme: 'per_unit',
+              unit_amount: 2000,
+              livemode: false,
+            };
+          },
+        },
         checkout: {
           sessions: {
             async create(input: { expires_at: number }, options: { idempotencyKey: string }) {
