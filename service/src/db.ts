@@ -57,6 +57,7 @@ export async function migrate(pool: Pool) {
       '0008-projection-fences.sql',
       '0009-terminal-retries.sql',
       '0010-usage-epoch-index.sql',
+      '0011-free-accounts.sql',
     ]) {
       if ((await tx.query('SELECT 1 FROM juiced_migrations WHERE id=$1', [name])).rowCount)
         continue;

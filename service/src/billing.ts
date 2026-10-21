@@ -353,9 +353,12 @@ export class Billing {
         );
         // Current authoritative subscription plus a settled invoice grants one
         // immutable epoch. Replaying an event cannot refill an exhausted epoch.
+        // A paid epoch always replaces the free allowance (migration 0011).
         if (
           a.period_id !== invoice.id &&
-          (!a.period_end || a.period_end.getTime() <= line.period.end * 1000)
+          (a.period_id === 'free' ||
+            !a.period_end ||
+            a.period_end.getTime() <= line.period.end * 1000)
         ) {
           await tx.query(
             `UPDATE accounts SET period_id=$2,period_start=$3,period_end=$4,included_credits=$5,entitlement='active' WHERE id=$1 AND status='active'`,

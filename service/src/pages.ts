@@ -40,18 +40,17 @@ export function devicePage(code: string) {
 export function accountPage() {
   return page(
     'Your Juiced account',
-    `<p>Each account has isolated workspaces. Your subscription includes a fixed compute allowance; Juiced pauses new work at the cap.</p>
-<p id="account"></p><pre id="usage"></pre><button id="subscribe">Subscribe</button> <button id="billing">Manage billing</button>
+    `<p>Each account has isolated workspaces. Juiced accounts are free, including workspace compute.</p>
+<p id="account"></p><pre id="usage"></pre>
 <h2>Signed-in devices</h2><ul id="devices"></ul><h2>Sign-in providers</h2><p>Link a provider while signed in to use either provider for the same Juiced account.</p><button data-provider="github">Link GitHub</button> <button data-provider="google">Link Google</button>
-<h2>Delete account</h2><p>Deleting cancels billing, signs out devices, stops compute and deletes workspace files and databases. This cannot be undone.</p><button id="delete">Delete my account</button>`,
+<h2>Delete account</h2><p>Deleting signs out devices, stops compute and deletes workspace files and databases. This cannot be undone.</p><button id="delete">Delete my account</button>`,
     `let account;const status=document.querySelector('#status');
 async function api(path,method='GET',body){const r=await fetch(path,{method,headers:{'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});const d=await r.json();if(!r.ok)throw new Error(d.error||'Request failed');return d;}
 async function load(){try{const me=await api('/v1/me');account=me.accounts[0]?.id;if(!account)throw new Error('No active account');document.querySelector('#account').textContent='Account '+account;
-const usage=await api('/v1/accounts/'+account+'/usage');document.querySelector('#usage').textContent='Subscription: '+usage.entitlement+'\nIncluded credits: '+usage.included+'\nSettled usage: '+usage.used+' (recent usage may still be pending)\nAllowance renews: '+(usage.periodEnd||'After subscribing');
+const usage=await api('/v1/accounts/'+account+'/usage');document.querySelector('#usage').textContent='Plan: Free ('+usage.entitlement+')\nSettled usage: '+usage.used+' credits (recent usage may still be pending)';
 const list=await api('/v1/devices');const ul=document.querySelector('#devices');ul.replaceChildren();for(const device of list.items){const li=document.createElement('li');li.textContent=device.label+' — '+(device.revoked_at?'signed out':'active')+' ';if(!device.revoked_at){const b=document.createElement('button');b.textContent='Sign out';b.onclick=async()=>{await api('/v1/devices/'+device.id,'DELETE');await load();};li.append(b);}ul.append(li);}}
 catch(e){status.textContent=e.message;const a=document.createElement('a');a.href='/sign-in';a.textContent='Sign in';status.append(' ',a);}}
-for(const action of ['subscribe','billing'])document.querySelector('#'+action).onclick=async()=>{try{const d=await api('/v1/accounts/'+account+'/billing/'+(action==='subscribe'?'checkout':'portal'),'POST');location.assign(d.url);}catch(e){status.textContent=e.message;}};
 document.querySelectorAll('[data-provider]').forEach(b=>b.onclick=async()=>{try{const d=await api('/api/auth/link-social','POST',{provider:b.dataset.provider,callbackURL:'/account'});if(d.url)location.assign(d.url);}catch(e){status.textContent=e.message;}});
-document.querySelector('#delete').onclick=async()=>{if(!account||!confirm('Cancel billing and permanently delete all Juiced workspaces?'))return;try{await api('/v1/accounts/'+account,'DELETE',{confirmation:account});document.querySelector('main').textContent='Deletion requested. Billing cancellation and data deletion will continue in the background.';}catch(e){status.textContent=e.message;}};load();`,
+document.querySelector('#delete').onclick=async()=>{if(!account||!confirm('Permanently delete all Juiced workspaces?'))return;try{await api('/v1/accounts/'+account,'DELETE',{confirmation:account});document.querySelector('main').textContent='Deletion requested. Data deletion will continue in the background.';}catch(e){status.textContent=e.message;}};load();`,
   );
 }

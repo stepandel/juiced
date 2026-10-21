@@ -9,9 +9,8 @@ it does not fetch fonts or images from an external service.
 
 - `/docs` links to five server-rendered guides: getting started, workspaces and
   sessions, code transfers, remote Claude Code, and Juiced versus a VPS.
-- `/pricing` describes Free (10 vCPU hours) and Unlimited ($25/month). Both
-  include all features. One vCPU hour is one virtual CPU running for one hour.
-  Pricing copy does not configure service entitlements or Stripe billing.
+- `/pricing` describes the single free plan: every feature and workspace
+  compute. Pricing copy does not configure service entitlements or Stripe billing.
 - `/sitemap.xml` includes only the homepage, docs index, guides, and pricing.
   Add new public pages here when they ship. Do not add account or API routes.
 - `/robots.txt` advertises the sitemap and permits public crawlers, including AI
