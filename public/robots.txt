@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /account
+Disallow: /sign-in
+Disallow: /device
+Disallow: /api/
+Disallow: /v1/
