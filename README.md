@@ -1,5 +1,17 @@
 # Juiced
 
+Managed mode is the default. Users sign in to a Juiced account, with isolated
+Cantelop infrastructure and subscription billing managed by Juiced. See
+[managed setup and operations](docs/managed-service.md) for configuration, release
+ordering and production qualification. The account-service origin is
+`https://juiced.codes`; builds use it by default. The public service and npm CLI
+publication remain pending deployment configuration and qualification.
+
+The [architecture](docs/multitenancy.md) and
+[implementation plan](docs/multitenancy-implementation.md) describe the design.
+The setup below is the explicit self-managed workflow: set
+`JUICED_MODE=self-managed` or pass `--self-managed` before commands.
+
 File sync is off by default. Git repositories initialize from local `HEAD` once; later transfers are explicit. Non-Git directories use a persistent remote project folder, initially empty, with optional file sync through `juiced claude sync --files [--watch]`. See [Git workspaces](docs/git-workspaces.md) for snapshot transfer, importing commits, optional fast-forwarding, and migration from file sync.
 
 Run the real Claude Code CLI in a Cantelop session, attached to your local terminal:

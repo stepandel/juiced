@@ -1,9 +1,9 @@
 {
   "name": "juiced",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Run Claude Code on Cantelop from your terminal",
   "type": "module",
-  "private": true,
+  "private": false,
   "bin": {
     "juiced": "bin/juiced.mjs"
   },
@@ -18,20 +18,26 @@
     "build": "node scripts/build.mjs",
     "build:runtime": "node scripts/build-runtime.mjs",
     "check": "tsc --noEmit",
-    "test": "node --import tsx --test test/*.test.ts",
-    "test:environment:local": "npm run build && node scripts/test-environment-local.mjs",
-    "test:live": "node scripts/test-live.mjs",
-    "test:agent:live": "node scripts/test-agent-live.mjs",
+    "test": "node --import tsx --import ./test/self-managed-fixtures.ts --test --test-concurrency=4 test/*.test.ts",
+    "test:environment:local": "npm run build && JUICED_MODE=self-managed node scripts/test-environment-local.mjs",
+    "test:live": "JUICED_MODE=self-managed node scripts/test-live.mjs",
+    "test:agent:live": "JUICED_MODE=self-managed node scripts/test-agent-live.mjs",
     "measure:latency": "node scripts/measure-terminal-latency.mjs",
     "probe:reconciliation": "node scripts/probe-cantelop-reconciliation.mjs",
     "prepack": "npm run build",
-    "test:git:live": "node scripts/test-git-live.mjs",
-    "test:delete:local": "npm run build && node scripts/test-delete-local.mjs",
-    "test:delete:live": "npm run build && node scripts/test-delete-live.mjs",
-    "test:inspection:local": "npm run build && npm run build:runtime && node --import tsx scripts/test-inspection-local.mjs"
+    "test:git:live": "JUICED_MODE=self-managed node scripts/test-git-live.mjs",
+    "test:delete:local": "npm run build && JUICED_MODE=self-managed node scripts/test-delete-local.mjs",
+    "test:delete:live": "npm run build && JUICED_MODE=self-managed node scripts/test-delete-live.mjs",
+    "test:inspection:local": "npm run build && npm run build:runtime && JUICED_MODE=self-managed node --import tsx scripts/test-inspection-local.mjs",
+    "check:service": "npm run check --workspace @juiced/service",
+    "test:service": "npm test --workspace @juiced/service",
+    "migrate:service": "node --import tsx service/src/migrate.ts",
+    "start:service": "node --import tsx service/src/main.ts",
+    "worker:service": "node --import tsx service/src/worker.ts",
+    "check:package": "npm run build && node scripts/smoke-install.mjs"
   },
   "dependencies": {
-    "@cantelop/sdk": "1.4.0",
+    "@cantelop/sdk": "1.5.0",
     "ink": "^8.0.0",
     "react": "^19.3.1",
     "string-width": "^8.3.0"
@@ -43,5 +49,16 @@
     "esbuild": "^0.25.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.3"
+  },
+  "workspaces": [
+    "service"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stepandel/juiced.git"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "2.1.2"
   }
 }

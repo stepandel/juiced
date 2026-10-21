@@ -1,0 +1,31 @@
+name: Juiced checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: juiced_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      JUICED_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/juiced_test
+      JUICED_CREDENTIAL_STORE: file
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm run check:service
+      - run: npm test
+      - run: npm run test:service
+      - name: Fresh public package installation
+        run: npm run check:package

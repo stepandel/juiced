@@ -4,7 +4,8 @@ import { basename } from 'node:path';
 
 import { validProjectName } from './project-name.js';
 
-export async function selectProject(directory: string, workspace?: string) {
+export interface Project {localDirectory:string;directoryName:string;remoteDirectory:string;workspace:string;scope?:string}
+export async function selectProject(directory: string, workspace?: string):Promise<Project> {
   const localDirectory = await realpath(directory);
   const directoryName = basename(localDirectory);
   if (!validProjectName(directoryName)) throw new Error('This directory name cannot be used as a remote project folder. Use a visible project directory with a portable name.');

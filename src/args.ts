@@ -131,6 +131,9 @@ export function parseArguments(args: string[], env: NodeJS.ProcessEnv = process.
 export const HELP = `Run Claude Code on Cantelop with Juiced's local terminal interface.
 
 Usage:
+  juiced login [--no-browser]
+  juiced logout [--all]
+  juiced whoami
   juiced env set NAME --stdin [--plain]
   juiced env unset NAME [--plain]
   juiced claude github-configure [--stdin]
@@ -164,6 +167,8 @@ Examples:
   echo "Explain this project" | juiced claude -p
 
 Options before the command:
+  --account ID      Select an authorized Juiced account
+  --service <https-url>       Select the Juiced account service\n  --self-managed    Use a separately deployed app and Cantelop integration profile
   --workspace SLUG  Override the workspace derived from the current directory
                    (JUICED_WORKSPACE also overrides automatic selection)
   -h, --help        Show this help
@@ -210,6 +215,7 @@ excludes .git, .cantelop, .env*, node_modules, dist, and coverage; conflicts
 preserve both copies and stop the command.
 Claude login is separate for each project workspace.
 
-First run: deploy this project's runtime with cantelop deploy, then run
-juiced claude login to sign in to Claude inside the remote workspace. See README.md.
+First run: juiced login signs in to Juiced. Then juiced claude login signs in to
+Claude inside the project workspace. Managed mode requires an active subscription.
+For an existing deployment use --self-managed or JUICED_MODE=self-managed.
 `;

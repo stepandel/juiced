@@ -66,7 +66,7 @@ export class LocalPublisher {
     let client: GitWorkspaceClient | undefined;
     try {
       const root = await gitText(repository.root, ['rev-parse', '--path-format=absolute', '--git-path', 'juiced-publications']);
-      const directory = join(root, sha256(this.project.workspace), publication.id);
+      const directory = join(root, sha256(this.project.scope?JSON.stringify([this.project.scope,this.project.workspace]):this.project.workspace), publication.id);
       await mkdir(directory, { recursive: true, mode: 0o700 });
       const receiptPath = join(directory, 'receipt.json');
       const fingerprint = sha256(JSON.stringify({ kind: publication.kind, manifest: publication.manifest }));

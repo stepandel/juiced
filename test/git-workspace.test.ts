@@ -349,6 +349,12 @@ test('credentialed remote URLs fail before transfer without disclosing the token
   assert.equal(f.commands.some(command => command.action === 'begin'), false);
 });
 
+test('managed Git stop uses the typed service operation and never requests database credentials',async()=>{
+ let stops=0;
+ const session=createGitSession({session(){return {id:'ses_'+'a'.repeat(32)} as ReturnType<Parameters<typeof createGitSession>[0]['session']>;},async database(){throw new Error('Managed CLI must not receive a database token');}}, {directoryName:'project'},undefined,async()=>{stops++;});
+ await Promise.all([session.stop(),session.stop()]);assert.equal(stops,1);assert.throws(()=>session.request({type:'heartbeat'}),/has stopped/);
+});
+
 test('an unborn HEAD is reported as a repository without commits', async t => {
   const root = await mkdtemp(join(tmpdir(), 'juiced-unborn-')); t.after(() => rm(root, { recursive: true, force: true }));
   await git(root, ['init', '-q']);
