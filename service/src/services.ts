@@ -23,7 +23,7 @@ export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'wo
     cfg.development,
   );
   // Billing is enabled by STRIPE_SECRET_KEY. Without it, billing routes return
-  // billing_unavailable and accounts are funded only by operator alpha grants.
+  // billing_unavailable and accounts use the default free allowance.
   const billing = env.STRIPE_SECRET_KEY
     ? new Billing(
         pool,

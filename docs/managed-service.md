@@ -60,7 +60,8 @@ production branch `main`, root directory `service`, framework Next.js and Node 2
 Source files outside the root directory must be enabled for shared contracts and
 the workspace lockfile. `service/vercel.json` declares the private `juiced-jobs`
 queue trigger and the once-per-minute `/api/cron` schedule. Vercel builds run
-`next build`; they do not publish the CLI or compile a Cantelop runtime.
+`npm run migrate && next build`, migrating with the Neon integration's owner
+`DATABASE_URL`; they do not publish the CLI or compile a Cantelop runtime.
 
 The website is `https://juiced.codes`.
 `https://juiced-eight.vercel.app` redirects to the canonical domain.
@@ -68,7 +69,10 @@ The homepage is a static Next.js page and
 `/health` checks the HTTP handler without account credentials. Account routes and
 `/ready` return HTTP 503 until production configuration is supplied. The homepage
 links to public docs and pricing. Free includes 10 vCPU hours; Unlimited
-($25/month) is marked coming soon. Both plans include all features. See
+($25/month) is marked coming soon. Both plans include all features. In the service
+every account starts on the `free` epoch with an effectively unlimited allowance
+(10^15 credits until 2100). A paid Stripe
+invoice replaces that epoch when billing is configured later. See
 [search and AI discovery](search-discovery.md) for verification, sitemap submission,
 and baseline measurement after deployment.
 `service/public/install.sh` is served at `/install.sh` by Vercel's CDN.
@@ -128,6 +132,12 @@ References: [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/ne
 
 ### Account infrastructure
 
+`service/migrations/0001-initial.sql` creates the complete service and
+authentication schema, including free-account defaults. Apply it to an empty
+database for the first deployment. Migration runs are transactional and serialized;
+subsequent runs skip applied migrations and seed the CLI client idempotently.
+After launch, schema changes belong in new forward migrations.
+
 1. Install the pinned registry dependency with `npm ci`. SDK **1.5.0** supplies
    compiled transport rebinding and the public relay validators; its registry
    integrity is recorded in the lockfile. `npm run check:package` verifies a fresh
@@ -136,7 +146,7 @@ References: [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/ne
 2. Set the values in `service/.env.example`. Production requires both OAuth
    providers, PostgreSQL, a Fleet and approved package/runtime IDs. Stripe is
    optional: without `STRIPE_SECRET_KEY`, billing routes and the webhook return
-   `billing_unavailable` and accounts are activated only by operator alpha grants.
+   `billing_unavailable` and accounts use the default free allowance.
    With it, Stripe's fixed-price subscription and portal configuration is required. Remote PostgreSQL uses
    certificate verification. Register OAuth callbacks at
    `https://juiced.codes/api/auth/callback/github` and `/google`.
@@ -222,7 +232,7 @@ compatible package as the desired release to roll back. Existing Cantelop releas
 activation and additive database migration rules still apply; never claim a
 rollback reverses destructive application data changes.
 
-For canaries, deploy the new Next.js app and jobs to a separate alpha Fleet/service origin
+For canaries, deploy the new Next.js app and jobs to a separate staging Fleet/service origin
 first. Pin its package/runtime pair, qualify two accounts, then promote the same
 immutable package in the production Fleet and CLI build. Keep Fleet and host
 capacity limits deliberately small until load/lease-renewal latency is measured.
@@ -234,13 +244,12 @@ Operator commands use the worker database credential:
 
 ```sh
 node --import tsx service/scripts/admin.ts status
-node --import tsx service/scripts/admin.ts grant-alpha acc_... CREDITS ISO_EXPIRY
 node --import tsx service/scripts/admin.ts suspend-all
 node --import tsx service/scripts/admin.ts invalidate-devices
 ```
 
-Alpha grants are explicitly operator funded, integral and expire within seven
-days. Watch pending/stale jobs, billing retries, unreconciled reservations,
+Accounts start with the free allowance automatically. Watch pending/stale jobs,
+billing retries, unreconciled reservations,
 policy/enforced revision lag, principal expiry, purge failures, pool wait times
 and lease-renewal latency. Job diagnostics must not contain credentials, command bodies or terminal content.
 
