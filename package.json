@@ -9,7 +9,8 @@
   },
   "files": [
     "bin",
-    "dist/cli.mjs"
+    "dist/cli.mjs",
+    "dist/chunks/*.mjs"
   ],
   "engines": {
     "node": ">=22"

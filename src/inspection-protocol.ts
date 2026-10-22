@@ -6,6 +6,8 @@ import { isRecord as record } from './agent-protocol.js';
 
 export const MAX_INSPECTION_BYTES = 64 * 1024 * 1024;
 export const INSPECTION_CHUNK_BYTES = 32 * 1024;
+// Leave room below the SDK's 64 KiB serialized request-reply limit.
+export const MAX_INSPECTION_REPLY_BYTES = 60 * 1024;
 export const INSPECTION_TIMEOUT_MS = 240_000;
 export type TreeEntry = { name: string; mode: '040000' | '100644' | '100755' | '120000' | '160000'; oid: string };
 export type ListingEntry = Pick<TreeEntry, 'name' | 'mode'>;
@@ -23,6 +25,7 @@ export type InspectionSnapshot = {
 export type InspectionCommand = {
   type: 'inspect'; id: string; directoryName: string; binding: string; scope: string; includeIgnored: boolean;
   mode?: 'listing';
+  inline?: boolean;
 };
 export type InspectionEvent =
   | { type: 'inspection-chunk'; id: string; offset: number; data: string }
@@ -46,7 +49,8 @@ export function inspectionScope(path = '.') {
 export function validateInspectionCommand(command: InspectionCommand) {
   if (!command || command.type !== 'inspect' || !validTransferId(command.id) || !validProjectName(command.directoryName) ||
       !/^[a-f0-9]{64}$/.test(command.binding) || !relativeProjectPath(command.scope) || typeof command.includeIgnored !== 'boolean' ||
-      (command.mode !== undefined && command.mode !== 'listing')) throw new Error('Invalid workspace inspection command');
+      (command.mode !== undefined && command.mode !== 'listing') ||
+      (command.inline !== undefined && typeof command.inline !== 'boolean')) throw new Error('Invalid workspace inspection command');
 }
 
 const name = (value: unknown): value is string => typeof value === 'string' && !!value && !['.', '..', '.git'].includes(value) && !value.includes('/') && !value.includes('\0');

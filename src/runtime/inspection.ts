@@ -4,12 +4,12 @@ import type { SessionOutput } from '@cantelop/sdk/session';
 import { captureInspection } from '../inspection-snapshot.js';
 import { captureListing } from '../inspection-listing.js';
 import { sha256 } from '../git.js';
-import { INSPECTION_CHUNK_BYTES, MAX_INSPECTION_BYTES, InspectionIncomplete, validateInspectionCommand, type InspectionCommand, type InspectionEvent } from '../inspection-protocol.js';
+import { INSPECTION_CHUNK_BYTES, MAX_INSPECTION_BYTES, InspectionIncomplete, validateInspectionCommand, type InspectionCommand, type InspectionEvent, type InspectionListing, type InspectionSnapshot } from '../inspection-protocol.js';
 import { readBinding } from './git.js';
 import { isENOENT } from '../fs-util.js';
 
 /** Resolve existing state only. projectPaths/status would create or repair it. */
-export async function inspectRemote(command: InspectionCommand, output: SessionOutput<InspectionEvent>, signal: AbortSignal, workspace = process.cwd()) {
+export async function captureRemoteInspection(command: InspectionCommand, signal: AbortSignal, workspace = process.cwd()) {
   try {
     validateInspectionCommand(command);
     signal.throwIfAborted();
@@ -32,18 +32,30 @@ export async function inspectRemote(command: InspectionCommand, output: SessionO
     await check();
     const snapshot = await (command.mode === 'listing' ? captureListing : captureInspection)(target, command.scope, command.includeIgnored, signal);
     await check();
-    const bytes = Buffer.from(JSON.stringify(snapshot));
-    if (bytes.length > MAX_INSPECTION_BYTES) throw new InspectionIncomplete('The inventory exceeds 64 MiB. Inspect a narrower path.');
-    for (let offset = 0; offset < bytes.length; offset += INSPECTION_CHUNK_BYTES) {
-      signal.throwIfAborted();
-      await output.send({ type: 'inspection-chunk', id: command.id, offset, data: bytes.subarray(offset, offset + INSPECTION_CHUNK_BYTES).toString('base64') });
-    }
-    await output.send({ type: 'inspection-end', id: command.id, size: bytes.length, sha256: sha256(bytes) });
+    return snapshot;
   } catch (error) {
     if (signal.aborted) throw error;
     const message = isENOENT(error)
       ? 'The remote Git checkout is not initialized. Inspection did not create it.'
       : error instanceof Error ? error.message : 'Workspace inspection failed';
-    await output.send({ type: 'inspection-error', id: command.id, message });
+    throw new InspectionIncomplete(message);
+  }
+}
+
+export async function sendInspection(command: InspectionCommand, snapshot: InspectionSnapshot | InspectionListing, output: SessionOutput<InspectionEvent>, signal: AbortSignal) {
+  const bytes = Buffer.from(JSON.stringify(snapshot));
+  if (bytes.length > MAX_INSPECTION_BYTES) throw new InspectionIncomplete('The inventory exceeds 64 MiB. Inspect a narrower path.');
+  for (let offset = 0; offset < bytes.length; offset += INSPECTION_CHUNK_BYTES) {
+    signal.throwIfAborted();
+    await output.send({ type: 'inspection-chunk', id: command.id, offset, data: bytes.subarray(offset, offset + INSPECTION_CHUNK_BYTES).toString('base64') });
+  }
+  await output.send({ type: 'inspection-end', id: command.id, size: bytes.length, sha256: sha256(bytes) });
+}
+
+export async function inspectRemote(command: InspectionCommand, output: SessionOutput<InspectionEvent>, signal: AbortSignal, workspace = process.cwd()) {
+  try { await sendInspection(command, await captureRemoteInspection(command, signal, workspace), output, signal); }
+  catch (error) {
+    if (signal.aborted) throw error;
+    await output.send({ type: 'inspection-error', id: command.id, message: error instanceof Error ? error.message : 'Workspace inspection failed' });
   }
 }

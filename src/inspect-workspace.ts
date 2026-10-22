@@ -8,7 +8,7 @@ import { captureInspection } from './inspection-snapshot.js';
 import { compareInspection, renderInspection, renderRemoteListing } from './inspection-view.js';
 import { INSPECTION_CHUNK_BYTES, INSPECTION_TIMEOUT_MS, MAX_INSPECTION_BYTES, InspectionIncomplete, inspectionScope, validateInspectionListing, validateInspectionSnapshot, type InspectionListing, type InspectionSnapshot } from './inspection-protocol.js';
 import { BASE64, validWorkspaceId, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
-import { isCursorExpired, isViewMissing, retryAdmission } from './transport.js';
+import { isCursorExpired, retryAdmission } from './transport.js';
 
 type Workspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'inspect' | 'session' | 'selector'>;
 type InspectionApp = { workspace(selector: WorkspaceSelector): Workspace };
@@ -42,18 +42,21 @@ async function remoteInventory<T>(workspace: InspectionWorkspace, command: Inspe
   const combined = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]);
   try {
     combined.throwIfAborted();
-    // A durable end boundary avoids replaying old inventories across CLI processes.
-    const after = fresh ? undefined : await session.view({ signal: combined }).then(view => view.cursor).catch(error => {
-      if (isViewMissing(error)) return undefined;
-      throw error;
-    });
-    const requested = session.request(command, { signal: combined, timeoutMs: INSPECTION_TIMEOUT_MS }).then(reply => {
+    const request = (inline: boolean) => session.request({ ...command, inline }, { signal: combined, timeoutMs: INSPECTION_TIMEOUT_MS }).then(reply => {
       if (!reply?.ok) throw new InspectionIncomplete(reply?.error ?? 'The workspace rejected inspection.');
+      return reply;
     }).catch(error => { controller.abort(error); throw error; });
+    // Small inventories fit in the reply: no view read, replay, or SSE connection.
+    // Older runtimes and large inventories still emit the command's tagged events.
+    const requested = request(!fresh);
     void requested.catch(() => {});
+    if (!fresh) {
+      const reply = await requested;
+      if (reply.inspection !== undefined) return validate(reply.inspection, command.scope);
+    }
     const chunks: Buffer[] = []; let size = 0;
     try {
-      for await (const event of session.stream({ signal: combined, ...(after ? { after } : {}) })) {
+      for await (const event of session.stream({ signal: combined })) {
         const data = event.data;
         if (!data || !('id' in data) || data.id !== command.id) continue;
         if (data.type === 'inspection-error') throw new InspectionIncomplete(data.message);

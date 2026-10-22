@@ -1,5 +1,5 @@
 import type { GitCommand, GitEvent, GitResult, StaleLease } from './git-protocol.js';
-import type { InspectionCommand, InspectionEvent } from './inspection-protocol.js';
+import type { InspectionCommand, InspectionEvent, InspectionListing, InspectionSnapshot } from './inspection-protocol.js';
 import type { SavedSettings } from './settings.js';
 import type { ClaudeFrame } from './agent-protocol.js';
 import type { SessionListCommand, SessionListPage } from './session-list-protocol.js';
@@ -46,7 +46,7 @@ export type TerminalEvent =
   | GitEvent
   | InspectionEvent;
 
-export type TerminalReply = { ok: true; git?: GitResult; agent?: AgentConnection; replay?: { entries: AgentJournalEntry[]; latest: number }; sessions?: SessionListPage; publication?: PublishResult } | { ok: false; error: string; stale?: StaleLease[]; busy?: 'sessions' | 'maintenance' };
+export type TerminalReply = { ok: true; git?: GitResult; agent?: AgentConnection; replay?: { entries: AgentJournalEntry[]; latest: number }; sessions?: SessionListPage; publication?: PublishResult; inspection?: InspectionSnapshot | InspectionListing } | { ok: false; error: string; stale?: StaleLease[]; busy?: 'sessions' | 'maintenance' };
 
 export const MAX_INPUT_BYTES = 16 * 1024;
 export const MAX_BUFFERED_INPUT = 1024 * 1024;

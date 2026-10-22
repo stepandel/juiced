@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 const execute = promisify(execFile),
   directory = await mkdtemp(join(tmpdir(), 'juiced-install-'));
 const { version: packageVersion, dependencies } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -71,6 +72,7 @@ try {
     ).stdout,
   )[0];
   assert.ok(packed.files.some((f) => f.path === 'dist/cli.mjs'));
+  assert.ok(packed.files.some((f) => /^dist\/chunks\/app-.*\.mjs$/.test(f.path)), 'lazy UI chunk must ship with the CLI');
   assert.ok(
     packed.files.every((f) => !/^service\/|^src\/|\.env|node_modules/.test(f.path)),
     'private service/source must stay out of npm package',
@@ -102,6 +104,13 @@ try {
     timeout: 10000,
   });
   assert.match(help.stdout, /login/);
+  // Even a bundled release must defer Ink/Yoga (including its WASM fetch) until
+  // an interactive session actually opens. Exercise the installed chunk layout.
+  await execute(process.execPath, ['--input-type=module', '-e', `
+    globalThis.fetch = () => { throw new Error('Offline commands must not load Yoga or make network requests'); };
+    process.argv = [process.execPath, ${JSON.stringify(bin)}, '--version'];
+    await import(${JSON.stringify(pathToFileURL(bin).href)});
+  `], { cwd: directory, env, timeout: 10000 });
   process.stdout.write(
     'Fresh package install, offline help/version, and private-file exclusion passed.\n',
   );

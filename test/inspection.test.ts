@@ -15,7 +15,7 @@ import { captureListing } from '../src/inspection-listing.js';
 import { compareInspection, renderInspection, renderRemoteListing } from '../src/inspection-view.js';
 import { InspectionIncomplete, validateInspectionListing, validateInspectionSnapshot, type InspectionCommand, type InspectionEvent } from '../src/inspection-protocol.js';
 import { inspectWorkspace, remoteSnapshot } from '../src/inspect-workspace.js';
-import { inspectRemote } from '../src/runtime/inspection.js';
+import { captureRemoteInspection, inspectRemote } from '../src/runtime/inspection.js';
 import { selectProject } from '../src/project.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
 
@@ -170,6 +170,23 @@ test('inspection sessions are stable across scopes, isolated by workspace and bi
   assert.equal(aborted, true);
   const controller = new AbortController(); controller.abort(new Error('cancelled'));
   await assert.rejects(remoteSnapshot(workspace('wsp_a'), command, controller.signal), /cancelled/);
+});
+
+test('small inventories use one request and validate the inline reply without reading history', async t => {
+  const f = await fixture(t), snapshot = await f.snapshot(f.local);
+  let requests = 0;
+  const workspace = {
+    selector: { id: `wsp_${'a'.repeat(32)}` },
+    session() { return {
+      async request(command: InspectionCommand) { requests++; assert.equal(command.inline, true); return { ok: true, inspection: snapshot }; },
+      async view() { assert.fail('Inline inspection must not read the session view'); },
+      async *stream() { assert.fail('Inline inspection must not open an event stream'); },
+    }; },
+  } as unknown as Parameters<typeof remoteSnapshot>[0];
+  const command: InspectionCommand = { type: 'inspect', id: randomUUID(), directoryName: 'project', binding: f.repository.binding, scope: '', includeIgnored: false };
+  assert.deepEqual(await remoteSnapshot(workspace, command, f.controller.signal), snapshot);
+  assert.equal(requests, 1);
+  await assert.rejects(remoteSnapshot(workspace, { ...command, scope: 'wrong' }, f.controller.signal), /invalid/);
 });
 
 test('expired or reset inspection replay retries once without stopping the shared session', async t => {
@@ -387,6 +404,10 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
       if (operation.type === 'request') {
         assert.equal(operation.message.type, 'inspect');
         const command = operation.message as InspectionCommand;
+        if (command.inline) {
+          try { return Response.json({ protocolVersion: 2, id: body.id, reply: { ok: true, inspection: await captureRemoteInspection(command, f.controller.signal, f.workspace) } }); }
+          catch (error) { return Response.json({ protocolVersion: 2, id: body.id, reply: { ok: false, error: (error as Error).message } }); }
+        }
         const history = histories.get(id) ?? []; histories.set(id, history);
         void inspectRemote(command, { async send(data) {
           history.push({ data, sessionId: id, messageId: body.id, cursor: { streamId: 'a'.repeat(32), sequence: history.length + 1 }, createdAt: new Date() }); emitted.emit(id);
@@ -413,7 +434,7 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
   const before = await state(f.workspace);
   assert.equal(await inspectWorkspace(app, f.local, options, f.controller.signal, stdout), 0);
   assert.match(text, /src\/\s+!\s+src\//);
-  assert.ok(calls.every(call => ['workspace.inspect', 'view', 'request', 'stream'].includes(call.command.type)));
+  assert.deepEqual(calls.map(call => call.command.type), ['workspace.inspect', 'request']);
   const inspectionSession = calls.find(call => call.command.type === 'request')!.session!.id;
   assert.match(inspectionSession, /^ses_inspect_[a-f0-9]{32}$/);
   assert.equal(calls.filter(call => call.command.type === 'stop').length, 0);
@@ -442,7 +463,7 @@ test('real SDK request/stream uses the inspected canonical ID and never requires
     assert.doesNotMatch(text, /local-only|Local|HEAD|matching|different/);
     assert.equal(calls.find(call => call.command.type === 'request')!.session!.id, inspectionSession);
     assert.ok(calls.some(call => call.command.type === 'request' && call.command.message.type === 'inspect' && call.command.message.mode === 'listing'));
-    assert.ok(calls.some(call => call.command.type === 'stream' && call.command.after?.sequence));
+    assert.deepEqual(calls.map(call => call.command.type), ['workspace.inspect', 'request']);
     assert.equal(calls.filter(call => call.command.type === 'stop').length, 0);
     assert.deepEqual(await state(f.workspace), remoteBefore);
   } finally { await chmod(join(f.local, 'README.md'), 0o644); }

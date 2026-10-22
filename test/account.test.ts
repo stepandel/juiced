@@ -42,6 +42,28 @@ test('required CLI updates explain the incompatibility and give an update comman
   assert.match(new ManagedError('cli_upgrade_required').message, /incompatible[\s\S]*juiced update[\s\S]*curl -fsSL/);
 });
 
+test('prepare bootstraps known accounts directly and discovers accounts only when needed', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'juiced-prepare-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const savedAccount = `acc_${'a'.repeat(32)}`, explicitAccount = `acc_${'b'.repeat(32)}`;
+  const signal = new AbortController().signal;
+  for (const selected of ['saved', 'explicit', 'discover', 'denied'] as const) {
+    const calls: string[] = [];
+    const client = new AccountClient({ JUICED_CONFIG_HOME: join(root, selected), JUICED_SERVICE_URL: 'https://service.example' }, async (input) => {
+      const path = new URL(String(input)).pathname; calls.push(path);
+      if (path === '/v1/me') return Response.json({ userId: 'user', deviceId: 'device', accounts: [{ id: savedAccount, status: 'active', entitlement: 'active' }] });
+      assert.equal(path, `/v1/accounts/${selected === 'explicit' || selected === 'denied' ? explicitAccount : savedAccount}/bootstrap`);
+      if (selected === 'denied') return Response.json({ error: 'not_found' }, { status: 404 });
+      return Response.json({ id: `jin_${'a'.repeat(32)}`, status: 'ready', runtimeId: 'runtime', minimumCli: '0.2.0', error: null, operationId: 'test' });
+    });
+    await client.store.write({ origin: client.origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000, ...(selected === 'discover' ? {} : { account: savedAccount }) });
+    const preparing = client.prepare('0.2.6', 'runtime', selected === 'explicit' || selected === 'denied' ? explicitAccount : undefined, signal);
+    if (selected === 'denied') await assert.rejects(preparing, (error: unknown) => error instanceof ManagedError && error.status === 404);
+    else await preparing;
+    assert.equal(calls.length, selected === 'discover' ? 2 : 1);
+  }
+});
+
 test('credentials are private, origin scoped and serialize refresh across concurrent calls', async () => {
   const root = await mkdtemp(join(tmpdir(), 'juiced-credentials-'));
   try {

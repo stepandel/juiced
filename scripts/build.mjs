@@ -1,9 +1,10 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { build } from 'esbuild';
 import { createCantelopCompilerPlugin } from '@cantelop/sdk/build';
 
 const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const installer = await readFile(new URL('../service/public/install.sh', import.meta.url), 'utf8');
+await rm(new URL('../dist/chunks', import.meta.url), { recursive: true, force: true });
 
 await build({
   define: {
@@ -16,7 +17,10 @@ await build({
   platform: 'node',
   target: 'node22',
   format: 'esm',
+  splitting: true,
+  chunkNames: 'chunks/[name]-[hash]',
+  outExtension: { '.js': '.mjs' },
   packages: 'external',
   plugins: [createCantelopCompilerPlugin({ definition: 'src/cantelop.ts' })],
-  outfile: 'dist/cli.mjs',
+  outdir: 'dist',
 });

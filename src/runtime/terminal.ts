@@ -10,8 +10,8 @@ import { validProjectName } from '../project-name.js';
 import { relativeProjectPath } from '../git.js';
 import { createGitRuntime, projectPaths, readBinding } from './git.js';
 import { acquireCheckout, acquireSessionCheckout, CheckoutBusy } from './project-state.js';
-import { inspectRemote } from './inspection.js';
-import { INSPECTION_TIMEOUT_MS, validateInspectionCommand } from '../inspection-protocol.js';
+import { captureRemoteInspection, inspectRemote, sendInspection } from './inspection.js';
+import { INSPECTION_TIMEOUT_MS, MAX_INSPECTION_REPLY_BYTES, validateInspectionCommand } from '../inspection-protocol.js';
 import { saveSettings } from './settings.js';
 import { createDurableAgent } from './durable-agent.js';
 import { listRemoteSessions } from './session-list.js';
@@ -307,6 +307,31 @@ export async function receiveTerminal(context: SessionContext<TerminalCommand, T
   }
   if (command.type === 'inspect') {
     validateInspectionCommand(command);
+    if (command.inline) {
+      try {
+        const signal = AbortSignal.any([context.signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]);
+        const snapshot = await captureRemoteInspection(command, signal);
+        const reply = { ok: true as const, inspection: snapshot };
+        if (Buffer.byteLength(JSON.stringify(reply)) <= MAX_INSPECTION_REPLY_BYTES) {
+          context.reply(reply);
+          return;
+        }
+        // Capture once; stream larger inventories using the existing bounded protocol.
+        context.activity.queue(async activity => {
+          try { await sendInspection(command, snapshot, activity.output, activity.signal); }
+          catch (error) {
+            if (activity.signal.aborted) throw error;
+            await activity.output.send({ type: 'inspection-error', id: command.id, message: error instanceof Error ? error.message : 'Workspace inspection failed' });
+          }
+          await activity.view.commit({ inspection: 1 });
+        }, { timeoutMs: INSPECTION_TIMEOUT_MS });
+        context.reply({ ok: true });
+      } catch (error) {
+        if (context.signal.aborted) throw error;
+        context.reply({ ok: false, error: error instanceof Error ? error.message : 'Workspace inspection failed' });
+      }
+      return;
+    }
     context.activity.queue(async activity => {
       await inspectRemote(command, activity.output, activity.signal);
       await activity.view.commit({ inspection: 1 });

@@ -14,6 +14,7 @@ import { activateTerminal, receiveTerminal } from '../src/runtime/terminal.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
 import { discoverRepository, git, sha256 } from '../src/git.js';
 import { ClaudeDecoder } from '../src/agent-protocol.js';
+import { MAX_INSPECTION_REPLY_BYTES, validateInspectionSnapshot } from '../src/inspection-protocol.js';
 
 test('durable agent routes run through the real SDK activity and native JSON process without client heartbeats', { timeout: 15_000 }, async t => {
   const previousDirectory = process.cwd();
@@ -223,7 +224,7 @@ test('native runtime routes Git maintenance without starting Claude and returns 
   assert.equal((await request('/__cantelop/v2/runtime')).activity, null);
 });
 
-test('native runtime streams a Git inspection without database access or starting Claude', { timeout: 15_000 }, async t => {
+test('native runtime returns small inspections inline and streams large or legacy inventories without Claude or database access', { timeout: 15_000 }, async t => {
   const previous = process.cwd();
   const root = await realpath(await mkdtemp(join(tmpdir(), 'juiced-inspect-native-'))), target = join(root, 'project');
   await mkdir(target); await git(target, ['init', '-b', 'main']);
@@ -276,5 +277,46 @@ test('native runtime streams a Git inspection without database access or startin
   const listed = Buffer.concat(chunks.filter(event => event.id === listing).map(event => Buffer.from(event.data, 'base64')));
   assert.deepEqual(JSON.parse(listed.toString()).entries, [{ name: 'file.txt', mode: '100644' }]);
   assert.ok(events.some(event => event.type === 'inspection-error' && event.id === failed));
+
+  const inline = async (scope = '', binding = repository.binding) => {
+    const id = `msg_${randomUUID().replaceAll('-', '')}`, inspectionId = randomUUID();
+    await request('/__cantelop/v2/messages', { session: { id: 'inspection-test', workspace_id: `wsp_${'6'.repeat(32)}`, keep_alive_seconds: 120 }, message: { id, payload: { type: 'inspect', id: inspectionId, directoryName: 'project', binding, scope, includeIgnored: false, inline: true } }, reply: true });
+    for (let i = 0; i < 300; i++) {
+      const status = await request(`/__cantelop/v2/messages/${id}`);
+      assert.notEqual(status.state, 'failed', JSON.stringify(status));
+      if (status.state === 'succeeded') return { reply: (await request(`/__cantelop/v2/messages/${id}/reply`)).reply as TerminalReply, inspectionId };
+      await delay(5);
+    }
+    assert.fail('Inline inspection did not reply');
+  };
+  const small = (await inline()).reply;
+  assert.ok(small.ok && small.inspection);
+  assert.equal(validateInspectionSnapshot(small.inspection, '').entries[0]?.name, 'file.txt');
+  assert.ok(Buffer.byteLength(JSON.stringify(small)) <= MAX_INSPECTION_REPLY_BYTES);
+  assert.deepEqual((await request(`/__cantelop/v2/runtime/events?after=${cursor}&wait=0`)).events, []);
+  const rejected = (await inline('', '0'.repeat(64))).reply;
+  assert.ok(!rejected.ok && /matching Git binding/.test(rejected.error));
+
+  // Large inventories must fall back to chunks, never overflow the SDK reply.
+  await Promise.all(Array.from({ length: 700 }, (_, i) => writeFile(join(target, `long-${i}-${'x'.repeat(70)}.txt`), 'content\n')));
+  const large = await inline();
+  assert.deepEqual(large.reply, { ok: true });
+  const largeChunks: Buffer[] = []; let complete = false;
+  for (let i = 0; i < 300 && !complete; i++) {
+    const batch = await request(`/__cantelop/v2/runtime/events?after=${cursor}&wait=0`);
+    for (const item of batch.events) {
+      if (item.event?.id === large.inspectionId) {
+        if (item.event.type === 'inspection-chunk') largeChunks.push(Buffer.from(item.event.data, 'base64'));
+        if (item.event.type === 'inspection-end') complete = true;
+      }
+      cursor = item.cursor;
+    }
+    if (batch.events.length) await request('/__cantelop/v2/runtime/events/ack', { through: cursor });
+    if (!complete) await delay(5);
+  }
+  assert.ok(complete);
+  const largeBytes = Buffer.concat(largeChunks);
+  assert.ok(largeBytes.length > MAX_INSPECTION_REPLY_BYTES);
+  assert.equal(validateInspectionSnapshot(JSON.parse(largeBytes.toString()), '').entries.length, 701);
   assert.deepEqual(await readFile(join(target, '.git', 'index')), index);
 });

@@ -292,11 +292,12 @@ export class AccountClient {
     if (!runtimeId) throw new ManagedError('cli_upgrade_required');
     if (!(await this.store.read()) && process.stdin.isTTY && process.stderr.isTTY)
       await this.login(signal);
-    const me = await this.me(signal),
-      saved = await this.store.read();
-    account ??= saved?.account ?? me.accounts[0]?.id;
-    if (!account || !me.accounts.some((a) => a.id === account))
-      throw new ManagedError('account_not_available');
+    const saved = await this.store.read();
+    // Bootstrap/installation authorizes membership itself. Only discover accounts
+    // when neither the command nor the saved sign-in already selects one.
+    account ??= saved?.account;
+    if (!account) account = (await this.me(signal)).accounts[0]?.id;
+    if (!account) throw new ManagedError('account_not_available');
     let result = readInstallation(
       passive
         ? await this.json(`/v1/accounts/${account}/installation`, undefined, signal, 'GET')
