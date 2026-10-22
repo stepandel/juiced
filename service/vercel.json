@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "npm ci --ignore-scripts --no-audit",
-  "buildCommand": "npm run migrate && next build",
+  "buildCommand": "if [ \"$VERCEL_ENV\" = preview ]; then echo 'Skipping migrations for preview builds'; else npm run migrate; fi && next build",
   "functions": {
     "app/api/jobs/route.ts": {
       "experimentalTriggers": [
