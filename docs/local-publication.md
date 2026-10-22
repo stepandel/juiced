@@ -134,6 +134,17 @@ files again. Expiration and cancellation stop further application attempts. If a
 connection or process fails during an approved operation, check the local checkout
 before retrying; a write may have completed without its acknowledgment arriving.
 
+Downloading an approved publication opens a second Cantelop session beside the
+interactive one. If the platform reports `session_admission_timeout`, the local
+client retries for up to 150 seconds within the offer's expiry. If the download
+still fails, the result has status `failed`, not `conflict`: Cantelop failures
+occur before any local change, so the message states that local files, HEAD and
+the index are unchanged and the client is still attached, and it names the
+recovery. For a snapshot, retry `publish_snapshot` or commit remotely and run
+`juiced claude sync --from-workspace`. For commits, retry `publish_commits` or
+run `juiced claude fast-forward`. `conflict` is reserved for local refusals such
+as overlapping edits or a changed branch.
+
 Imported refs remain at `refs/juiced/imports/<workspace>/<publication-id>/`.
 Downloaded snapshots, their manifests and receipts are retained under the local
 Git path `juiced-publications/<workspace-hash>/<publication-id>/`; use

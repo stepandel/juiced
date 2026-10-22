@@ -360,3 +360,19 @@ test('an unborn HEAD is reported as a repository without commits', async t => {
   await git(root, ['init', '-q']);
   await assert.rejects(discoverRepository(root), /has no commits/);
 });
+
+test('Git transfers wait out session admission timeouts with the same message identity', async () => {
+  const { RemoteAppError } = await import('@cantelop/sdk');
+  const ids: string[] = [];
+  let waited = 0;
+  const workspace = { session: () => ({ async request(_command: unknown, options: { id: string }) {
+    ids.push(options.id);
+    if (ids.length < 4) throw new RemoteAppError('session_admission_timeout', 409);
+    return { ok: true, git: { status: { initialized: true } } };
+  } }) } as never;
+  const client = new GitWorkspaceClient(workspace, { directoryName: 'project' } as never, { binding: 'binding' } as never, new AbortController().signal, () => waited++);
+  assert.deepEqual(await client.status(), { initialized: true });
+  assert.equal(ids.length, 4);
+  assert.equal(new Set(ids).size, 1);
+  assert.equal(waited, 1);
+});

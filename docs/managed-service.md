@@ -47,12 +47,20 @@ serialized across processes and credentials are atomically replaced. Service
 origins, accounts, installation IDs and canonical Workspace IDs namespace saved
 sessions, Git refs and publication receipts.
 
+Credentials live in the `credentials/` subdirectory of the configuration
+directory. Releases up to 0.2.3 used a file of the same name one level up and
+rewrite it with OS-keyring metadata on every token refresh, so newer releases
+never write that path; an older CLI process left running during an upgrade
+therefore cannot sign newer ones out.
+
 Upgrading from a release that used OS credential storage requires one browser
 sign-in with `juiced login` (interactive commands also start login automatically).
-Old keyring metadata is replaced by the new credential file after successful
-login. Juiced never opens the old OS store, so the upgrade cannot trigger a
-keychain password dialog. Old OS entries remain untouched; old device grants
-can be revoked from `/account`. Existing private-file sign-ins continue to work.
+Juiced never opens the old OS store, so the upgrade cannot trigger a keychain
+password dialog. Old OS entries remain untouched; old device grants can be
+revoked from `/account`. Existing private-file sign-ins are moved, not copied,
+into `credentials/` on first use: refresh tokens rotate, so a shared copy would
+sign one of the two CLIs out. An older CLI still running afterwards asks for its
+own sign-in. `juiced logout` removes both files.
 
 `/account` manages subscriptions, usage, devices, explicit provider linking and
 account deletion. Providers are never implicitly linked solely by email. Native
