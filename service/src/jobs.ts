@@ -6,6 +6,7 @@ import { transaction } from './db';
 import type { services } from './services';
 import type { Billing } from './billing';
 import { wakeJobs } from './queue';
+import { logError } from './log';
 
 /** Bounded work on the existing durable records. Duplicate queue deliveries
  * use the same SQL locks, idempotency keys and projection fences as before. */
@@ -29,17 +30,26 @@ export async function reconcile(s: JobServices, wake = wakeJobs) {
   const provision = new Provisioner(s.pool, s.accounts, s.platform, s.billing);
   const usage = new UsageIngestor(s.pool, s.platform);
   const terminals = new TerminalCloser(s.pool, s.platform);
+  const workers: Array<{ name: string; run(): Promise<boolean> } | undefined> = [
+    { name: 'billing', run: () => s.billing?.runOnce() ?? Promise.resolve(false) },
+    { name: 'usage', run: () => usage.runOnce() },
+    { name: 'provisioning', run: () => provision.runOnce() },
+    { name: 'terminals', run: () => terminals.runOnce() },
+  ];
+  let retry = false;
   const deadline = Date.now() + 20_000;
   let more = false;
   for (let round = 0; round < 25 && Date.now() < deadline; round++) {
-    const results = await Promise.allSettled([
-      s.billing?.runOnce() ?? false,
-      usage.runOnce(),
-      provision.runOnce(),
-      terminals.runOnce(),
-    ]);
-    const failed = results.find((result) => result.status === 'rejected');
-    if (failed?.status === 'rejected') throw failed.reason;
+    const results = await Promise.allSettled(workers.map((worker) => worker?.run() ?? false));
+    for (const [index, result] of results.entries()) {
+      if (result.status !== 'rejected') continue;
+      logError('job_worker_failed', result.reason, { worker: workers[index]!.name });
+      retry = true;
+      // A broken usage page must not starve provisioning, billing or cleanup.
+      // Retry the failed worker on the next queue delivery, after other queues
+      // have advanced and their durable retry times have been scheduled.
+      workers[index] = undefined;
+    }
     more = results.some((result) => result.status === 'fulfilled' && result.value);
     if (!more) break;
   }
@@ -60,7 +70,12 @@ export async function reconcile(s: JobServices, wake = wakeJobs) {
     ) pending
   `)
   ).rows[0]!.due;
-  if (more) await wake();
-  else if (next && next.getTime() <= Date.now() + 60_000)
-    await wake(Math.max(1, Math.ceil((next.getTime() - Date.now()) / 1000)));
+  let delay = more ? 0 : Infinity;
+  if (next && next.getTime() <= Date.now() + 60_000)
+    delay = Math.min(delay, Math.max(1, Math.ceil((next.getTime() - Date.now()) / 1000)));
+  // Publish one retry, shared with the next healthy job's wake-up. Rethrowing
+  // after publishing would also redeliver the current message and multiply
+  // retries. A failed publish still throws so queue redelivery/cron can recover.
+  if (retry) delay = Math.min(delay, 10);
+  if (Number.isFinite(delay)) await wake(delay);
 }

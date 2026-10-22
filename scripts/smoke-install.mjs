@@ -88,6 +88,7 @@ try {
     ],
     { cwd: directory, env, timeout: 180000, maxBuffer: 2 ** 20 },
   );
+  await assert.rejects(readFile(join(directory, 'node_modules/@napi-rs/keyring/package.json')), { code: 'ENOENT' });
   const bin = join(directory, 'node_modules', 'juiced', 'bin', 'juiced.mjs');
   const version = await execute(process.execPath, [bin, '--version'], {
     cwd: directory,

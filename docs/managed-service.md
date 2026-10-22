@@ -38,15 +38,21 @@ that build-time default. Headless setup uses `login --no-browser`; ordinary comm
 never prompt for account login when stdin is not a terminal. Help/version work
 offline. Account selection uses a leading `--account acc_...`.
 
-OS credential storage is preferred (macOS Keychain, Windows Credential Manager,
-Linux Secret Service). The optional native dependency can be omitted. A private
-`0600` file is the fallback; `JUICED_CREDENTIAL_STORE=file` selects it explicitly.
-A locked/unavailable store containing an existing credential fails without
-silently downgrading. Config directories are under the user's normal application
+Sign-in tokens are stored in a private `0600` file inside a `0700` configuration
+directory on macOS/Linux. This is the only credential storage method; no OS
+keychain or storage setting is required. Other programs running as the same user
+can read the tokens. Config directories are under the user's normal application
 configuration directory; `JUICED_CONFIG_HOME` overrides the location. Refresh is
 serialized across processes and credentials are atomically replaced. Service
 origins, accounts, installation IDs and canonical Workspace IDs namespace saved
 sessions, Git refs and publication receipts.
+
+Upgrading from a release that used OS credential storage requires one browser
+sign-in with `juiced login` (interactive commands also start login automatically).
+Old keyring metadata is replaced by the new credential file after successful
+login. Juiced never opens the old OS store, so the upgrade cannot trigger a
+keychain password dialog. Old OS entries remain untouched; old device grants
+can be revoked from `/account`. Existing private-file sign-ins continue to work.
 
 `/account` manages subscriptions, usage, devices, explicit provider linking and
 account deletion. Providers are never implicitly linked solely by email. Native

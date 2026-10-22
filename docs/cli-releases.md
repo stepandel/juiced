@@ -17,8 +17,8 @@ npm run test:installer -- dist/releases/juiced-darwin-arm64.tar.gz
 
 Use the archive matching the build machine. Build on Node 24 and a native macOS
 or Linux x64/arm64 host. Packaging retains the lockfile's production dependency
-versions and integrity checks, includes optional native credential storage, and
-excludes the private service workspace and development dependencies. It downloads
+versions and integrity checks and excludes the private service workspace and
+development dependencies. It downloads
 the build host's Node version from nodejs.org, checks the official SHA-256 digest,
 and includes the portable executable and Node's license. Dependency licenses
 remain in their package directories. `release.json` records the version, Node

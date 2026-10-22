@@ -1,6 +1,6 @@
 {
   "name": "juiced",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Run Claude Code on Cantelop from your terminal",
   "type": "module",
   "private": false,
@@ -61,8 +61,5 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stepandel/juiced.git"
-  },
-  "optionalDependencies": {
-    "@napi-rs/keyring": "2.1.2"
   }
 }

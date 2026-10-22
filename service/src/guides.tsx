@@ -1,13 +1,16 @@
 import type { ReactNode } from 'react';
+import { Shell } from '../app/shell';
 
 export const guides: {
   slug: string;
+  label: string;
   title: string;
   description: string;
   body: ReactNode;
 }[] = [
   {
     slug: 'getting-started',
+    label: 'Getting started',
     title: 'Get started with Juiced',
     description:
       'Requirements, Juiced account sign-in, Claude Code login, and your first persistent cloud workspace.',
@@ -40,9 +43,7 @@ export const guides: {
           With the CLI installed, sign in to your Juiced account using GitHub or
           Google. This account controls your managed workspaces and compute.
         </p>
-        <pre>
-          <code>{'juiced login\njuiced whoami'}</code>
-        </pre>
+        <Shell>{'juiced login\njuiced whoami'}</Shell>
         <p>
           For a terminal without a browser, use{' '}
           <code>juiced login --no-browser</code>.
@@ -53,9 +54,7 @@ export const guides: {
           directory selects your workspace. Claude login is separate from Juiced
           account login and is saved in that workspace.
         </p>
-        <pre>
-          <code>{'cd your-project\njuiced claude login\njuiced claude'}</code>
-        </pre>
+        <Shell>{'cd your-project\njuiced claude login\njuiced claude'}</Shell>
         <p>
           Follow the Claude sign-in URL and enter the returned authorization
           code in your terminal. You can review Claude Code access requirements
@@ -78,13 +77,11 @@ export const guides: {
           reconnect.
         </p>
         <h2>Review and bring back the result</h2>
-        <pre>
-          <code>
-            {
-              'juiced claude peek --changes-only\njuiced claude sync --from-workspace'
-            }
-          </code>
-        </pre>
+        <Shell>
+          {
+            'juiced claude peek --changes-only\njuiced claude sync --from-workspace'
+          }
+        </Shell>
         <p>
           The import brings back commits without changing your local files.
           Follow the <a href="/docs/syncing-code">Git transfer guide</a> to
@@ -99,6 +96,7 @@ export const guides: {
   },
   {
     slug: 'workspaces-and-sessions',
+    label: 'Workspaces and sessions',
     title: 'Workspaces, sessions, and persistence',
     description:
       'What Juiced saves, how project isolation works, and how to detach from and reconnect to Claude Code.',
@@ -119,9 +117,7 @@ export const guides: {
         <p>
           To choose a workspace explicitly, put the option before the command:
         </p>
-        <pre>
-          <code>{'juiced --workspace my-project claude'}</code>
-        </pre>
+        <Shell>{'juiced --workspace my-project claude'}</Shell>
         <h2>Detach while Claude keeps working</h2>
         <p>
           Enter <code>/detach</code> or close your terminal to disconnect while
@@ -139,9 +135,7 @@ export const guides: {
           workspace to reconnect to its saved session. From another tab, list
           the sessions and select the ID you want:
         </p>
-        <pre>
-          <code>{'juiced claude sessions\njuiced claude --session ses_…'}</code>
-        </pre>
+        <Shell>{'juiced claude sessions\njuiced claude --session ses_…'}</Shell>
         <p>
           Start a fresh conversation with <code>juiced claude --new</code>. A
           new conversation uses the same project workspace and files.
@@ -166,6 +160,7 @@ export const guides: {
   },
   {
     slug: 'syncing-code',
+    label: 'Syncing code',
     title: 'Move code between your laptop and the cloud',
     description:
       'Send commits and local edits to Juiced, inspect remote changes, and import or fast-forward results explicitly.',
@@ -178,13 +173,11 @@ export const guides: {
           that checkout. Uncommitted local edits are not included automatically.
         </p>
         <h2>Send local commits or edits</h2>
-        <pre>
-          <code>
-            {
-              'juiced claude sync --to-workspace\n# Also send staged, unstaged, and non-ignored untracked files:\njuiced claude sync --to-workspace --include-uncommitted'
-            }
-          </code>
-        </pre>
+        <Shell>
+          {
+            'juiced claude sync --to-workspace\n# Also send staged, unstaged, and non-ignored untracked files:\njuiced claude sync --to-workspace --include-uncommitted'
+          }
+        </Shell>
         <p>
           Close the workspace’s running sessions before using these upload
           commands. An existing remote checkout must be clean and able to
@@ -197,21 +190,17 @@ export const guides: {
           Review what you are sending, especially tracked configuration files.
         </p>
         <h2>Inspect cloud changes</h2>
-        <pre>
-          <code>{'juiced claude ls\njuiced claude peek --changes-only'}</code>
-        </pre>
+        <Shell>{'juiced claude ls\njuiced claude peek --changes-only'}</Shell>
         <p>
           Inspection compares local and remote files without applying changes or
           spending a Claude model turn.
         </p>
         <h2>Import commits for review</h2>
-        <pre>
-          <code>
-            {
-              'juiced claude sync --from-workspace\ngit log --oneline --all --decorate'
-            }
-          </code>
-        </pre>
+        <Shell>
+          {
+            'juiced claude sync --from-workspace\ngit log --oneline --all --decorate'
+          }
+        </Shell>
         <p>
           Importing stores remote commits under Juiced’s Git refs. It does not
           move your current branch or change your working files. Ask Claude to
@@ -219,9 +208,7 @@ export const guides: {
           the cloud.
         </p>
         <h2>Apply results to your local branch</h2>
-        <pre>
-          <code>juiced claude fast-forward</code>
-        </pre>
+        <Shell>juiced claude fast-forward</Shell>
         <p>
           This command imports results and explicitly advances the original
           local branch when the working tree is clean and history can
@@ -242,13 +229,11 @@ export const guides: {
           A non-Git project starts with an empty remote folder. Explicit file
           sync is available on macOS and Linux, on arm64 and x64:
         </p>
-        <pre>
-          <code>
-            {
-              'juiced claude sync --files\n# Keep syncing in a separate terminal:\njuiced claude sync --files --watch'
-            }
-          </code>
-        </pre>
+        <Shell>
+          {
+            'juiced claude sync --files\n# Keep syncing in a separate terminal:\njuiced claude sync --files --watch'
+          }
+        </Shell>
         <p>
           File sync is bidirectional, including deletions after its first
           reconciliation. Conflicts preserve both copies and stop the command.
@@ -259,6 +244,7 @@ export const guides: {
   },
   {
     slug: 'remote-claude-code',
+    label: 'Running with your laptop closed',
     title: 'Keep Claude Code running with your laptop closed',
     description:
       'Run Claude Code in a persistent cloud workspace, detach from your terminal, and reconnect to review its work.',
@@ -271,13 +257,11 @@ export const guides: {
           sandbox; your terminal is the interface to that process.
         </p>
         <h2>Start, detach, and return</h2>
-        <pre>
-          <code>
-            {
-              'juiced claude\n# Submit your task, then enter this in Juiced:\n/detach\n# Later, from the same project and terminal tab:\njuiced claude'
-            }
-          </code>
-        </pre>
+        <Shell>
+          {
+            'juiced claude\n# Submit your task, then enter this in Juiced:\n/detach\n# Later, from the same project and terminal tab:\njuiced claude'
+          }
+        </Shell>
         <p>
           The remote turn continues after you detach or close your terminal.
           Reconnecting lets you see the session and respond to anything that
@@ -317,6 +301,7 @@ export const guides: {
   },
   {
     slug: 'juiced-vs-vps',
+    label: 'Juiced vs a VPS',
     title: 'Juiced vs a VPS for Claude Code',
     description:
       'Compare Juiced’s cloud workspaces and terminal sessions with managing Claude Code on your own virtual server.',
