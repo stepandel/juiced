@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { copyFile, mkdtemp, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +45,18 @@ test(
       GH_TOKEN: 'fixture-token',
     };
     const store = new CredentialStore(origin, env);
+    const offlineEnv = { ...env, JUICED_SERVICE_URL: '', JUICED_CONFIG_HOME: join(root, 'offline-config') };
+    const built = join(output, 'cli.mjs');
+    const version = await execute(process.execPath, [built, '--version'], { env: offlineEnv });
+    assert.equal(version.stdout, 'juiced 0.2.1\n');
+    assert.equal(version.stderr, '');
+    await execute(process.execPath, [built, '--help'], { env: offlineEnv });
+    await assert.rejects(readFile(join(offlineEnv.JUICED_CONFIG_HOME, 'telemetry.json')), { code: 'ENOENT' });
+    for (const [action, expected] of [['disable', 'disabled'], ['status', 'disabled'], ['enable', 'enabled']]) {
+      const result = await execute(process.execPath, [built, 'telemetry', action!], { env: offlineEnv });
+      assert.equal(result.stdout, `Juiced telemetry is ${expected}.\n`);
+      assert.equal(result.stderr, '');
+    }
     await store.write({
       origin,
       accessToken: 'a'.repeat(40),
@@ -59,6 +71,7 @@ test(
  import assert from 'node:assert/strict';let runtime;const calls=[];
  globalThis.fetch=async(input,init)=>{
  const r=new Request(input,init),u=new URL(r.url);
+ if(u.pathname==='/v1/telemetry')return new Response(null,{status:204});
  if(u.origin==='https://api.github.com')return Response.json({login:'octocat'});
  assert.equal(u.origin,${JSON.stringify(origin)});assert.equal(r.headers.get('authorization'),'Bearer '+'a'.repeat(40));
  if(u.pathname==='/v1/me')return Response.json({userId:'user',deviceId:'device',accounts:[{id:${JSON.stringify(account)},status:'active',entitlement:'active'},{id:${JSON.stringify(other)},status:'active',entitlement:'active'}]});

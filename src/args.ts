@@ -135,6 +135,7 @@ Usage:
   juiced logout [--all]
   juiced whoami
   juiced update
+  juiced telemetry [status|enable|disable]
   juiced env set NAME --stdin [--plain]
   juiced env unset NAME [--plain]
   juiced claude github-configure [--stdin]

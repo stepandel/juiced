@@ -52,6 +52,7 @@ if (url.endsWith('/latest')) {
   const env = {
     ...process.env, PATH: tools, JUICED_INSTALL_DIR: install, JUICED_BIN_DIR: bin,
     FIXTURE_ASSETS: assets, FIXTURE_REQUESTS: join(directory, 'requests'),
+    FIXTURE_COMPLETIONS: join(directory, 'completions'), JUICED_TELEMETRY_DISABLED: '1',
     FIXTURE_OS: process.platform === 'darwin' ? 'Darwin' : 'Linux', FIXTURE_ARCH: process.arch === 'arm64' ? 'arm64' : 'x86_64',
     JUICED_VERSION: 'latest', JUICED_CONFIG_HOME: join(directory, 'config'), JUICED_MODE: 'managed',
   };
@@ -65,7 +66,7 @@ if (url.endsWith('/latest')) {
       await mkdir(join(payload, 'juiced/lib'), { recursive: true });
       await writeFile(join(payload, 'juiced/bin/juiced'), launcher, { mode: 0o755 });
       await writeFile(join(payload, 'juiced/lib/node'), '#!/bin/sh\nexec /bin/sh "$@"\n', { mode: 0o755 });
-      await writeFile(join(payload, 'juiced/bin/juiced.mjs'), `#!/bin/sh\ncase "$1" in\n--version) printf 'juiced ${version}\\n';;\n--help) printf 'juiced login\\n';;\n*) printf '%s\\n' "$@";;\nesac\n`);
+      await writeFile(join(payload, 'juiced/bin/juiced.mjs'), `#!/bin/sh\ncase "$1" in\n--version) printf 'juiced ${version}\\n';;\n--help) printf 'juiced login\\n';;\n--internal-install-completed) printf '%s\\n' "$2" >> "$FIXTURE_COMPLETIONS";;\n*) printf '%s\\n' "$@";;\nesac\n`);
       await execute('tar', ['-czf', join(assets, asset), '-C', payload, 'juiced']);
     }
     const digest = createHash('sha256').update(await readFile(join(assets, asset))).digest('hex');
@@ -85,6 +86,7 @@ test('piped installer resolves latest, verifies an archive and runs without Node
   assert.doesNotMatch((await readdir(f.env.PATH)).join('\n'), /^(node|npm)$/m);
   const result = await f.run();
   assert.match(result.stdout, /Installed Juiced 0\.2\.0/);
+  assert.equal(await readFile(f.env.FIXTURE_COMPLETIONS, 'utf8'), 'fresh\n');
   assert.match(result.stdout, /Add .* to your PATH/);
   assert.equal((await f.installed(['--version'])).stdout.trim(), 'juiced 0.2.0');
   assert.equal((await f.installed(['prompt with spaces', "quote's"])).stdout, "prompt with spaces\nquote's\n");
@@ -103,6 +105,7 @@ test('explicit version upgrades atomically and retains the previous runnable rel
   assert.deepEqual((await readFile(resolve(previous, '../../install-paths'), 'utf8')).split('\0'), [f.install, f.bin, '']);
   await f.archive('0.2.1');
   await f.run(['0.2.1'], { JUICED_VERSION: 'invalid' });
+  assert.equal(await readFile(f.env.FIXTURE_COMPLETIONS, 'utf8'), 'fresh\nupdate\n');
   assert.equal((await f.installed(['--version'])).stdout.trim(), 'juiced 0.2.1');
   assert.equal((await execute(previous, ['--version'], { env: f.env })).stdout.trim(), 'juiced 0.2.0');
   assert.doesNotMatch(await readFile(f.env.FIXTURE_REQUESTS, 'utf8'), /\/latest/);
@@ -123,6 +126,7 @@ test('bad checksums and failed downloads preserve the installed command and clea
   assert.equal(await readlink(join(f.bin, 'juiced')), previous);
   assert.equal((await f.installed(['--version'])).stdout.trim(), 'juiced 0.2.0');
   assert.equal((await readdir(join(f.install, 'releases'))).length, 1);
+  assert.equal(await readFile(f.env.FIXTURE_COMPLETIONS, 'utf8'), 'fresh\n');
 });
 
 test('installer also verifies downloads using sha256sum when available', async t => {

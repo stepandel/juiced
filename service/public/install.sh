@@ -43,9 +43,11 @@ main() {
 
   install_dir=${JUICED_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/juiced}
   bin_dir=${JUICED_BIN_DIR:-$HOME/.local/bin}
+  install_kind=fresh
   case "$install_dir" in /*) ;; *) fail 'JUICED_INSTALL_DIR must be an absolute path.' ;; esac
   case "$bin_dir" in /*) ;; *) fail 'JUICED_BIN_DIR must be an absolute path.' ;; esac
   if [ -e "$bin_dir/juiced" ] || [ -L "$bin_dir/juiced" ]; then
+    install_kind=update
     [ -L "$bin_dir/juiced" ] || fail "An existing command occupies $bin_dir/juiced. Move it before installing."
     case $(readlink "$bin_dir/juiced") in
       "$install_dir/releases/"*/bin/juiced) ;;
@@ -89,6 +91,9 @@ main() {
   ln -s "$destination/bin/juiced" "$link_staging/juiced"
   mv -f "$link_staging/juiced" "$bin_dir/juiced"
   printf 'Installed Juiced %s to %s/juiced.\n' "$version" "$bin_dir"
+  # The installed CLI owns the random ID and opt-out setting. Its version check
+  # above never counts as a first run. Reporting failure cannot fail installation.
+  "$bin_dir/juiced" --internal-install-completed "$install_kind" || :
   case :$PATH: in
     *:"$bin_dir":*) printf 'Run juiced login to get started.\n' ;;
     *) printf 'Add %s to your PATH, then run juiced login.\n' "$bin_dir" ;;

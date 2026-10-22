@@ -3,7 +3,8 @@ export interface Invocation {
   account?: string;
   service?: string;
   args: string[];
-  command?: 'login' | 'logout' | 'whoami' | 'update';
+  command?: 'login' | 'logout' | 'whoami' | 'update' | 'telemetry';
+  telemetryAction?: 'status' | 'enable' | 'disable';
   noBrowser?: boolean;
   all?: boolean;
 }
@@ -40,13 +41,21 @@ export function parseInvocation(input: string[], env: NodeJS.ProcessEnv = proces
     } else break;
   }
   const rest = input.slice(n);
-  if (['login', 'logout', 'whoami', 'update'].includes(rest[0] ?? '')) {
-    if (result.mode === 'self-managed' && rest[0] !== 'update')
+  if (['login', 'logout', 'whoami', 'update', 'telemetry'].includes(rest[0] ?? '')) {
+    if (result.mode === 'self-managed' && !['update', 'telemetry'].includes(rest[0]!))
       throw new Error(
         'Account commands require managed mode. Use juiced --self-managed claude login for Claude.',
       );
     if (result.args.length) throw new Error('Account commands do not accept --workspace.');
     result.command = rest[0] as NonNullable<Invocation['command']>;
+    if (result.command === 'telemetry') {
+      if (rest.length > 2 || (rest[1] !== undefined && !['status', 'enable', 'disable'].includes(rest[1])))
+        throw new Error('Usage: juiced telemetry [status|enable|disable]');
+      result.telemetryAction = (rest[1] ?? 'status') as 'status' | 'enable' | 'disable';
+      if (result.mode === 'self-managed' && (result.account || result.service))
+        throw new Error('--account cannot select a self-managed deployment.');
+      return result;
+    }
     const flags = rest.slice(1),
       allowed =
         result.command === 'login'

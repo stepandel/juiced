@@ -10,6 +10,8 @@ import type { Pool } from 'pg';
 import type { Config } from './config';
 import { ServiceError, readText } from './config';
 import { transaction } from './db';
+import type { Telemetry } from './telemetry';
+import { telemetryFromHeaders } from '../../contracts/telemetry';
 
 export const CLIENT_ID = 'juiced-cli';
 export const tokenHash = (token: string, type: string) =>
@@ -144,7 +146,7 @@ export async function seedClient(auth: Auth, pool: Pool, cfg: Config) {
 }
 
 /** Provider issues/rotates opaque tokens; this records their device lineage before returning them. */
-export async function authHandler(auth: Auth, pool: Pool, request: Request) {
+export async function authHandler(auth: Auth, pool: Pool, request: Request, telemetry?: Telemetry) {
   const path = new URL(request.url).pathname;
   if (path !== '/api/auth/oauth2/token' || request.method !== 'POST') return auth.handler(request);
   const raw = await readText(request.clone(), 16 * 1024);
@@ -172,7 +174,7 @@ export async function authHandler(auth: Auth, pool: Pool, request: Request) {
   if (!response.ok) return response;
   const tokens = (await response.clone().json()) as { refresh_token?: string };
   if (!tokens.refresh_token) throw new ServiceError('device_grant_missing', 503);
-  await transaction(pool, async (tx) => {
+  const userId = await transaction(pool, async (tx) => {
     const refreshRow = (
       await tx.query(`SELECT id,"userId" FROM "oauthRefreshToken" WHERE token=$1`, [
         tokenHash(tokens.refresh_token!, 'refresh_token'),
@@ -212,7 +214,12 @@ export async function authHandler(auth: Auth, pool: Pool, request: Request) {
       'INSERT INTO device_refresh_tokens(refresh_id,device_id) VALUES($1,$2) ON CONFLICT DO NOTHING',
       [refreshRow.id, device],
     );
+    return String(refreshRow.userId);
   });
+  // Only completed device grants are logins; token refreshes are not new users.
+  const context = telemetryFromHeaders(request.headers);
+  if (!refresh && data.get('grant_type') === DEVICE_CODE_GRANT_TYPE && context)
+    await telemetry?.capture('cli_login_succeeded', context, {}, userId).catch(() => {});
   return response;
 }
 

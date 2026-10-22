@@ -86,8 +86,11 @@ test('real SDK transport streams a remote subprocess and preserves piped bytes, 
   const { stdin } = input();
   stdin.end(Buffer.from('A prompt with 🍈 and \x00 binary\n'));
   const session = app.workspace({ slug: 'default' }).session({ id: 'test', keepAliveSeconds: 120 });
-  const code = await runRemoteTerminal(session, ['-e', `process.stderr.write('diagnostic\\n'); process.stdin.pipe(process.stdout); process.stdin.on('end',()=>process.exitCode=9);`], { stdin, stdout: stdout.stream, stderr: stderr.stream });
+  let connected = 0, active = 0;
+  const code = await runRemoteTerminal(session, ['-e', `process.stderr.write('diagnostic\\n'); process.stdin.pipe(process.stdout); process.stdin.on('end',()=>process.exitCode=9);`], { stdin, stdout: stdout.stream, stderr: stderr.stream }, { onConnected: () => { connected++; }, onActivity: () => { active++; } });
   assert.equal(code, 9);
+  assert.equal(connected, 1);
+  assert.ok(active > 0);
   assert.equal(stdout.text(), 'A prompt with 🍈 and \x00 binary\n');
   assert.equal(stderr.text(), 'diagnostic\n');
   assert.equal(stops, 1);

@@ -6,6 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import type { AppConnection } from '@cantelop/sdk';
 import { CredentialStore, savedOrigin, rememberOrigin, type Credentials } from './store.js';
+import { CliTelemetry } from '../telemetry.js';
+import { TELEMETRY_HEADER, type CliEvent, type CliEventProperties } from '../../contracts/telemetry.js';
 
 declare const JUICED_DEFAULT_SERVICE_URL: string;
 const execute = promisify(execFile);
@@ -36,9 +38,11 @@ const messages: Record<string, string> = {
 export class AccountClient {
   readonly origin: string;
   readonly store: CredentialStore;
+  readonly telemetry: CliTelemetry;
   constructor(
     private env: NodeJS.ProcessEnv = process.env,
     private fetcher: typeof fetch = fetch,
+    telemetry?: CliTelemetry,
   ) {
     const configured =
       env.JUICED_SERVICE_URL ??
@@ -65,6 +69,7 @@ export class AccountClient {
       throw new Error('JUICED_SERVICE_URL must be an HTTPS origin.');
     this.origin = url.origin;
     this.store = new CredentialStore(this.origin, env);
+    this.telemetry = telemetry ?? new CliTelemetry(env, fetcher);
   }
   async response(
     path: string,
@@ -75,6 +80,8 @@ export class AccountClient {
   ): Promise<Response> {
     const token = authenticated ? await this.token(signal) : undefined;
     const headers = new Headers(init.headers);
+    headers.delete(TELEMETRY_HEADER);
+    for (const [key, value] of Object.entries(await this.telemetry.headers())) headers.set(key, value);
     if (token) headers.set('Authorization', `Bearer ${token}`);
     const result = await this.fetcher(new URL(path, this.origin), {
       ...init,
@@ -116,6 +123,13 @@ export class AccountClient {
       throw new ManagedError('invalid_service_response');
     }
   }
+  track(event: CliEvent, properties: CliEventProperties) {
+    this.telemetry.schedule(async () => {
+      if (!(await this.telemetry.enabled())) return;
+      const token = await this.token(AbortSignal.timeout(1500));
+      await this.telemetry.capture(this.origin, event, properties, token);
+    });
+  }
   async token(signal: AbortSignal) {
     return this.store.locked(signal, async () => {
       let saved = await this.store.read();
@@ -125,7 +139,7 @@ export class AccountClient {
         method: 'POST',
         signal,
         redirect: 'error',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...await this.telemetry.headers() },
         body: new URLSearchParams({
           client_id: 'juiced-cli',
           grant_type: 'refresh_token',
@@ -170,6 +184,8 @@ export class AccountClient {
           );
           return;
         }
+        // Expired/revoked credentials can be followed by a different person's login.
+        await this.telemetry.resetIdentity();
       }
       await this.deviceLogin(signal, noBrowser);
     }, 'login');
@@ -215,6 +231,7 @@ export class AccountClient {
         signal,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
+          ...await this.telemetry.headers(),
           'X-Juiced-Device-Name': (this.env.JUICED_DEVICE_NAME ?? hostname())
             .replace(/[^A-Za-z0-9 ._-]/g, '')
             .slice(0, 64),
