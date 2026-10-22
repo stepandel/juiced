@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { chmod, mkdir, mkdtemp, rm, readFile, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -298,4 +300,39 @@ test('legacy private-file credentials move to the current file exactly once', as
   if (process.platform !== 'win32') assert.equal((await stat(store.path)).mode & 0o777, 0o600);
   await store.clear();
   assert.equal(await store.read(), undefined);
+});
+
+test('a token read survives another CLI migrating credentials after the current file was missing', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'juiced-migration-race-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const env = { JUICED_CONFIG_HOME: root, JUICED_SERVICE_URL: 'https://example.test' };
+  const client = new AccountClient(env, async () => { throw new Error('No refresh is needed'); });
+  const credentials = { origin: client.origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000 };
+  await writeFile(client.store.legacyPath, JSON.stringify(credentials), { mode: 0o600 });
+
+  let missing!: () => void, resume!: () => void;
+  const absent = new Promise<void>(resolve => { missing = resolve; });
+  const resumed = new Promise<void>(resolve => { resume = resolve; });
+  const originalOpen = fs.open;
+  let paused = false;
+  const open = t.mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
+    try { return await originalOpen(...args); }
+    catch (error) {
+      if (!paused && args[0] === client.store.path && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+        paused = true; missing(); await resumed;
+      }
+      throw error;
+    }
+  });
+  syncBuiltinESMExports();
+  t.after(() => { resume(); open.mock.restore(); syncBuiltinESMExports(); });
+
+  const token = client.token(new AbortController().signal);
+  void token.catch(() => {});
+  try {
+    await absent;
+    assert.deepEqual(await new CredentialStore(client.origin, env).read(), credentials);
+    await assert.rejects(stat(client.store.legacyPath), { code: 'ENOENT' });
+  } finally { resume(); }
+  assert.equal(await token, credentials.accessToken);
 });

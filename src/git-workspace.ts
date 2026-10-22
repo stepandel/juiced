@@ -3,7 +3,7 @@ import { open, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { SessionEventCursor, SessionRef, WorkspaceRef } from '@cantelop/sdk';
+import { RemoteAppError, type SessionEventCursor, type SessionRef, type WorkspaceRef } from '@cantelop/sdk';
 import { readRemoteConfiguration } from './git-remotes.js';
 import { ancestor, cleanRepository, createUpload, fileInfo, git, gitText, sha256, type Repository } from './git.js';
 import { MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, validTransferId, validateExportManifest, type GitCommand, type GitResult, type GitStatus, type ExportManifest, type FileInfo } from './git-protocol.js';
@@ -128,6 +128,17 @@ export class GitWorkspaceClient {
     }
   }
 
+  private async *downloadEvents(signal: AbortSignal, after?: SessionEventCursor) {
+    try {
+      yield* this.session.stream({ signal, ...(after ? { after } : {}) });
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      if (error instanceof RemoteAppError) throw error;
+      // Raw fetch/reader errors originate here, before any local application.
+      throw new RemoteAppError('event_subscription_failed', 0, undefined, { cause: error });
+    }
+  }
+
   private async download(id: string, path: string, info: FileInfo, selected: 'bundle' | 'snapshot' = 'bundle') {
     const file = await open(path, 'w+', 0o600);
     let offset = 0; let cursor: SessionEventCursor | undefined; let complete = false; let failures = 0;
@@ -138,7 +149,7 @@ export class GitWorkspaceClient {
     try {
       while (!complete) {
         try {
-          for await (const event of this.session.stream({ ...(cursor ? { after: cursor } : {}), signal })) {
+          for await (const event of this.downloadEvents(signal, cursor)) {
             const data = event.data;
             if (data.type === 'git-error' && data.id === id) throw new Error(`Remote Git download failed: ${data.message}`);
             if (data.type === 'git-chunk' && data.id === id && (data.file ?? 'bundle') === selected) {

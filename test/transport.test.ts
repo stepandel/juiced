@@ -3,6 +3,7 @@ import test from 'node:test';
 import { RemoteAppError } from '@cantelop/sdk';
 import { backoffMs, isAdmissionTimeout, isCursorExpired, isTransient, isViewMissing, messageId, retryAdmission, withTimeout } from '../src/transport.js';
 import { transferFailure } from '../src/agent/publications.js';
+import { GitError } from '../src/git.js';
 
 const status = (code: number, message = 'x') => Object.assign(new Error(message), { status: code });
 
@@ -106,7 +107,18 @@ test('a failed publication download is reported as retryable, not as a conflict'
   assert.deepEqual(local, { status: 'conflict', message: 'Local edits overlap this snapshot. Nothing was applied.' });
   // An expired or cancelled application is not a connection failure.
   assert.equal(transferFailure(snapshot, new DOMException('expired', 'TimeoutError'), 'fallback').status, 'conflict');
-  const upload = transferFailure({ id: 'x', kind: 'upload', summary: 's', expiresAt: 0, head: 'a'.repeat(40), sourceBranch: null, includeUncommitted: true }, new Error('fetch failed'), 'fallback');
+  const upload = transferFailure({ id: 'x', kind: 'upload', summary: 's', expiresAt: 0, head: 'a'.repeat(40), sourceBranch: null, includeUncommitted: true }, new RemoteAppError('command_outcome_unknown', 0, undefined, { cause: new Error('fetch failed') }), 'fallback');
   assert.equal(upload.status, 'failed');
   assert.match(upload.message, /pull_local_changes/);
+});
+
+test('publication failures retain local conflicts and filesystem errors containing transport words', () => {
+  const snapshot = { kind: 'snapshot' as const } as Parameters<typeof transferFailure>[0];
+  for (const error of [
+    new Error('Local edits overlap this snapshot. Nothing was applied. Review /tmp/stream-app/.git/juiced-publications/snapshot.patch'),
+    new GitError('error: connection.ts: patch does not apply', 1),
+    Object.assign(new Error("ENOSPC: no space left on device, write '/tmp/network-app/.git/juiced-publications/receipt.json'"), { code: 'ENOSPC' }),
+  ]) {
+    assert.deepEqual(transferFailure(snapshot, error, 'fallback'), { status: 'conflict', message: error.message });
+  }
 });

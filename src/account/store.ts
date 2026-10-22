@@ -34,16 +34,16 @@ export class CredentialStore {
     const current = await readCredentialFile(this.path, this.origin);
     if (current.kind === 'credentials') return current.value;
     if (current.kind === 'keyring') throw new Error('Invalid Juiced credential file. Sign in again.');
-    // An OS-keyring pointer left by an older release renews the sign-in
-    // through the normal login flow without opening an OS password dialog.
-    if ((await readCredentialFile(this.legacyPath, this.origin)).kind !== 'credentials') return;
-    // Move rather than copy: refresh tokens rotate, so two owners of one token
-    // would sign each other out on their next refresh.
+    // Another process may have moved the legacy file since our first read.
+    // Recheck both locations under the migration lock before reporting sign-out.
     return withFileLock(this.legacyPath + '.lock', new AbortController().signal, async () => {
       const raced = await readCredentialFile(this.path, this.origin);
       if (raced.kind === 'credentials') return raced.value;
+      if (raced.kind === 'keyring') throw new Error('Invalid Juiced credential file. Sign in again.');
       const legacy = await readCredentialFile(this.legacyPath, this.origin);
+      // Legacy keyring pointers renew sign-in without opening the OS store.
       if (legacy.kind !== 'credentials') return;
+      // Move rather than copy: refresh tokens rotate and must have one owner.
       await this.write(legacy.value);
       await rm(this.legacyPath, { force: true });
       return legacy.value;

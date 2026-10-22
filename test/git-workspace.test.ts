@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createClient } from '@libsql/client';
-import { CantelopClient, type AppCommandEnvelope, type SessionEvent } from '@cantelop/sdk';
+import { CantelopClient, RemoteAppError, type AppCommandEnvelope, type SessionEvent } from '@cantelop/sdk';
 import type { WorkspaceDatabase } from '@cantelop/sdk/session';
 import { createUpload, discoverRepository, fileInfo, git, gitText } from '../src/git.js';
 import { createGitSession, GitWorkspaceClient } from '../src/git-workspace.js';
@@ -14,6 +14,7 @@ import { selectProject } from '../src/project.js';
 import { createGitRuntime } from '../src/runtime/git.js';
 import { acquireCheckout, CheckoutBusy } from '../src/runtime/project-state.js';
 import { createTerminal } from '../src/runtime/terminal.js';
+import { transferFailure } from '../src/agent/publications.js';
 import type { GitCommand } from '../src/git-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
 
@@ -35,6 +36,7 @@ async function fixture(t: test.TestContext) {
   const histories = new Map<string, SessionEvent<TerminalEvent>[]>();
   const emitted = new EventEmitter();
   let failChunk = false; let failStream = false; let dropped = false;
+  let streamFailure: Error | undefined;
   const context = (id: string) => ({ signal: lifetime.signal, session: { id, keepAliveSeconds: 120 }, env: {}, database: async () => db as WorkspaceDatabase });
   const app = new CantelopClient().app<TerminalCommand, TerminalEvent, TerminalReply>({
     name: 'juiced-git-test', runtime: { receive() {} },
@@ -63,6 +65,7 @@ async function fixture(t: test.TestContext) {
           return Response.json({ protocolVersion: 2, id: envelope.id, reply });
         }
         if (operation.type === 'stream') {
+          if (streamFailure) throw streamFailure;
           let index = operation.after?.sequence ?? 0;
           const abort = new AbortController(); const signal = AbortSignal.any([request.signal, abort.signal]);
           return new Response(new ReadableStream<Uint8Array>({
@@ -85,7 +88,8 @@ async function fixture(t: test.TestContext) {
   const client = async () => new GitWorkspaceClient(workspace, project, (await discoverRepository(local))!, lifetime.signal);
   t.after(async () => { lifetime.abort(); db.close(); await rm(root, { recursive: true, force: true }); });
   return { root, local, remote, target: join(remote, project.directoryName), project, db, context, client, lifetime, commands, stopped,
-    failNextChunk() { failChunk = true; }, failNextStream() { failStream = true; } };
+    failNextChunk() { failChunk = true; }, failNextStream() { failStream = true; },
+    failStreams(error: Error) { streamFailure = error; } };
 }
 
 test('SDK round trip preserves exact unpublished commits and imports branches before optional fast-forward', { timeout: 30_000 }, async t => {
@@ -362,7 +366,6 @@ test('an unborn HEAD is reported as a repository without commits', async t => {
 });
 
 test('Git transfers wait out session admission timeouts with the same message identity', async () => {
-  const { RemoteAppError } = await import('@cantelop/sdk');
   const ids: string[] = [];
   let waited = 0;
   const workspace = { session: () => ({ async request(_command: unknown, options: { id: string }) {
@@ -375,4 +378,20 @@ test('Git transfers wait out session admission timeouts with the same message id
   assert.equal(ids.length, 4);
   assert.equal(new Set(ids).size, 1);
   assert.equal(waited, 1);
+});
+
+test('raw download subscription failures are typed at the transport boundary', async t => {
+  const f = await fixture(t);
+  const head = await gitText(f.local, ['rev-parse', 'HEAD']);
+  const client = await f.client();
+  await client.send(false);
+  const error = new TypeError('fetch failed');
+  f.failStreams(error);
+  await assert.rejects(client.receive(), failure => {
+    assert.ok(failure instanceof RemoteAppError);
+    assert.equal(failure.cause, error);
+    assert.equal(transferFailure({ kind: 'commits' } as never, failure, 'fallback').status, 'failed');
+    return true;
+  });
+  assert.equal(await gitText(f.local, ['rev-parse', 'HEAD']), head);
 });

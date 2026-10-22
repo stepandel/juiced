@@ -1,19 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { RemoteAppError } from '@cantelop/sdk';
 import type { TerminalCommand, TerminalReply } from '../protocol.js';
 import type { Approval } from '../agent-protocol.js';
 import { validateExportManifest, validOid, validTransferId } from '../git-protocol.js';
 import type { LocalTransfer, Publication, PublishResult, UploadRequest } from '../publish-protocol.js';
-import { isTransient, withTimeout } from '../transport.js';
+import { withTimeout } from '../transport.js';
 
 export type LocalPublish = {
   head: string; apply(publication: Publication, signal: AbortSignal): Promise<PublishResult>;
   upload?: { prepare(request: UploadRequest, signal: AbortSignal): Promise<Record<string, unknown>>; send(request: UploadRequest, signal: AbortSignal): Promise<PublishResult>; discard(id: string): Promise<void> };
-};
-
-/** A Cantelop request or connection failure, as opposed to a local refusal or cancellation. */
-const remoteFailure = (error: unknown) => {
-  const name = (error as { name?: unknown } | null | undefined)?.name;
-  return name === 'RemoteAppError' || isTransient(error) && name !== 'AbortError' && name !== 'TimeoutError';
 };
 
 /**
@@ -23,7 +18,9 @@ const remoteFailure = (error: unknown) => {
  */
 export function transferFailure(transfer: LocalTransfer, error: unknown, fallback: string): PublishResult {
   const message = (error instanceof Error ? error.message : fallback).slice(0, 2000);
-  if (!remoteFailure(error)) return { status: 'conflict', message };
+  // The SDK types request failures; GitWorkspaceClient also types stream failures
+  // at the subscription boundary. Local Git/filesystem errors keep their origin.
+  if (!(error instanceof RemoteAppError)) return { status: 'conflict', message };
   if (transfer.kind === 'upload')
     return { status: 'failed', message: `Juiced could not send the local changes to the workspace (${message}). This was a connection or capacity error, not a conflict; the remote checkout was not changed and the local client is still attached. Retry pull_local_changes in a minute.` };
   const recovery = transfer.kind === 'snapshot'

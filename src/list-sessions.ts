@@ -5,7 +5,7 @@ import type { WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
 import { discoverRepository, sha256 } from './git.js';
 import { selectProject } from './project.js';
 import { isENOENT } from './fs-util.js';
-import { retryAdmission } from './transport.js';
+import { ADMISSION_RETRY_MS, retryAdmission } from './transport.js';
 import { SESSION_LIST_TIMEOUT_MS, validSessionId, validateSessionListPage, type SessionListCommand } from './session-list-protocol.js';
 import { validWorkspaceId, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 
@@ -38,7 +38,8 @@ export async function listSessions(app: ListingApp, directory: string, workspace
   const repository = await discoverRepository(project.localDirectory);
   const known = await localIdentities(project);
   const session = app.workspace({ id: existing.id }).session({ keepAliveSeconds: 0 });
-  const combined = AbortSignal.any([signal, AbortSignal.timeout(SESSION_LIST_TIMEOUT_MS)]);
+  // Admission can take longer than the listing itself while another session finishes.
+  const combined = AbortSignal.any([signal, AbortSignal.timeout(ADMISSION_RETRY_MS + SESSION_LIST_TIMEOUT_MS)]);
   const sessions: Array<{ id: string; updatedAt: string }> = [];
   let after: string | undefined, unidentified = 0, unreadable = 0;
   try {
