@@ -3,6 +3,8 @@ import type { Pool } from 'pg';
 import { readCliEvent, telemetryFromHeaders, type TelemetryContext, type CliEventProperties } from '../../contracts/telemetry';
 import { authenticate } from './auth';
 import { readText, ServiceError, type Config } from './config';
+import { rateLimit } from './db';
+import { logError } from './log';
 
 type Event = { event: string; distinct_id: string; properties: Record<string, unknown> };
 export class Telemetry {
@@ -10,9 +12,12 @@ export class Telemetry {
   private host: string;
   constructor(env: Record<string, string | undefined>, private fetcher: typeof fetch = fetch) {
     this.key = env.JUICED_POSTHOG_KEY;
-    this.host = env.JUICED_POSTHOG_HOST ?? 'https://us.i.posthog.com';
-    if (this.key && !['https://us.i.posthog.com', 'https://eu.i.posthog.com'].includes(this.host))
-      throw new Error('JUICED_POSTHOG_HOST must be the US or EU PostHog ingestion origin');
+    this.host = (env.JUICED_POSTHOG_HOST || 'https://us.i.posthog.com').replace(/\/$/, '');
+    // A misconfigured analytics host disables collection instead of stopping the service.
+    if (this.key && !['https://us.i.posthog.com', 'https://eu.i.posthog.com'].includes(this.host)) {
+      logError('telemetry.config', new Error('JUICED_POSTHOG_HOST must be the US or EU PostHog ingestion origin'));
+      this.key = undefined;
+    }
   }
   get enabled() { return !!this.key; }
 
@@ -21,7 +26,8 @@ export class Telemetry {
     const anonymous = `anonymous:${context.anonymousId}`;
     const distinct_id = userId ? `user:${userId}` : anonymous;
     const batch: Event[] = [];
-    if (userId) batch.push({ event: '$identify', distinct_id, properties: { $anon_distinct_id: anonymous, $geoip_disable: true } });
+    // Link the anonymous identity once at login or connection, not on every activity event.
+    if (userId && event !== 'cli_session_active') batch.push({ event: '$identify', distinct_id, properties: { $anon_distinct_id: anonymous, $geoip_disable: true } });
     batch.push({ event, distinct_id, properties: {
       installation_id: context.installationId, cli_version: context.version,
       os: context.platform, arch: context.arch, ...properties,
@@ -51,11 +57,7 @@ export class Telemetry {
     // The peer IP is set only by our Vercel ingress adapter, never taken from the event.
     const peer = request.headers.get('x-juiced-peer-ip');
     const key = identity ? `user:${identity.userId}` : peer ? createHash('sha256').update(peer).digest('hex') : context.installationId;
-    const count = (await pool.query(
-      `INSERT INTO api_limits(key,bucket,count) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET bucket=excluded.bucket,count=CASE WHEN api_limits.bucket=excluded.bucket THEN api_limits.count+1 ELSE 1 END RETURNING count`,
-      [`telemetry:${key}`, Math.floor(Date.now() / 60000)],
-    )).rows[0]!.count;
-    if (count > 60) throw new ServiceError('rate_limit_exceeded', 429);
+    await rateLimit(pool, `telemetry:${key}`, 60);
     const accepted = await this.capture(input.event, context, input.properties, identity?.userId);
     return new Response(null, { status: accepted ? 202 : 204 });
   }

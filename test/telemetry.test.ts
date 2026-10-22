@@ -82,6 +82,9 @@ test('persistent opt-out works offline and overrides all later CLI instances', a
   assert.equal(await client.capture(f.env.JUICED_SERVICE_URL, 'cli_first_run'), false);
   await client.preference(true);
   assert.equal(await client.enabled(), true);
+  const { anonymousId } = JSON.parse(await readFile(client.path, 'utf8'));
+  await client.preference(true);
+  assert.equal(JSON.parse(await readFile(client.path, 'utf8')).anonymousId, anonymousId, 'Enabling twice keeps the identity');
   assert.equal(parseInvocation(['telemetry', 'disable']).telemetryAction, 'disable');
   assert.equal(parseInvocation(['telemetry']).telemetryAction, 'status');
   assert.throws(() => parseInvocation(['telemetry', 'invalid']), /Usage/);
@@ -92,6 +95,9 @@ test('corrupt settings and failed HTTP requests cannot interrupt CLI operations'
   await writeFile(f.telemetry.path, '{invalid');
   assert.deepEqual(await f.telemetry.headers(), {});
   assert.equal(await f.telemetry.capture(f.env.JUICED_SERVICE_URL, 'cli_first_run'), false);
+  assert.equal(await f.telemetry.enabled(), false);
+  await f.telemetry.preference(false);
+  assert.equal(JSON.parse(await readFile(f.telemetry.path, 'utf8')).disabled, true);
   await rm(f.telemetry.path);
   const unavailable = new CliTelemetry(f.env, async () => { throw new Error('offline'); }, { write: () => true });
   assert.equal(await unavailable.capture(f.env.JUICED_SERVICE_URL, 'cli_first_run'), false);
@@ -113,4 +119,9 @@ test('session events use account credentials and omit metadata after opt-out', a
   client.track('cli_session_active', { session_mode: 'interactive' });
   await f.telemetry.flush();
   assert.equal(f.requests.length, 2);
+  await f.telemetry.preference(true);
+  await client.store.write({ origin: client.origin, accessToken: 'a'.repeat(32), refreshToken: 'b'.repeat(32), expiresAt: Date.now() + 1000 });
+  client.track('cli_session_active', { session_mode: 'interactive' });
+  await f.telemetry.flush();
+  assert.equal(f.requests.length, 2, 'Background events never refresh credentials');
 });

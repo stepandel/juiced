@@ -48,15 +48,18 @@ test('install events carry only approved properties and never forward request he
 
 test('session activity requires authentication and links to the verified user', async () => {
   const f = fixture();
-  const body = { event: 'cli_session_active', properties: { session_mode: 'interactive' } };
+  const body = { event: 'cli_session_connected', properties: { session_mode: 'interactive' } };
   await assert.rejects(f.telemetry.receive(request(body), f.pool, cfg), { code: 'not_signed_in' });
   assert.equal(f.batches.length, 0);
   assert.equal((await f.telemetry.receive(request(body, true), f.pool, cfg)).status, 202);
-  const [identify, activity] = f.batches[0]!.batch;
+  const [identify, connected] = f.batches[0]!.batch;
   assert.equal(identify!.event, '$identify');
   assert.equal(identify!.properties.$anon_distinct_id, `anonymous:${context.anonymousId}`);
-  assert.equal(activity!.distinct_id, 'user:verified-user');
-  assert.equal(activity!.event, 'cli_session_active');
+  assert.equal(connected!.distinct_id, 'user:verified-user');
+  assert.equal(connected!.event, 'cli_session_connected');
+  const active = { event: 'cli_session_active', properties: { session_mode: 'interactive' } };
+  assert.equal((await f.telemetry.receive(request(active, true), f.pool, cfg)).status, 202);
+  assert.deepEqual(f.batches[1]!.batch.map(e => [e.event, e.distinct_id]), [['cli_session_active', 'user:verified-user']], 'Activity does not repeat $identify');
 });
 
 test('event allowlist rejects arbitrary content, user IDs, error strings and oversized bodies', async () => {
@@ -82,5 +85,6 @@ test('rate limiting and unavailable PostHog do not acknowledge undelivered event
   await assert.rejects(f.telemetry.receive(request(body), pool, cfg), { code: 'rate_limit_exceeded' });
   const broken = new Telemetry({ JUICED_POSTHOG_KEY: 'phc_fixture' }, async () => { throw new Error('offline'); });
   assert.equal(await broken.capture('cli_installed', context), false);
-  assert.throws(() => new Telemetry({ JUICED_POSTHOG_KEY: 'phc_fixture', JUICED_POSTHOG_HOST: 'http://internal' }), /JUICED_POSTHOG_HOST/);
+  assert.equal(new Telemetry({ JUICED_POSTHOG_KEY: 'phc_fixture', JUICED_POSTHOG_HOST: 'http://internal' }).enabled, false);
+  assert.equal(new Telemetry({ JUICED_POSTHOG_KEY: 'phc_fixture', JUICED_POSTHOG_HOST: 'https://eu.i.posthog.com/' }).enabled, true);
 });

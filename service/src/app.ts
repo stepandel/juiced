@@ -13,7 +13,7 @@ import { ServiceError, readText, type Config } from './config';
 import { relay } from './relay';
 import { stopGitSession } from './git-stop';
 import type { Billing } from './billing';
-import { transaction } from './db';
+import { rateLimit, transaction } from './db';
 import { signIn, devicePage, accountPage } from './pages';
 import { logError } from './log';
 import type { Telemetry } from './telemetry';
@@ -49,13 +49,7 @@ export function application(s: Services) {
         expiresAt: session.session.expiresAt.getTime(),
       };
     }
-    const count = (
-      await s.pool.query(
-        `INSERT INTO api_limits(key,bucket,count) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET bucket=excluded.bucket,count=CASE WHEN api_limits.bucket=excluded.bucket THEN api_limits.count+1 ELSE 1 END RETURNING count`,
-        [`device:${who.deviceId}`, Math.floor(Date.now() / 60000)],
-      )
-    ).rows[0]!.count;
-    if (count > 1200) throw new ServiceError('rate_limit_exceeded', 429);
+    await rateLimit(s.pool, `device:${who.deviceId}`, 1200);
     return who;
   }
   async function dispatch(request: Request): Promise<Response> {

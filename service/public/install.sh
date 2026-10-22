@@ -93,7 +93,10 @@ main() {
   printf 'Installed Juiced %s to %s/juiced.\n' "$version" "$bin_dir"
   # The installed CLI owns the random ID and opt-out setting. Its version check
   # above never counts as a first run. Reporting failure cannot fail installation.
-  "$bin_dir/juiced" --internal-install-completed "$install_kind" || :
+  # Releases that predate install reporting do not recognize the flag.
+  if grep -q -e '--internal-install-completed' "$destination/bin/juiced.mjs" 2>/dev/null; then
+    "$bin_dir/juiced" --internal-install-completed "$install_kind" || :
+  fi
   case :$PATH: in
     *:"$bin_dir":*) printf 'Run juiced login to get started.\n' ;;
     *) printf 'Add %s to your PATH, then run juiced login.\n' "$bin_dir" ;;

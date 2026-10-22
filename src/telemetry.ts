@@ -78,14 +78,16 @@ export class CliTelemetry {
     const context = await this.context();
     return context ? { [TELEMETRY_HEADER]: JSON.stringify(context) } : {};
   }
-  async enabled() { return !this.excluded() && !(await this.read())?.disabled; }
+  // Unreadable settings send no metadata, so report them as disabled.
+  async enabled() { return !this.excluded() && !(await this.read().catch(() => ({ disabled: true })))?.disabled; }
   async preference(enabled: boolean) {
     this.cached = undefined;
     await this.locked(async () => {
-      const s = await this.read() ?? { installationId: randomUUID(), anonymousId: randomUUID() };
-      s.disabled = !enabled;
+      // Corrupt settings are replaced so the documented command can always recover.
+      const s = await this.read().catch(() => undefined) ?? { installationId: randomUUID(), anonymousId: randomUUID() };
       // Re-enabling starts a new anonymous identity; the installation count stays stable.
-      if (enabled) { s.anonymousId = randomUUID(); s.noticeShown = false; }
+      if (enabled && s.disabled) { s.anonymousId = randomUUID(); s.noticeShown = false; }
+      s.disabled = !enabled;
       await writeFileAtomic(this.path, JSON.stringify(s) + '\n');
     });
     this.cached = undefined;

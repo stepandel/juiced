@@ -307,7 +307,8 @@ async function main() {
               ...(git ? { git } : {}),
               signal: controller.signal,
               term: process.env.TERM ?? 'xterm-256color',
-              onConnected: () => { onConnected(); onActivity(); },
+              // Headless runs carry their work in argv; an idle interactive terminal is not activity.
+              onConnected: () => { onConnected(); if (!(process.stdin.isTTY && process.stdout.isTTY)) onActivity(); },
               onActivity,
             });
           }

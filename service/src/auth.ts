@@ -219,7 +219,8 @@ export async function authHandler(auth: Auth, pool: Pool, request: Request, tele
   // Only completed device grants are logins; token refreshes are not new users.
   const context = telemetryFromHeaders(request.headers);
   if (!refresh && data.get('grant_type') === DEVICE_CODE_GRANT_TYPE && context)
-    await telemetry?.capture('cli_login_succeeded', context, {}, userId).catch(() => {});
+    // Analytics must not delay the sign-in response.
+    void telemetry?.capture('cli_login_succeeded', context, {}, userId).catch(() => {});
   return response;
 }
 

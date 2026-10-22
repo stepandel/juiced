@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import type { AppConnection } from '@cantelop/sdk';
 import { CredentialStore, savedOrigin, rememberOrigin, type Credentials } from './store.js';
 import { CliTelemetry } from '../telemetry.js';
-import { TELEMETRY_HEADER, type CliEvent, type CliEventProperties } from '../../contracts/telemetry.js';
+import type { CliEvent, CliEventProperties } from '../../contracts/telemetry.js';
 
 declare const JUICED_DEFAULT_SERVICE_URL: string;
 const execute = promisify(execFile);
@@ -80,8 +80,6 @@ export class AccountClient {
   ): Promise<Response> {
     const token = authenticated ? await this.token(signal) : undefined;
     const headers = new Headers(init.headers);
-    headers.delete(TELEMETRY_HEADER);
-    for (const [key, value] of Object.entries(await this.telemetry.headers())) headers.set(key, value);
     if (token) headers.set('Authorization', `Bearer ${token}`);
     const result = await this.fetcher(new URL(path, this.origin), {
       ...init,
@@ -126,8 +124,10 @@ export class AccountClient {
   track(event: CliEvent, properties: CliEventProperties) {
     this.telemetry.schedule(async () => {
       if (!(await this.telemetry.enabled())) return;
-      const token = await this.token(AbortSignal.timeout(1500));
-      await this.telemetry.capture(this.origin, event, properties, token);
+      // Never refresh from a background task: an aborted rotation would discard the new refresh token.
+      const saved = await this.store.read();
+      if (!saved || saved.expiresAt <= Date.now() + 30000) return;
+      await this.telemetry.capture(this.origin, event, properties, saved.accessToken);
     });
   }
   async token(signal: AbortSignal) {
@@ -139,7 +139,7 @@ export class AccountClient {
         method: 'POST',
         signal,
         redirect: 'error',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...await this.telemetry.headers() },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: 'juiced-cli',
           grant_type: 'refresh_token',
