@@ -20,7 +20,8 @@ function request(approval: Approval): { title: string; question: string; body: R
     <Text>{plain(input.command)}</Text>
     {input.description ? <Text dimColor>{plain(input.description)}</Text> : null}
   </Box> };
-  if (approval.tool === 'Write') return { title: 'Create file', question: `Do you want to create ${path(input.file_path)}?`, body: <>
+  // Write can create or replace a remote file; the request does not say which.
+  if (approval.tool === 'Write') return { title: 'Write file', question: `Do you want to write ${path(input.file_path)}?`, body: <>
     <Text>{path(input.file_path)}</Text>
     {dashed(lines(input.content).slice(0, 400).map((text, i) => <Text key={i}><Text dimColor>{String(i + 1).padStart(3)} </Text>{text}</Text>))}
   </> };

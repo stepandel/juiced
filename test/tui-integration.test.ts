@@ -59,7 +59,7 @@ test('reattaching prints saved turns and the entire unfinished turn into scrollb
   const running = runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, lifetime.signal);
   const wait = (check: () => boolean) => until(check, { attempts: 200, message: () => `UI did not update: ${writes.join('')}` });
   try {
-    await wait(() => writes.join('').includes('Create file'));
+    await wait(() => writes.join('').includes('Write file'));
     const markers = ['SAVED_PROMPT_0', 'SAVED_ANSWER_0', 'SAVED_PROMPT_1', 'SAVED_ANSWER_1', 'UNFINISHED_PROMPT', ...Array.from({ length: 24 }, (_, i) => `SAVED_PROGRESS_${i}:`)];
     await wait(() => markers.every(marker => writes.join('').includes(marker))).catch(() => {});
     const restored = writes.join('');

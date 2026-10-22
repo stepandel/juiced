@@ -197,6 +197,47 @@ test('Git-aware listing matches the exact binding and relative launch directory'
   assert.deepEqual((await listRemoteSessions(command, signal(), f.remote)).items.map(item => item.id), [id(1)]);
 });
 
+test('session-list read failures stay distinct from empty history and expired cleanup sessions', async t => {
+  const f = await fixture(t);
+  for (const scenario of [
+    { read: undefined, stop: 'session_not_found' },
+    { read: 'session_not_found', stop: 'session_not_found' },
+    { read: 'permission_denied', stop: 'session_not_found' },
+    { read: 'session_not_found', stop: 'cleanup_failed' },
+  ]) {
+    const calls: string[] = [];
+    const app = new CantelopClient().app<TerminalCommand, TerminalEvent, TerminalReply>({ name: 'sessions-errors', runtime: { receive() {} }, connection: { async fetch(request) {
+      const body = await request.json() as AppCommandEnvelope<TerminalCommand>;
+      calls.push(body.command.type);
+      if (body.command.type === 'workspace.inspect') return Response.json({ protocolVersion: 2, workspace: {
+        id: `wsp_${'a'.repeat(32)}`, slug: 'chosen', app_id: `app_${'b'.repeat(32)}`, hostname: 'fixture.cantelop.dev', created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      } });
+      const code = body.command.type === 'stop' ? scenario.stop : scenario.read;
+      if (code) return Response.json({ error: { code } }, { status: 404 });
+      return Response.json({ protocolVersion: 2, id: body.id, reply: { ok: true, sessions: { items: [], unreadable: 0 } } });
+    } } });
+    const stdout = new PassThrough(); let output = '';
+    stdout.on('data', bytes => { output += String(bytes); });
+    const listed = listSessions(app, f.local, 'chosen', signal(), stdout);
+    if (!scenario.read) {
+      await listed;
+      assert.match(output, /No saved sessions/);
+    } else {
+      await assert.rejects(listed, error => {
+        if (scenario.read === 'session_not_found') {
+          assert.match((error as Error).message, /Saved conversations could not be read/);
+          assert.match((error as Error).message, /juiced --workspace chosen claude sessions/);
+          assert.match((error as Error).message, /juiced --workspace chosen claude login/);
+          assert.equal(((error as Error).cause as { code: string }).code, 'session_not_found');
+        } else assert.equal((error as { code: string }).code, 'permission_denied');
+        return true;
+      });
+      assert.equal(output, '', 'A failed read must never look like an empty saved history');
+    }
+    assert.deepEqual(calls, ['workspace.inspect', 'request', 'stop']);
+  }
+});
+
 test('runtime listing routes directly without activities, database access, or a native process', async t => {
   const f = await fixture(t);
   const original = process.cwd();
