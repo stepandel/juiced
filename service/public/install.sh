@@ -94,7 +94,7 @@ main() {
   # The installed CLI owns the random ID and opt-out setting. Its version check
   # above never counts as a first run. Reporting failure cannot fail installation.
   # Releases that predate install reporting do not recognize the flag.
-  if grep -q -e '--internal-install-completed' "$destination/bin/juiced.mjs" 2>/dev/null; then
+  if grep -q -e '--internal-install-completed' "$destination/dist/cli.mjs" 2>/dev/null; then
     "$bin_dir/juiced" --internal-install-completed "$install_kind" || :
   fi
   case :$PATH: in

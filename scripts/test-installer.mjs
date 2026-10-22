@@ -64,9 +64,12 @@ if (url.endsWith('/latest')) {
       const payload = join(directory, 'payload');
       await mkdir(join(payload, 'juiced/bin'), { recursive: true });
       await mkdir(join(payload, 'juiced/lib'), { recursive: true });
+      await mkdir(join(payload, 'juiced/dist'), { recursive: true });
       await writeFile(join(payload, 'juiced/bin/juiced'), launcher, { mode: 0o755 });
       await writeFile(join(payload, 'juiced/lib/node'), '#!/bin/sh\nexec /bin/sh "$@"\n', { mode: 0o755 });
-      await writeFile(join(payload, 'juiced/bin/juiced.mjs'), `#!/bin/sh\ncase "$1" in\n--version) printf 'juiced ${version}\\n';;\n--help) printf 'juiced login\\n';;\n--internal-install-completed) printf '%s\\n' "$2" >> "$FIXTURE_COMPLETIONS";;\n*) printf '%s\\n' "$@";;\nesac\n`);
+      // Match real archives: the launcher imports the bundled CLI under dist/.
+      await writeFile(join(payload, 'juiced/bin/juiced.mjs'), '#!/bin/sh\nexec /bin/sh "$(dirname "$0")/../dist/cli.mjs" "$@"\n');
+      await writeFile(join(payload, 'juiced/dist/cli.mjs'), `#!/bin/sh\ncase "$1" in\n--version) printf 'juiced ${version}\\n';;\n--help) printf 'juiced login\\n';;\n--internal-install-completed) printf '%s\\n' "$2" >> "$FIXTURE_COMPLETIONS";;\n*) printf '%s\\n' "$@";;\nesac\n`);
       await execute('tar', ['-czf', join(assets, asset), '-C', payload, 'juiced']);
     }
     const digest = createHash('sha256').update(await readFile(join(assets, asset))).digest('hex');
