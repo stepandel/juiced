@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, readFile, stat, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, readFile, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseInvocation } from '../src/account/invocation.js';
@@ -44,7 +44,6 @@ test('credentials are private, origin scoped and serialize refresh across concur
   const root = await mkdtemp(join(tmpdir(), 'juiced-credentials-'));
   try {
     const env = {
-      JUICED_CREDENTIAL_STORE: 'file',
       JUICED_CONFIG_HOME: root,
       JUICED_SERVICE_URL: 'https://service.example',
     };
@@ -82,7 +81,6 @@ test('concurrent logins share one browser approval and subsequent logins reuse t
   const root = await mkdtemp(join(tmpdir(), 'juiced-login-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const env = {
-    JUICED_CREDENTIAL_STORE: 'file',
     JUICED_CONFIG_HOME: root,
     JUICED_SERVICE_URL: 'https://service.example',
   };
@@ -116,7 +114,7 @@ test('concurrent logins share one browser approval and subsequent logins reuse t
 test('login refreshes a shared expired access token without requesting browser approval', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'juiced-login-refresh-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const env = { JUICED_CONFIG_HOME: root, JUICED_CREDENTIAL_STORE: 'file', JUICED_SERVICE_URL: 'https://service.example' };
+  const env = { JUICED_CONFIG_HOME: root, JUICED_SERVICE_URL: 'https://service.example' };
   const account = 'acc_' + 'b'.repeat(32);
   let refreshes = 0;
   const fetcher: typeof fetch = async (input, init) => {
@@ -147,7 +145,7 @@ test('login retries browser approval for rejected credentials but preserves cred
         const root = await mkdtemp(join(tmpdir(), 'juiced-login-retry-'));
         t.after(() => rm(root, { recursive: true, force: true }));
         let approvals = 0;
-        const client = new AccountClient({ JUICED_CONFIG_HOME: root, JUICED_CREDENTIAL_STORE: 'file', JUICED_SERVICE_URL: 'https://service.example' }, async (input) => {
+        const client = new AccountClient({ JUICED_CONFIG_HOME: root, JUICED_SERVICE_URL: 'https://service.example' }, async (input) => {
           const path = new URL(String(input)).pathname;
           if (path === '/api/auth/device/code') {
             approvals++;
@@ -172,7 +170,6 @@ test('a crashed lock owner or reaper does not block credential refresh', async (
   const root = await mkdtemp(join(tmpdir(), 'juiced-lock-'));
   try {
     const store = new CredentialStore('https://service.example', {
-      JUICED_CREDENTIAL_STORE: 'file',
       JUICED_CONFIG_HOME: root,
     });
     await mkdir(root, { recursive: true });
@@ -200,39 +197,79 @@ test('managed origin rejects credentials, non-loopback HTTP and insecure implici
     assert.throws(() => new AccountClient({ JUICED_SERVICE_URL: url }));
 });
 
-test('OS credential storage keeps refresh secrets out of the fallback file', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'juiced-keyring-'));
-  let secret: string | null = null;
-  const entry = {
-    async getPassword() {
-      return secret;
-    },
-    async setPassword(v: string) {
-      secret = v;
-    },
-    async deletePassword() {
-      secret = null;
-      return true;
-    },
+test('credential files stay private across replacements and reject unsafe reads', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'juiced-private-credentials-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, 'config'), env = { JUICED_CONFIG_HOME: directory };
+  const store = new CredentialStore('https://example.test', env);
+  const credentials = {
+    origin: store.origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40),
+    expiresAt: Date.now() + 300000,
   };
-  try {
-    const store = new CredentialStore(
-      'https://example.test',
-      { JUICED_CONFIG_HOME: root },
-      async () => entry,
-    );
-    const credentials = {
-      origin: store.origin,
-      accessToken: 'a'.repeat(40),
-      refreshToken: 'b'.repeat(40),
-      expiresAt: Date.now() + 300000,
-    };
+  await store.write(credentials);
+  assert.deepEqual(await new CredentialStore(store.origin, env).read(), credentials);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(directory)).mode & 0o777, 0o700);
+    assert.equal((await stat(store.path)).mode & 0o777, 0o600);
+    await chmod(directory, 0o777);
+    await chmod(store.path, 0o644);
+    await assert.rejects(store.read(), /credential file must be private/);
     await store.write(credentials);
-    assert.equal((await readFile(store.path, 'utf8')).includes(credentials.refreshToken), false);
-    assert.deepEqual(await store.read(), credentials);
-    await store.clear();
-    assert.equal(secret, null);
-  } finally {
-    await rm(root, { recursive: true, force: true });
+    assert.equal((await stat(directory)).mode & 0o777, 0o700);
+    assert.equal((await stat(store.path)).mode & 0o777, 0o600);
+
+    const target = join(root, 'outside.json');
+    await writeFile(target, 'untouched');
+    await rm(store.path);
+    await symlink(target, store.path);
+    await assert.rejects(store.read(), { code: 'ELOOP' });
+    await store.write(credentials);
+    assert.equal(await readFile(target, 'utf8'), 'untouched');
   }
+  for (const invalid of [
+    '{invalid', '[]', 'x'.repeat(32 * 1024 + 1),
+    JSON.stringify({ ...credentials, origin: 'https://other.test' }),
+    JSON.stringify({ ...credentials, refreshToken: 'invalid' }),
+    JSON.stringify({ ...credentials, account: 'invalid' }),
+  ]) {
+    await writeFile(store.path, invalid, { mode: 0o600 });
+    await assert.rejects(store.read(), /Juiced credential/);
+  }
+  await store.clear();
+  await store.clear();
+  assert.equal(await store.read(), undefined);
+});
+
+test('legacy OS storage renews login once and saves subsequent sign-ins to the private file', { timeout: 15000 }, async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'juiced-legacy-credentials-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const env = { JUICED_CONFIG_HOME: root, JUICED_SERVICE_URL: 'https://service.example' };
+  const account = 'acc_' + 'c'.repeat(32);
+  let approvals = 0;
+  const client = new AccountClient(env, async (input, init) => {
+    const request = new Request(input, init), path = new URL(request.url).pathname;
+    if (path === '/api/auth/device/code') {
+      approvals++;
+      return Response.json({ device_code: 'device-code', user_code: 'ABCD-EFGH', verification_uri: '/device', expires_in: 600, interval: 5 });
+    }
+    if (path === '/api/auth/oauth2/token')
+      return Response.json({ access_token: 'a'.repeat(40), refresh_token: 'b'.repeat(40), expires_in: 300 });
+    assert.equal(path, '/v1/me');
+    assert.equal(request.headers.get('authorization'), 'Bearer ' + 'a'.repeat(40));
+    return Response.json({ userId: 'user', deviceId: 'device', accounts: [{ id: account, status: 'active', entitlement: 'active' }] });
+  });
+  await writeFile(client.store.path, JSON.stringify({ origin: client.origin, storage: 'keyring' }), { mode: 0o600 });
+  assert.equal(await client.store.read(), undefined);
+  await client.login(new AbortController().signal, true);
+  await client.login(new AbortController().signal, true);
+  assert.equal(approvals, 1);
+  const saved = await new CredentialStore(client.origin, env).read();
+  assert.equal(saved?.account, account);
+  assert.equal(saved?.refreshToken, 'b'.repeat(40));
+  assert.equal(JSON.parse(await readFile(client.store.path, 'utf8')).storage, undefined);
+
+  await writeFile(client.store.path, JSON.stringify({ origin: 'https://other.test', storage: 'keyring' }), { mode: 0o600 });
+  await assert.rejects(client.store.read(), /Invalid credential origin/);
+  await client.store.clear();
+  assert.equal(await client.store.read(), undefined);
 });

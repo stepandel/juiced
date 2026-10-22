@@ -1,9 +1,10 @@
 import { readFileSync, constants } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { chmod, mkdir, open, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from '../file-lock.js';
+import { writeFileAtomic } from '../fs-util.js';
 
 export interface Credentials {
   origin: string;
@@ -12,17 +13,11 @@ export interface Credentials {
   expiresAt: number;
   account?: string;
 }
-export interface KeyringEntry {
-  getPassword(): Promise<string | null>;
-  setPassword(value: string): Promise<void>;
-  deletePassword(): Promise<boolean>;
-}
 export class CredentialStore {
   readonly path: string;
   constructor(
     readonly origin: string,
-    private env: NodeJS.ProcessEnv = process.env,
-    private keyringFactory?: () => Promise<KeyringEntry | undefined>,
+    env: NodeJS.ProcessEnv = process.env,
   ) {
     const root = configRoot(env);
     this.path = join(root, createHash('sha256').update(origin).digest('hex') + '.json');
@@ -43,17 +38,14 @@ export class CredentialStore {
         (process.platform !== 'win32' && (info.mode & 0o077) !== 0)
       )
         throw new Error('Juiced credential file must be private.');
-      let text = await file.readFile('utf8');
-      const metadata = parsePrivateJSON(text) as { storage?: string; origin?: string };
-      if (metadata.storage === 'keyring') {
-        if (metadata.origin !== this.origin) throw new Error('Invalid credential origin.');
-        const entry = await this.keyring();
-        if (!entry) throw new Error('OS credential store is unavailable. Unlock it and retry.');
-        const secret = await entry.getPassword();
-        if (!secret) throw new Error('Juiced credential is missing. Sign in again.');
-        text = secret;
+      const value = parsePrivateJSON(await file.readFile('utf8'));
+      if (value.storage === 'keyring') {
+        if (value.origin !== this.origin) throw new Error('Invalid credential origin.');
+        // Older releases left a pointer to OS storage here. Renew the sign-in
+        // through the normal login flow without opening an OS password dialog.
+        return;
       }
-      const v = parsePrivateJSON(text) as unknown as Credentials;
+      const v = value as unknown as Credentials;
       if (
         v.origin !== this.origin ||
         typeof v.accessToken !== 'string' ||
@@ -74,69 +66,14 @@ export class CredentialStore {
       value.origin !== this.origin ||
       !/^[A-Za-z0-9_-]{20,512}$/.test(value.accessToken) ||
       !/^[A-Za-z0-9_-]{20,512}$/.test(value.refreshToken) ||
-      !Number.isFinite(value.expiresAt)
+      !Number.isFinite(value.expiresAt) ||
+      (value.account !== undefined && !/^acc_[a-f0-9]{32}$/.test(value.account))
     )
       throw new Error('Invalid Juiced credentials. Sign in again.');
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-    let serialized = JSON.stringify(value);
-    let existingKeyring = false;
-    try {
-      existingKeyring =
-        (parsePrivateJSON(await readFile(this.path, 'utf8')) as { storage?: string }).storage ===
-        'keyring';
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    const entry = await this.keyring();
-    try {
-      if (entry) {
-        await entry.setPassword(serialized);
-        serialized = JSON.stringify({ origin: this.origin, storage: 'keyring' });
-      } else if (existingKeyring) throw new Error('OS credential store is unavailable.');
-    } catch (error) {
-      if (existingKeyring) throw error;
-      process.stderr.write(
-        'Juiced is using a private credential file because the OS credential store is unavailable.\n',
-      );
-    }
-    const temp = `${this.path}.${randomUUID()}.tmp`;
-    try {
-      const file = await open(temp, 'wx', 0o600);
-      try {
-        await file.writeFile(serialized + '\n');
-        await file.sync();
-      } finally {
-        await file.close();
-      }
-      await rename(temp, this.path);
-    } finally {
-      await rm(temp, { force: true });
-    }
-  }
-  private async keyring(): Promise<KeyringEntry | undefined> {
-    if (this.env.JUICED_CREDENTIAL_STORE === 'file') return;
-    if (this.keyringFactory) return this.keyringFactory();
-    try {
-      const { AsyncEntry } = await import('@napi-rs/keyring');
-      return new AsyncEntry('juiced', createHash('sha256').update(this.origin).digest('hex'), {
-        linux: { store: 'secret-service' },
-      });
-    } catch {
-      return;
-    }
+    await privateDirectory(dirname(this.path));
+    await writeFileAtomic(this.path, JSON.stringify(value) + '\n');
   }
   async clear() {
-    let metadata;
-    try {
-      metadata = parsePrivateJSON(await readFile(this.path, 'utf8')) as { storage?: string };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    if (metadata?.storage === 'keyring') {
-      const entry = await this.keyring();
-      if (!entry) throw new Error('Unlock the OS credential store to remove Juiced credentials.');
-      await entry.deletePassword();
-    }
     await rm(this.path, { force: true });
   }
   async locked<T>(
@@ -144,6 +81,8 @@ export class CredentialStore {
     action: () => Promise<T>,
     purpose: 'credentials' | 'login' = 'credentials',
   ): Promise<T> {
+    signal.throwIfAborted();
+    await privateDirectory(dirname(this.path));
     return withFileLock(
       this.path + (purpose === 'login' ? '.login.lock' : '.lock'), signal, action,
       purpose === 'login' ? 600000 : 30000,
@@ -178,21 +117,13 @@ export function savedOrigin(env: NodeJS.ProcessEnv) {
 }
 export async function rememberOrigin(origin: string, env: NodeJS.ProcessEnv) {
   const root = configRoot(env);
-  await mkdir(root, { recursive: true, mode: 0o700 });
-  const path = join(root, 'service.json'),
-    temp = path + '.' + randomUUID() + '.tmp';
-  try {
-    const file = await open(temp, 'wx', 0o600);
-    try {
-      await file.writeFile(JSON.stringify({ origin }) + '\n');
-      await file.sync();
-    } finally {
-      await file.close();
-    }
-    await rename(temp, path);
-  } finally {
-    await rm(temp, { force: true });
-  }
+  await privateDirectory(root);
+  await writeFileAtomic(join(root, 'service.json'), JSON.stringify({ origin }) + '\n');
+}
+
+async function privateDirectory(path: string) {
+  await mkdir(path, { recursive: true, mode: 0o700 });
+  if (process.platform !== 'win32') await chmod(path, 0o700);
 }
 
 function parsePrivateJSON(text: string): Record<string, unknown> {

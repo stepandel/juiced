@@ -61,8 +61,5 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stepandel/juiced.git"
-  },
-  "optionalDependencies": {
-    "@napi-rs/keyring": "2.1.2"
   }
 }

@@ -86,7 +86,8 @@ The auth spike must prove stable grant/session identification, refresh rotation,
 replay handling, and server-side revocation. Serialize refresh across CLI processes
 with an OS lock and atomic credential replacement; do not invalidate legitimate
 concurrent clients through a refresh race or retry an ambiguously consumed refresh
-credential blindly. Use the OS credential store, with a documented `0600` fallback.
+credential blindly. Store credentials in a private `0600` file inside a `0700`
+configuration directory on macOS/Linux.
 
 The provider owns its auth tables. Juiced adds account memberships and device
 metadata keyed to provider user/grant IDs. Do not maintain a second OAuth token
