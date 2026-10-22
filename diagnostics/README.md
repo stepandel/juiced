@@ -72,6 +72,62 @@ interactive UI. Typing a prompt through the PTY returned `JUICED_INTERACTIVE_OK`
 retained Claude sign-in and completed onboarding, with native folder trust
 prompts preserved.
 
+## Fleet latency investigation (October 21, 2026)
+
+The live managed path has a confirmed Juiced scheduling defect. A recent sample
+of 50 Vercel request records contained 31 `usage_app_unmapped` failures across six
+deployments. Usage ingestion refuses a Fleet settlement whose App has no local
+installation/account mapping. Previously, that failure ended reconciliation after
+one batch round and skipped scheduling the next durable retry. Provisioning could
+advance once per delivery, but then depended on the queue's 10-second error retry
+or the minute cron instead of its shorter schedule.
+
+Reconciliation now logs each failed worker, continues the other queues, and
+publishes one wake-up for the earlier of the next due task and a 10-second retry.
+A failed publish still throws for queue redelivery. Usage transactions still
+roll back, retaining the cursor and every settlement for investigation. Error
+logs now identify the unmapped App and sequence. The missing mapping still needs
+operator reconciliation; this fix does not discard its usage.
+
+Small live measurements did not reproduce a major VM startup regression:
+
+| Operation | Observed elapsed time |
+| --- | --- |
+| Bootstrap of the already-ready installation | 148–205 ms |
+| Existing-session view, after first sample | 318–392 ms |
+| Empty replay acknowledgement, after first sample | 448–520 ms |
+| Native Claude auth status | 1,068–1,544 ms |
+| New disposable Workspace resolution | 1,342 ms |
+| `claude --version`, including VM activation and output | 1,243–1,942 ms |
+| Recent managed VM startup, from host logs | 199–215 ms |
+| Isolated agent handshake, initial / reopened | 6,033 / 2,784 ms |
+
+The earlier direct SDK benchmark recorded a 377 ms median request and a 236 ms
+median view. These runs differ in conversation, package and date; they suggest
+additional managed-path overhead without isolating its source. Juiced fetches
+Fleet credentials from the Cantelop console on every runtime request, and the
+shared Fleet runner adds release-gate authorization RPCs. Neither hop's individual
+cost was measured. One initial authenticated call took 6,245 ms, including client
+token handling; subsequent account reads were about 110 ms. Its slow phase was
+not isolated. In a separate diagnostic conversation, the initial view took
+3,001 ms versus 317 ms on reopening. View, replay, initialize and settings waits
+are sequential, so extra request latency accumulates during connection setup.
+
+No model prompts were submitted. The disposable sessions were stopped and their
+Workspace was confirmed archived; physical purge is asynchronous. Both native
+processes used for the isolated agent handshake were explicitly stopped; a small
+diagnostic journal remains in the authenticated Workspace. That handshake excludes
+account/bootstrap, auth preflight, Git setup and long history. The user's existing
+conversation was inspected without starting or stopping its Claude process, so
+its complete reconnect delay remains unmeasured. No independent SDK defect was
+established, and no production code or configuration was deployed.
+
+The regression test uses PostgreSQL to prove that an unmapped settlement rolls
+back an earlier mapped settlement and the cursor while independent jobs drain,
+short retries remain scheduled, failed workers retry once per delivery, and a
+failed queue publish remains recoverable. All 33 service tests and the service
+type check passed. [Measurements and limitations](fleet-latency-2026-10-21.json).
+
 ## Terminal latency investigation (October 16, 2026)
 
 Ten input samples were correlated with the compute host's durable receipt
