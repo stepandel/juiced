@@ -2,7 +2,7 @@ import { PublicPage } from '../site-components';
 import { pageMetadata } from '../../src/site';
 
 const description =
-  'Start free with every Juiced feature and 10 vCPU hours. Unlimited compute for $25 per month is coming soon. Claude Code access is separate.';
+  'Start free with every Juiced feature and 10 vCPU hours. Unlimited compute for $25 per month is coming soon. Bring your own Claude subscription or API key for Claude Code.';
 export const metadata = pageMetadata('Pricing', description, '/pricing');
 
 export default function Pricing() {
@@ -26,7 +26,8 @@ export default function Pricing() {
       </div>
       <p className="pricing-details">
         Both plans include every feature. One vCPU hour is one virtual CPU
-        running for one hour. Claude Code access is separate.
+        running for one hour. Claude Code isn&apos;t included: bring your own
+        Claude subscription or API key.
       </p>
       <p>
         <a href="/docs/getting-started">Get started</a>
