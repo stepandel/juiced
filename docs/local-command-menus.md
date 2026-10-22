@@ -73,7 +73,7 @@ below can verify a candidate CLI before updating the Dockerfile pin.
 | `/tasks` | Reported task state, details, output where supported, confirmed stop | Output RPC is version-dependent; refresh explicitly to update the view |
 | `/rename`, `/name` | Local name editor, remote acknowledgment | Current conversation only |
 | `/reload-skills`, `/reload-plugins` | Confirm, reload, refresh catalogs | Remote errors stay in the menu and allow retry |
-| `/status` | Session status and public metadata | No account credentials |
+| `/status` | Read-only labeled session status and public metadata | ↑/↓ or PgUp/PgDn scroll in short terminals; no selectable actions or account credentials |
 | `/help` | Command browser and keyboard shortcuts | Juiced keyboard shortcuts apply to its local editor |
 
 This is an adapter layer, not complete native UI parity. Claude's headless API

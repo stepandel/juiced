@@ -290,6 +290,40 @@ test('a slow menu read can be cancelled and cannot reopen over a local draft', {
   } finally { await f.close(); }
 });
 
+test('status is a readable, scrollable details view without selectable JSON or remote key forwarding', { timeout: 10000 }, async () => {
+  const a = await agent();
+  const f = ui(a);
+  try {
+    await f.wait(() => f.latest.includes('mode on'));
+    await f.command('/status');
+    await f.wait(() => f.latest.includes('Remote session') && f.latest.includes('Background tasks: 0'));
+    assert.match(f.latest, /Session: menu-session/);
+    assert.match(f.latest, /Model: provider-x/);
+    assert.match(f.latest, /Permission mode: default/);
+    assert.match(f.latest, /Output style: Provider style/);
+    assert.equal(f.latest.includes('❯'), false);
+    assert.equal(f.latest.includes('workspaceSession'), false);
+    assert.equal(f.latest.includes('Enter to confirm'), false);
+    f.stdin.write('\r');
+    f.stdin.write('\x1b[200~filter\n\x1b[201~');
+    await delay(30);
+    assert.equal(f.latest.includes('Filter:'), false);
+    f.stdout.columns = 50; f.stdout.rows = 15; f.stdout.emit('resize');
+    await f.wait(() => f.latest.includes('↑/↓ scroll'));
+    assert.equal(f.latest.includes('Background tasks: 0'), false);
+    f.stdin.write('\x1b[6~');
+    await f.wait(() => f.latest.includes('Background tasks: 0'));
+    f.stdin.write('\x1b[5~');
+    await f.wait(() => f.latest.includes('Session: menu-session'));
+    for (const frame of f.frames) assert.ok(frame.text.trimEnd().split('\n').length < frame.rows, `Status overflowed: ${frame.text}`);
+    f.stdin.write('\x1b');
+    await f.wait(() => !f.latest.includes('Remote session') && f.latest.includes('mode on'));
+    assert.deepEqual(a.queries, []);
+    assert.deepEqual(a.changes, []);
+    assert.deepEqual(a.submitted, []);
+  } finally { await f.close(); }
+});
+
 test('MCP menu filtering and resizing stay within the viewport without remote key forwarding', { timeout: 10000 }, async () => {
   const a = await agent();
   a.responses.mcp_status = { mcpServers: Array.from({ length: 20 }, (_, index) => ({ name: `server-${index}`, status: 'connected' })) };

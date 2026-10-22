@@ -169,7 +169,7 @@ async function main() {
         args.argv.length === 1 &&
         ['--help', '-h', '--version', '-v'].includes(args.argv[0]!);
       const maintenance = args.action === 'sync' || args.action === 'fast-forward';
-      if (!introspection && !maintenance) await ensureLogin(workspace.auth(), controller.signal);
+      if (!introspection && !maintenance) await ensureLogin(workspace.auth(), controller.signal, { workspace: args.workspace });
       if (args.action === 'login')
         process.stderr.write(
           `Ready. Run juiced${args.workspace ? ` --workspace ${args.workspace}` : ''} claude from this directory.\n`,
@@ -193,7 +193,9 @@ async function main() {
                   : await client.receive();
               process.stderr.write(
                 args.action === 'fast-forward'
-                  ? `Fast-forwarded ${repository.branch} to ${result.head.slice(0, 12)}.\n`
+                  ? result.head === repository.head
+                    ? `Already up to date: ${repository.branch} is at ${result.head.slice(0, 12)}.\n`
+                    : `Fast-forwarded ${repository.branch} to ${result.head.slice(0, 12)}.\n`
                   : `Imported ${result.head.slice(0, 12)} into ${result.ref}.\n`,
               );
             }

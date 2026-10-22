@@ -242,6 +242,15 @@ export async function commandMenu(agent: RemoteAgent, name: string, argument = '
     if (title.length > 200 || /[\x00-\x1f\x7f]/u.test(title)) throw new Error('Use a single-line name up to 200 characters.');
     await configure({ subtype: 'rename_session', title }); return message(`Conversation renamed to ${title}`);
   } } };
-  if (name === 'status') return inspect('Remote session', { workspaceSession: agent.session.id, status: agent.status, model: agent.model, permissionMode: agent.info.current_permission_mode, outputStyle: agent.info.output_style, fastMode: agent.info.fast_mode_state, commands: agent.commands.length, tasks: agent.tasks.size });
+  if (name === 'status') return { title: 'Remote session', items: [], details: [
+    { label: 'Session', value: agent.session.id },
+    { label: 'Status', value: agent.status },
+    { label: 'Model', value: agent.model },
+    { label: 'Permission mode', value: str(agent.info.current_permission_mode, 'default') },
+    { label: 'Output style', value: str(agent.info.output_style, 'default') },
+    { label: 'Fast mode', value: str(agent.info.fast_mode_state, 'unavailable') },
+    { label: 'Commands', value: String(agent.commands.length) },
+    { label: 'Background tasks', value: String(agent.tasks.size) },
+  ] };
   throw new Error(`No local menu adapter for /${name}`);
 }

@@ -42,6 +42,7 @@ export async function listSessions(app: ListingApp, directory: string, workspace
   const combined = AbortSignal.any([signal, AbortSignal.timeout(ADMISSION_RETRY_MS + SESSION_LIST_TIMEOUT_MS)]);
   const sessions: Array<{ id: string; updatedAt: string }> = [];
   let after: string | undefined, unidentified = 0, unreadable = 0;
+  let failed = false;
   try {
     do {
       combined.throwIfAborted();
@@ -60,7 +61,21 @@ export async function listSessions(app: ListingApp, directory: string, workspace
       unreadable += page.unreadable;
       after = page.after;
     } while (after);
-  } finally { await session.stop(); }
+  } catch (error) {
+    failed = true;
+    if ((error as { code?: string }).code === 'session_not_found') {
+      const command = `juiced${workspaceOverride ? ` --workspace ${project.workspace}` : ''} claude`;
+      throw new Error(`Saved conversations could not be read because the workspace session is unavailable. Run ${command} sessions again. If this is a new workspace, finish Claude sign-in with ${command} login.`, { cause: error });
+    }
+    throw error;
+  } finally {
+    try { await session.stop(); }
+    catch (error) {
+      // A zero-keep-alive inspection may already have ended. Cleanup must not
+      // hide a valid list or replace the original read failure with a stop error.
+      if (!failed && (error as { code?: string }).code !== 'session_not_found') throw error;
+    }
+  }
   sessions.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
   const lines = [`Sessions in ${project.workspace}:`];
   if (sessions.length) {
