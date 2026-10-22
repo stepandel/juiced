@@ -182,83 +182,56 @@ export default function Home() {
                 <h2 id="how">Four steps, no server to babysit.</h2>
               </div>
               <p>
-                A workspace per project, a sandbox per session, and nothing
-                lands on your laptop until you pull it.
+                Your code, Claude login and conversations live in a private
+                cloud workspace. Your terminal is the remote control.
               </p>
             </div>
-            <div className="steps">
-              <article>
-                <span className="number mono">
-                  step 01<i>workspace</i>
-                </span>
+            <ol className="steps">
+              <li>
+                <span className="number mono">01</span>
+                <h3>Start Claude in the cloud</h3>
+                <p>
+                  Juiced copies your repo to a private workspace and runs Claude
+                  Code there in its own sandbox.
+                </p>
                 <div className="cmd mono">
                   <span className="prompt">$ </span>juiced claude
                 </div>
-                <h3>A workspace for your project</h3>
+              </li>
+              <li>
+                <span className="number mono">02</span>
+                <h3>Close your laptop</h3>
                 <p>
-                  Your first <code>juiced claude</code> in a repo copies it to a
-                  private cloud workspace. Your code, Claude login and
-                  conversations stay there between runs.
+                  Detach or close the terminal. Claude keeps working without
+                  you.
                 </p>
-              </article>
-              <article>
-                <span className="number mono">
-                  step 02<i>sandbox</i>
-                </span>
                 <div className="cmd mono">
                   <span className="prompt">❯ </span>/detach
                 </div>
-                <h3>A sandbox for every session</h3>
+              </li>
+              <li>
+                <span className="number mono">03</span>
+                <h3>Pick up where you left off</h3>
                 <p>
-                  Claude Code runs in an isolated sandbox attached to that
-                  workspace. You drive it from your terminal, and it keeps going
-                  when you disconnect.
+                  Run it again to reconnect to the same conversation. Idle
+                  compute shuts down, but your files stay.
                 </p>
-              </article>
-              <article>
-                <span className="number mono">
-                  step 03<i>idle</i>
-                </span>
                 <div className="cmd mono">
-                  <span className="dim">sandbox</span> running →{' '}
-                  <span className="dim">stopped</span>
+                  <span className="prompt">$ </span>juiced claude
                 </div>
-                <h3>Shut down when idle</h3>
+              </li>
+              <li>
+                <span className="number mono">04</span>
+                <h3>Bring the changes home</h3>
                 <p>
-                  Once Claude is done, the sandbox shuts down. Run{' '}
-                  <code>juiced claude</code> again to pick up the same
-                  conversation.
+                  Apply Claude's commits to your local branch. Nothing on your
+                  laptop changes until you do.
                 </p>
-              </article>
-              <article>
-                <span className="number mono">
-                  step 04<i>pull</i>
-                </span>
                 <div className="cmd mono">
                   <span className="prompt">$ </span>juiced claude fast-forward
                 </div>
-                <h3>Changes come back on your terms</h3>
-                <p>
-                  Pull Claude's commits into your local repo when you're ready.
-                  Nothing changes on your laptop until you approve it.
-                </p>
-              </article>
-            </div>
-            <div className="flow mono" aria-hidden="true">
-              <span>laptop</span>
-              <i></i>
-              <span className="hot">juiced claude</span>
-              <i></i>
-              <span>cloud workspace</span>
-              <i></i>
-              <span>sandbox</span>
-              <i></i>
-              <span className="hot">/detach</span>
-              <i></i>
-              <span>claude keeps working</span>
-              <i></i>
-              <span>pull when ready</span>
-            </div>
+              </li>
+            </ol>
           </section>
           <section className="band" aria-labelledby="learn-more">
             <div className="section-head">
