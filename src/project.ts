@@ -13,3 +13,6 @@ export async function selectProject(directory: string, workspace?: string):Promi
   const hash = createHash('sha256').update(localDirectory).digest('hex').slice(0, 16);
   return { localDirectory, directoryName, remoteDirectory: `/workspace/${directoryName}`, workspace: workspace ?? `${label}-${hash}` };
 }
+
+/** A Juiced command line that preserves an explicitly selected workspace. */
+export const juicedCommand = (workspace: string | undefined, rest: string) => `juiced${workspace ? ` --workspace ${workspace}` : ''} claude${rest ? ` ${rest}` : ''}`;

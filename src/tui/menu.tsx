@@ -9,7 +9,8 @@ export type MenuPage = {
   title: string;
   description?: string;
   items: MenuItem[];
-  details?: { label: string; value: string }[];
+  /** Read-only rows; unlabeled rows keep their indentation. */
+  details?: { label?: string; value: string }[];
   footer?: string;
   pendingLabel?: string;
   search?: boolean;
@@ -123,8 +124,8 @@ export function CommandMenu({ load, rows, done, cancel, active = true }: { load(
   return <Box flexDirection="column" borderStyle="single" borderLeft={false} borderRight={false} borderBottom={false} borderColor="green" overflow="hidden">
     <Box height={1} flexShrink={0}><Text bold color="green" wrap="truncate-end">{page?.title ?? 'Loading menu…'}</Text></Box>
     {page?.description && <Box maxHeight={2} overflow="hidden"><Text dimColor>{line(page.description)}</Text></Box>}
-    {page?.details ? <Box flexDirection="column">{page.details.slice(current.index, current.index + detailRows).map(field => <Box key={field.label} height={1} flexShrink={0}>
-      <Text wrap="truncate-end"><Text dimColor>{line(field.label)}: </Text>{line(field.value)}</Text>
+    {page?.details ? <Box flexDirection="column">{page.details.slice(current.index, current.index + detailRows).map((field, i) => <Box key={current.index + i} height={1} flexShrink={0}>
+      {field.label === undefined ? <Text wrap="truncate-end">{plain(field.value) || ' '}</Text> : <Text wrap="truncate-end"><Text dimColor>{line(field.label)}: </Text>{line(field.value)}</Text>}
     </Box>)}</Box> : page?.input ? <Box maxHeight={3} overflow="hidden"><Text>{line(page.input.label)}: {before}<Text inverse>{cursor}</Text>{after}</Text></Box> : <>
       {current.query && <Box height={1}><Text dimColor wrap="truncate-end">⌕ Filter: {current.query}</Text></Box>}
       {items.slice(start, start + limit).map((item, i) => {
@@ -137,6 +138,6 @@ export function CommandMenu({ load, rows, done, cancel, active = true }: { load(
       {selected?.description && <Box maxHeight={2} overflow="hidden"><Text dimColor>{line(selected.description)}</Text></Box>}
     </>}
     {error && <Box height={1} flexShrink={0}><Text color="yellow" wrap="truncate-end">{error}</Text></Box>}
-    <Box height={1} flexShrink={0}><Text dimColor wrap="truncate-end">{loading ? 'Loading from Claude… · Esc to cancel' : current.pending ? page?.pendingLabel ?? 'Waiting for Claude…' : error && !page ? 'Enter to retry · Esc to cancel' : page?.details ? `${page.details.length > detailRows ? '↑/↓ scroll · ' : ''}Esc to go back` : page?.footer ? `${page.footer} · Esc to go back` : page?.input ? 'Enter to save · Esc to go back' : `Enter to confirm · Esc to go back · ↑/↓ to select · type to filter · ${items.length ? current.index + 1 : 0}/${items.length}`}</Text></Box>
+    <Box height={1} flexShrink={0}><Text dimColor wrap="truncate-end">{loading ? 'Loading from Claude… · Esc to cancel' : current.pending ? page?.pendingLabel ?? 'Waiting for Claude…' : error && !page ? 'Enter to retry · Esc to cancel' : page?.details ? `${page.details.length > detailRows ? '↑/↓ or PgUp/PgDn to scroll · ' : ''}${page.footer ? `${page.footer} · ` : ''}Esc to go back` : page?.footer ? `${page.footer} · Esc to go back` : page?.input ? 'Enter to save · Esc to go back' : `Enter to confirm · Esc to go back · ↑/↓ to select · type to filter · ${items.length ? current.index + 1 : 0}/${items.length}`}</Text></Box>
   </Box>;
 }

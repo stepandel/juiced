@@ -10,9 +10,9 @@ import { runRemoteTerminal } from './remote-terminal.js';
 import { useLocalTui } from './agent-protocol.js';
 import { RemoteAgent } from './remote-agent.js';
 import { runLocalTui } from './tui/app.js';
-import { selectProject as selectProjectBase } from './project.js';
+import { juicedCommand, selectProject as selectProjectBase } from './project.js';
 import { discoverRepository } from './git.js';
-import { createGitSession, GitWorkspaceClient } from './git-workspace.js';
+import { createGitSession, fastForwardMessage, GitWorkspaceClient } from './git-workspace.js';
 import { deleteWorkspace } from './delete-workspace.js';
 import { inspectWorkspace } from './inspect-workspace.js';
 import { syncFiles } from './file-sync.js';
@@ -172,7 +172,7 @@ async function main() {
       if (!introspection && !maintenance) await ensureLogin(workspace.auth(), controller.signal, { workspace: args.workspace });
       if (args.action === 'login')
         process.stderr.write(
-          `Ready. Run juiced${args.workspace ? ` --workspace ${args.workspace}` : ''} claude from this directory.\n`,
+          `Ready. Run ${juicedCommand(args.workspace, '')} from this directory.\n`,
         );
       else {
         const repository = introspection
@@ -187,17 +187,12 @@ async function main() {
               await client.send(args.includeUncommitted);
               process.stderr.write(`Transferred local work to ${project.workspace}.\n`);
             } else {
-              const result =
-                args.action === 'fast-forward'
-                  ? await client.fastForward()
-                  : await client.receive();
-              process.stderr.write(
-                args.action === 'fast-forward'
-                  ? result.head === repository.head
-                    ? `Already up to date: ${repository.branch} is at ${result.head.slice(0, 12)}.\n`
-                    : `Fast-forwarded ${repository.branch} to ${result.head.slice(0, 12)}.\n`
-                  : `Imported ${result.head.slice(0, 12)} into ${result.ref}.\n`,
-              );
+              if (args.action === 'fast-forward')
+                process.stderr.write(fastForwardMessage(repository.branch, await client.fastForward()));
+              else {
+                const result = await client.receive();
+                process.stderr.write(`Imported ${result.head.slice(0, 12)} into ${result.ref}.\n`);
+              }
             }
           } finally {
             await client.close().catch(() => {});

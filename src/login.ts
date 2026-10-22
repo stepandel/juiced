@@ -1,6 +1,8 @@
 import { createInterface } from 'node:readline/promises';
 import type { Readable, Writable } from 'node:stream';
 import type { WorkspaceAuthRef } from '@cantelop/sdk';
+import { juicedCommand } from './project.js';
+import { errorCode } from './transport.js';
 
 type LoginOptions = {
   workspace?: string | undefined;
@@ -9,7 +11,7 @@ type LoginOptions = {
 
 export async function ensureLogin(auth: WorkspaceAuthRef, signal: AbortSignal, options: LoginOptions = {}): Promise<void> {
   const { stdin, stderr } = options.io ?? process;
-  const command = `juiced${options.workspace ? ` --workspace ${options.workspace}` : ''} claude login`;
+  const command = juicedCommand(options.workspace, 'login');
   if (await auth.status({ signal })) return;
   if (!stdin.isTTY || !stderr.isTTY) {
     throw new Error(`Claude sign-in required in this workspace. Run ${command} in an interactive terminal first.`);
@@ -22,7 +24,8 @@ export async function ensureLogin(auth: WorkspaceAuthRef, signal: AbortSignal, o
   const cancel = () => cancelled.abort(new Error('Claude sign-in cancelled'));
   readline.on('SIGINT', cancel);
   readline.once('close', cancel);
-  let authenticated = false;
+  // An expired attempt is already gone and needs no cancellation.
+  let authenticated = false, ended = false;
   try {
     stderr.write(`Sign in to Claude using this URL:\n${attempt.url}\n\n`);
     while (!authenticated) {
@@ -31,15 +34,17 @@ export async function ensureLogin(auth: WorkspaceAuthRef, signal: AbortSignal, o
       try {
         authenticated = await auth.submitCode({ attemptId: attempt.attemptId, code, signal: loginSignal });
       } catch (error) {
-        if ((error as { code?: string }).code === 'login_not_active')
-          throw new Error(`This Claude sign-in attempt expired or was cancelled. Run ${command} again to get a new authorization URL and code.`, { cause: error });
-        if ((error as { code?: string }).code !== 'code_rejected') throw error;
+        if (errorCode(error) === 'login_not_active') {
+          ended = true;
+          throw new Error(`This Claude sign-in attempt expired or was cancelled. Rerun your command, or run ${command}, to get a new authorization URL and code.`, { cause: error });
+        }
+        if (errorCode(error) !== 'code_rejected') throw error;
         stderr.write('Claude rejected that code. Try again.\n');
       }
     }
     stderr.write('Claude is signed in to this workspace.\n');
   } finally {
     readline.close();
-    if (!authenticated) await auth.cancelLogin({ attemptId: attempt.attemptId, signal: AbortSignal.timeout(5000) }).catch(() => {});
+    if (!authenticated && !ended) await auth.cancelLogin({ attemptId: attempt.attemptId, signal: AbortSignal.timeout(5000) }).catch(() => {});
   }
 }

@@ -24,15 +24,15 @@ export function backoffMs(attempt: number, { base = 250, max = 5000 }: { base?: 
 /** Cantelop message IDs; a fixed UUID keeps retries of one delivery idempotent. */
 export const messageId = (uuid: string = randomUUID()) => `msg_${uuid.replaceAll('-', '')}`;
 
-const code = (error: unknown) => String((error as { code?: unknown } | null | undefined)?.code);
+export const errorCode = (error: unknown) => String((error as { code?: unknown } | null | undefined)?.code);
 /** A session that has never been viewed has no view yet; treat as "no boundary". */
-export const isViewMissing = (error: unknown) => ['session_view_not_found', 'session_not_found', 'resource_not_found'].includes(code(error));
+export const isViewMissing = (error: unknown) => ['session_view_not_found', 'session_not_found', 'resource_not_found'].includes(errorCode(error));
 /**
  * The platform did not admit the Session's runtime in time, for example while
  * another Session of the Workspace is still finishing. The request never ran,
  * so it is safe to retry whatever its HTTP status.
  */
-export const isAdmissionTimeout = (error: unknown) => code(error) === 'session_admission_timeout';
+export const isAdmissionTimeout = (error: unknown) => errorCode(error) === 'session_admission_timeout';
 /** Interactive Sessions stay admitted for their 120-second keep-alive after a detach or exit. */
 export const ADMISSION_RETRY_MS = 150_000;
 export const ADMISSION_MESSAGE = 'The workspace did not admit this session in time. Another Juiced session may still be finishing; sessions stay active for up to two minutes after you detach or exit.';
@@ -55,7 +55,7 @@ export async function retryAdmission<T>(signal: AbortSignal, work: () => Promise
 }
 
 /** The retained event window no longer covers the requested cursor. */
-export const isCursorExpired = (error: unknown) => ['event_cursor_expired', 'event_stream_reset'].includes(code(error));
+export const isCursorExpired = (error: unknown) => ['event_cursor_expired', 'event_stream_reset'].includes(errorCode(error));
 
 /**
  * A child of a long-lived signal that unregisters when disposed. AbortSignal.any
