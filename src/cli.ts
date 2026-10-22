@@ -165,12 +165,12 @@ async function main() {
         args.argv.length === 1 &&
         ['--help', '-h', '--version', '-v'].includes(args.argv[0]!);
       const maintenance = args.action === 'sync' || args.action === 'fast-forward';
-      if (!introspection && !maintenance) await ensureLogin(workspace.auth(), controller.signal);
-      if (args.action === 'login')
+      if (args.action === 'login') {
+        await ensureLogin(workspace.auth(), controller.signal);
         process.stderr.write(
           `Ready. Run juiced${args.workspace ? ` --workspace ${args.workspace}` : ''} claude from this directory.\n`,
         );
-      else {
+      } else {
         const repository = introspection
           ? undefined
           : await discoverRepository(project.localDirectory);
@@ -224,6 +224,10 @@ async function main() {
                 ...(terminal ? { terminal: { identity: terminal, workspaceId: resolved.id } } : {}),
               })
             : undefined;
+          // Auth preflight uses a separate sandbox. Reattachment reuses the
+          // workspace's credentials and must not provision that auth sandbox.
+          if (!introspection && !selected?.resumed)
+            await ensureLogin(workspace.auth(), controller.signal);
           if (repository && !selected?.resumed) {
             if (process.stderr.isTTY)
               process.stderr.write(`Preparing Git workspace ${project.remoteDirectory}…\n`);

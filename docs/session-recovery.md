@@ -14,6 +14,9 @@ Reattachment prints saved prompts, responses, and tool activity into terminal
 scrollback, including output from a turn that is still running. New output then
 continues below that history; restoring the display does not submit a prompt or
 answer a pending permission request.
+Reattachment skips the separate Claude authentication preflight sandbox. Fresh
+sessions and `juiced claude login` still check workspace sign-in. If Claude needs
+you to sign in again, run `juiced claude login` before reopening the session.
 Supplying Claude arguments starts a fresh bound session so launch settings and
 initial prompts take effect; reattachment retains its saved launch configuration.
 
