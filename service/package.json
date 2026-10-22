@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.12",
-    "@cantelop/sdk": "1.5.0",
+    "@cantelop/sdk": "1.5.1",
     "@vercel/queue": "0.8.0",
     "better-auth": "1.7.12",
     "drizzle-orm": "0.45.2",
