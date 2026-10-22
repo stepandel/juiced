@@ -17,15 +17,16 @@ export default function Docs() {
         persistent cloud workspace. Start with setup, then learn how sessions
         and code transfers work.
       </p>
-      <div className="guide-list">
+      <div className="guide-grid docs-index">
         {guides.map((guide) => (
-          <article key={guide.slug}>
+          <a key={guide.slug} href={`/docs/${guide.slug}`} className="guide-card">
             <span className="path mono">docs/{guide.slug}</span>
-            <h2>
-              <a href={`/docs/${guide.slug}`}>{guide.title}</a>
-            </h2>
+            <h2>{guide.title}</h2>
             <p>{guide.description}</p>
-          </article>
+            <span className="go mono" aria-hidden="true">
+              read →
+            </span>
+          </a>
         ))}
       </div>
       <p>
