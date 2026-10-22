@@ -66,7 +66,7 @@ export default function Home() {
               then run <code>juiced claude</code> in your project
             </p>
           </div>
-          <div
+          <figure
             className="terminal mono"
             aria-label="Example of using Juiced from a terminal"
           >
@@ -81,22 +81,32 @@ export default function Home() {
                 <span className="dim">~/your-project $</span> juiced claude
               </div>
               <div className="turn">
-                <span className="green">❯</span> add a settings page with a
-                theme toggle
+                <span className="green" aria-hidden="true">
+                  ❯
+                </span>{' '}
+                add a settings page with a theme toggle
               </div>
               <div>
-                <span className="green">●</span> Read{' '}
-                <span className="dim">3 files</span>
+                <span className="green" aria-hidden="true">
+                  ●
+                </span>{' '}
+                Read <span className="dim">3 files</span>
               </div>
               <div>
-                <span className="green">●</span> Write{' '}
-                <span className="dim">app/settings/page.tsx</span>
+                <span className="green" aria-hidden="true">
+                  ●
+                </span>{' '}
+                Write <span className="dim">app/settings/page.tsx</span>
               </div>
               <div className="turn">
-                <span className="green">❯</span> /detach
+                <span className="green" aria-hidden="true">
+                  ❯
+                </span>{' '}
+                /detach
               </div>
               <div className="dim indent">
-                ⎿ Detached. Claude is still working.
+                <span aria-hidden="true">⎿ </span>Detached. Claude is still
+                working.
               </div>
               <div className="turn">
                 <span className="dim">~/your-project $</span>{' '}
@@ -109,7 +119,7 @@ export default function Home() {
                 <i className="live"></i> cloud workspace
               </span>
             </div>
-          </div>
+          </figure>
         </section>
         <section className="features" aria-labelledby="how">
           <h2 id="how">How it works</h2>
