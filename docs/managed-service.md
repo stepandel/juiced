@@ -231,7 +231,12 @@ operational reconciliation; publish a retention/privacy policy before launch.
 ## Releases and recovery
 
 Bootstrap requires an exact compiled runtime fingerprint and a minimum CLI
-version. Changing the approved package queues a durable upgrade generation.
+version. Published CLIs automatically install the service's `JUICED_CLI_VERSION`
+(defaulting to its source CLI version) before managed commands. Publish the
+matching CLI archives before promoting that version with its package/runtime;
+raise `JUICED_MINIMUM_CLI` when older versions must stop starting work. See
+[CLI update and recovery behavior](cli-releases.md#updates-rollback-and-removal).
+Changing the approved package queues a durable upgrade generation.
 Managed admission drains existing VMs before package activation; old connections
 stay pinned and cannot submit new work during the transition. Publish an older
 compatible package as the desired release to roll back. Existing Cantelop release

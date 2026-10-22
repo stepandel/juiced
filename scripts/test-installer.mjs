@@ -100,6 +100,7 @@ test('explicit version upgrades atomically and retains the previous runnable rel
   await f.archive();
   await f.run(['v0.2.0']);
   const previous = await readlink(join(f.bin, 'juiced'));
+  assert.deepEqual((await readFile(resolve(previous, '../../install-paths'), 'utf8')).split('\0'), [f.install, f.bin, '']);
   await f.archive('0.2.1');
   await f.run(['0.2.1'], { JUICED_VERSION: 'invalid' });
   assert.equal((await f.installed(['--version'])).stdout.trim(), 'juiced 0.2.1');

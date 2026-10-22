@@ -1,9 +1,9 @@
 import { readFileSync, constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import { setTimeout as delay } from 'node:timers/promises';
+import { withFileLock } from '../file-lock.js';
 
 export interface Credentials {
   origin: string;
@@ -144,65 +144,11 @@ export class CredentialStore {
     action: () => Promise<T>,
     purpose: 'credentials' | 'login' = 'credentials',
   ): Promise<T> {
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-    const path = this.path + (purpose === 'login' ? '.login.lock' : '.lock');
-    const until = Date.now() + (purpose === 'login' ? 600000 : 30000);
-    for (;;) {
-      signal.throwIfAborted();
-      try {
-        const lock = await open(path, 'wx', 0o600);
-        await lock.writeFile(String(process.pid));
-        await lock.close();
-        break;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        // Elect one reaper before reading an owner. Two reapers must never
-        // both observe a dead PID and unlink a newly acquired replacement.
-        let reaper;
-        try {
-          reaper = await open(path + '.reap', 'wx', 0o600);
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
-          // A reaper holds its file for milliseconds; an old one was abandoned by a crash.
-          if (await abandoned(path + '.reap')) await rm(path + '.reap', { force: true });
-        }
-        if (reaper)
-          try {
-            const pid = Number(await readFile(path, 'utf8').catch(() => ''));
-            if (Number.isSafeInteger(pid) && pid > 0) {
-              try {
-                process.kill(pid, 0);
-              } catch (e) {
-                if ((e as NodeJS.ErrnoException).code === 'ESRCH') await rm(path, { force: true });
-              }
-            } else if (await abandoned(path)) {
-              // The owner crashed between creating the lock and recording its PID.
-              await rm(path, { force: true });
-            }
-          } finally {
-            await reaper.close();
-            await rm(path + '.reap', { force: true });
-          }
-        if (Date.now() > until)
-          throw new Error(
-            `Another Juiced process is ${purpose === 'login' ? 'signing in' : 'refreshing credentials'}. Retry shortly.`,
-          );
-        await delay(100, undefined, { signal });
-      }
-    }
-    try {
-      return await action();
-    } finally {
-      await rm(path, { force: true });
-    }
-  }
-}
-
-async function abandoned(path: string) {
-  try {
-    return (await stat(path)).mtimeMs < Date.now() - 5000;
-  } catch {
-    return false;
+    return withFileLock(
+      this.path + (purpose === 'login' ? '.login.lock' : '.lock'), signal, action,
+      purpose === 'login' ? 600000 : 30000,
+      `Another Juiced process is ${purpose === 'login' ? 'signing in' : 'refreshing credentials'}. Retry shortly.`,
+    );
   }
 }
 

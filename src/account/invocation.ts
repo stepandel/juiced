@@ -3,7 +3,7 @@ export interface Invocation {
   account?: string;
   service?: string;
   args: string[];
-  command?: 'login' | 'logout' | 'whoami';
+  command?: 'login' | 'logout' | 'whoami' | 'update';
   noBrowser?: boolean;
   all?: boolean;
 }
@@ -40,8 +40,8 @@ export function parseInvocation(input: string[], env: NodeJS.ProcessEnv = proces
     } else break;
   }
   const rest = input.slice(n);
-  if (['login', 'logout', 'whoami'].includes(rest[0] ?? '')) {
-    if (result.mode === 'self-managed')
+  if (['login', 'logout', 'whoami', 'update'].includes(rest[0] ?? '')) {
+    if (result.mode === 'self-managed' && rest[0] !== 'update')
       throw new Error(
         'Account commands require managed mode. Use juiced --self-managed claude login for Claude.',
       );

@@ -72,6 +72,7 @@ export function application(s: Services) {
         issuer: s.cfg.origin,
         resource: s.cfg.origin,
         scope: 'juiced offline_access',
+        cliVersion: s.accounts.release.cliVersion,
         deviceEndpoint: '/api/auth/device/code',
         tokenEndpoint: '/api/auth/oauth2/token',
       });

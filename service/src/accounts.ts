@@ -37,7 +37,7 @@ export interface Installation {
 export class Accounts {
   constructor(
     readonly pool: Pool,
-    readonly release: { packageId: string; runtimeId: string; minimumCli: string },
+    readonly release: { packageId: string; runtimeId: string; minimumCli: string; cliVersion?: string },
   ) {}
   async ensure(user: string) {
     return transaction(this.pool, async (tx) => {

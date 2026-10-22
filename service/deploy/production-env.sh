@@ -107,6 +107,7 @@ cantelop() {
   put CANTELOP_WORKER_FLEET_TOKEN "$worker"
   put JUICED_PACKAGE_ID "$(secret 'Approved package ID')"
   put JUICED_RUNTIME_ID "$(secret 'Runtime ID')"
+  put JUICED_CLI_VERSION "$(secret 'Published CLI version matching this runtime')"
   existing JUICED_MINIMUM_CLI || put JUICED_MINIMUM_CLI 0.2.0
 }
 

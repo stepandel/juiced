@@ -12,6 +12,7 @@ import { Clipped, Footer, modeCycle, optional, Shortcuts, Spinner, spinnerVerbs,
 import { Prompt, useDraft } from './prompt.js';
 import { Permission } from './permission.js';
 import { Transcript } from './transcript-view.js';
+import { needsCliUpdate } from '../update.js';
 
 function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent: RemoteAgent; argv: string[]; workspace: string; rows: number; columns: number; reflow: number; quit(code: number, stop?: boolean): void }) {
   const [conversation, setConversation] = useState(emptyConversation);
@@ -167,6 +168,9 @@ function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent
 
 export async function runLocalTui(agent: RemoteAgent, argv: string[], workspace: string, io: TerminalIO, signal: AbortSignal): Promise<number> {
   let code = 0;
+  let updateFailure: unknown;
+  const captureUpdate = (error: unknown) => { if (needsCliUpdate(error)) updateFailure = error; };
+  agent.on('failure', captureUpdate);
   let quitting: Promise<void> | undefined;
   const quit = (nextCode: number, stop = true) => {
     code = Math.max(code, nextCode);
@@ -195,6 +199,6 @@ export async function runLocalTui(agent: RemoteAgent, argv: string[], workspace:
   io.stdin.once('error', ioError);
   io.stdout.once('error', ioError);
   if (signal.aborted) abort();
-  try { await instance.waitUntilExit(); await quitting; return code; }
-  finally { clearTimeout(reflowTimer); signal.removeEventListener('abort', abort); io.stdin.off('end', abort); io.stdin.off('error', ioError); io.stdout.off('error', ioError); io.stdout.off('resize', resize); await agent.close().catch(() => {}); }
+  try { await instance.waitUntilExit(); await quitting; if (updateFailure) throw updateFailure; return code; }
+  finally { agent.off('failure', captureUpdate); clearTimeout(reflowTimer); signal.removeEventListener('abort', abort); io.stdin.off('end', abort); io.stdin.off('error', ioError); io.stdout.off('error', ioError); io.stdout.off('resize', resize); await agent.close().catch(() => {}); }
 }

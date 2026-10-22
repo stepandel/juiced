@@ -29,7 +29,7 @@ const messages: Record<string, string> = {
   usage_limit_reached:
     'Your included Juiced usage is exhausted. New work is paused until the allowance renews.',
   cli_upgrade_required:
-    'This Juiced version needs an update. Install the latest CLI and reconnect.',
+    'This CLI is incompatible with the service runtime. Run juiced update, then retry your command. You can also reinstall with: curl -fsSL https://juiced.codes/install.sh | sh',
   installation_changed: 'This command’s installation changed. Start a new Juiced command.',
   installation_pending: 'Your workspace service is being provisioned. Retry shortly.',
 };

@@ -9,6 +9,27 @@ import { runLocalTui } from '../src/tui/app.js';
 import type { TerminalInput, TerminalOutput } from '../src/remote-terminal.js';
 import { until } from './fixtures/wait.js';
 
+test('runtime mismatches leave raw mode and reach CLI update recovery', { timeout: 5000 }, async () => {
+  const mismatch = Object.assign(new Error('runtime differs'), { code: 'cli_upgrade_required' });
+  const session: AgentSession = {
+    id: 'runtime-mismatch',
+    async request() { throw mismatch; },
+    async dispatch() { throw mismatch; },
+    async *stream() { throw mismatch; },
+    async stop() {},
+  };
+  const stdin = new PassThrough() as PassThrough & TerminalInput & { ref(): void; unref(): void };
+  stdin.isTTY = true; stdin.isRaw = false;
+  stdin.setRawMode = raw => { stdin.isRaw = raw; };
+  stdin.ref = () => {}; stdin.unref = () => {};
+  const stdout = new Writable({ write(_, __, done) { done(); } }) as TerminalOutput;
+  stdout.isTTY = true; stdout.columns = 100; stdout.rows = 30;
+  const agent = new RemoteAgent(session);
+  await assert.rejects(runLocalTui(agent, [], 'default', { stdin, stdout, stderr: new PassThrough() }, new AbortController().signal), error => error === mismatch);
+  assert.equal(stdin.isRaw, false);
+  assert.equal(agent.listenerCount('failure'), 0);
+});
+
 test('reattaching prints saved turns and the entire unfinished turn into scrollback', { timeout: 5000 }, async () => {
   class ReattachedAgent extends RemoteAgent {
     submitted: string[] = [];

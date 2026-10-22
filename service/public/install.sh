@@ -83,6 +83,8 @@ main() {
   # Keep the previous release intact until the new command has passed its check.
   destination=$install_dir/releases/$version-${staging##*/}
   mv "$staging/juiced" "$destination"
+  # Persist custom paths so future automatic updates use this installation.
+  printf '%s\000%s\000' "$install_dir" "$bin_dir" > "$destination/install-paths"
   link_staging=$(mktemp -d "$bin_dir/.juiced.XXXXXXXX")
   ln -s "$destination/bin/juiced" "$link_staging/juiced"
   mv -f "$link_staging/juiced" "$bin_dir/juiced"

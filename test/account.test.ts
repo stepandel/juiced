@@ -26,11 +26,18 @@ test('managed invocation defaults explicitly and separates account selectors fro
   });
   assert.equal(parseInvocation(['--self-managed', 'claude'], {}).mode, 'self-managed');
   assert.equal(parseInvocation(['login', '--no-browser'], {}).command, 'login');
+  assert.equal(parseInvocation(['update'], {}).command, 'update');
+  assert.equal(parseInvocation(['--self-managed', 'update'], {}).command, 'update');
+  assert.throws(() => parseInvocation(['update', '--all'], {}), /Usage: juiced update/);
   assert.throws(() =>
     parseInvocation(['--self-managed', '--account', 'acc_' + 'a'.repeat(32), 'claude'], {}),
   );
   assert.throws(() => parseInvocation(['claude'], { JUICED_MODE: 'other' }));
   assert.throws(() => parseInvocation(['login', '--all'], {}));
+});
+
+test('required CLI updates explain the incompatibility and give an update command', () => {
+  assert.match(new ManagedError('cli_upgrade_required').message, /incompatible[\s\S]*juiced update[\s\S]*curl -fsSL/);
 });
 
 test('credentials are private, origin scoped and serialize refresh across concurrent calls', async () => {
