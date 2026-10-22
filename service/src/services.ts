@@ -6,6 +6,7 @@ import { Platform } from './platform';
 import { Billing } from './billing';
 import { VERSION } from '../../src/version';
 import { cliVersionAtLeast, isCliVersion } from '../../contracts/cli-version';
+import { Telemetry } from './telemetry';
 
 export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'worker' = 'api') {
   const cliVersion = env.JUICED_CLI_VERSION ?? VERSION;
@@ -45,7 +46,7 @@ export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'wo
         },
       )
     : undefined;
-  return { cfg, pool, accounts, platform, billing };
+  return { cfg, pool, accounts, platform, billing, telemetry: new Telemetry(env) };
 }
 
 export function serviceLoader(

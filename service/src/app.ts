@@ -13,9 +13,10 @@ import { ServiceError, readText, type Config } from './config';
 import { relay } from './relay';
 import { stopGitSession } from './git-stop';
 import type { Billing } from './billing';
-import { transaction } from './db';
+import { rateLimit, transaction } from './db';
 import { signIn, devicePage, accountPage } from './pages';
 import { logError } from './log';
+import type { Telemetry } from './telemetry';
 
 export interface Services {
   pool: Pool;
@@ -24,6 +25,7 @@ export interface Services {
   platform: Platform;
   auth?: Auth;
   billing?: Billing | undefined;
+  telemetry?: Telemetry | undefined;
   wake?: (delaySeconds?: number) => Promise<void>;
 }
 
@@ -47,13 +49,7 @@ export function application(s: Services) {
         expiresAt: session.session.expiresAt.getTime(),
       };
     }
-    const count = (
-      await s.pool.query(
-        `INSERT INTO api_limits(key,bucket,count) VALUES($1,$2,1) ON CONFLICT(key) DO UPDATE SET bucket=excluded.bucket,count=CASE WHEN api_limits.bucket=excluded.bucket THEN api_limits.count+1 ELSE 1 END RETURNING count`,
-        [`device:${who.deviceId}`, Math.floor(Date.now() / 60000)],
-      )
-    ).rows[0]!.count;
-    if (count > 1200) throw new ServiceError('rate_limit_exceeded', 429);
+    await rateLimit(s.pool, `device:${who.deviceId}`, 1200);
     return who;
   }
   async function dispatch(request: Request): Promise<Response> {
@@ -61,6 +57,8 @@ export function application(s: Services) {
       path = url.pathname;
     const method = request.method === 'HEAD' ? 'GET' : request.method;
     if (method === 'GET' && path === '/health') return Response.json({ status: 'ok' });
+    if (method === 'POST' && path === '/v1/telemetry')
+      return s.telemetry ? s.telemetry.receive(request, s.pool, s.cfg) : new Response(null, { status: 204 });
     if (method === 'GET' && path === '/ready') {
       await s.pool.query('SELECT 1 FROM juiced_migrations LIMIT 1');
       await s.billing?.ready();
@@ -79,7 +77,7 @@ export function application(s: Services) {
     if (path.startsWith('/api/auth/')) {
       if (request.body)
         request = new Request(request, { body: await readText(request, 16 * 1024) });
-      return authHandler(auth, s.pool, request);
+      return authHandler(auth, s.pool, request, s.telemetry);
     }
     if (method === 'GET' && path === '/sign-in') {
       const code = url.searchParams.get('user_code') ?? '';

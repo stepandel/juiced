@@ -6,6 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
 import type { AppConnection } from '@cantelop/sdk';
 import { CredentialStore, savedOrigin, rememberOrigin, type Credentials } from './store.js';
+import { CliTelemetry } from '../telemetry.js';
+import type { CliEvent, CliEventProperties } from '../../contracts/telemetry.js';
 
 declare const JUICED_DEFAULT_SERVICE_URL: string;
 const execute = promisify(execFile);
@@ -36,9 +38,11 @@ const messages: Record<string, string> = {
 export class AccountClient {
   readonly origin: string;
   readonly store: CredentialStore;
+  readonly telemetry: CliTelemetry;
   constructor(
     private env: NodeJS.ProcessEnv = process.env,
     private fetcher: typeof fetch = fetch,
+    telemetry?: CliTelemetry,
   ) {
     const configured =
       env.JUICED_SERVICE_URL ??
@@ -65,6 +69,7 @@ export class AccountClient {
       throw new Error('JUICED_SERVICE_URL must be an HTTPS origin.');
     this.origin = url.origin;
     this.store = new CredentialStore(this.origin, env);
+    this.telemetry = telemetry ?? new CliTelemetry(env, fetcher);
   }
   async response(
     path: string,
@@ -115,6 +120,15 @@ export class AccountClient {
     } catch {
       throw new ManagedError('invalid_service_response');
     }
+  }
+  track(event: CliEvent, properties: CliEventProperties) {
+    this.telemetry.schedule(async () => {
+      if (!(await this.telemetry.enabled())) return;
+      // Never refresh from a background task: an aborted rotation would discard the new refresh token.
+      const saved = await this.store.read();
+      if (!saved || saved.expiresAt <= Date.now() + 30000) return;
+      await this.telemetry.capture(this.origin, event, properties, saved.accessToken);
+    });
   }
   async token(signal: AbortSignal) {
     return this.store.locked(signal, async () => {
@@ -170,6 +184,8 @@ export class AccountClient {
           );
           return;
         }
+        // Expired/revoked credentials can be followed by a different person's login.
+        await this.telemetry.resetIdentity();
       }
       await this.deviceLogin(signal, noBrowser);
     }, 'login');
@@ -215,6 +231,7 @@ export class AccountClient {
         signal,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
+          ...await this.telemetry.headers(),
           'X-Juiced-Device-Name': (this.env.JUICED_DEVICE_NAME ?? hostname())
             .replace(/[^A-Za-z0-9 ._-]/g, '')
             .slice(0, 64),

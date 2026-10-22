@@ -22,11 +22,13 @@ import { listSessions } from './list-sessions.js';
 import { LocalUploader } from './local-upload.js';
 import { LocalPublisher } from './local-publish.js';
 import { CliUpdater, needsCliUpdate } from './update.js';
+import { CliTelemetry } from './telemetry.js';
 
 const controller = new AbortController();
 let managedMode = true;
 let commandStarted = false;
 let updater = new CliUpdater();
+let telemetry: CliTelemetry | undefined;
 let interrupted = 0;
 const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map((signal, index) => {
   const handler = () => {
@@ -38,16 +40,37 @@ const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map((signal, index) 
 });
 
 async function main() {
+  if (process.argv[2] === '--internal-install-completed') {
+    const kind = process.argv[3];
+    if (process.argv.length !== 4 || (kind !== 'fresh' && kind !== 'update')) return;
+    try {
+      const client = new AccountClient();
+      telemetry = client.telemetry;
+      telemetry.schedule(() => client.telemetry.capture(client.origin, 'cli_installed', { install_kind: kind }));
+    } catch { /* Reporting must never fail an otherwise successful installation. */ }
+    return;
+  }
   const invocation = parseInvocation(process.argv.slice(2));
   managedMode = invocation.mode === 'managed';
   const accountEnv = {
     ...process.env,
+    JUICED_MODE: invocation.mode,
     ...(invocation.service ? { JUICED_SERVICE_URL: invocation.service } : {}),
   };
+  telemetry = new CliTelemetry(accountEnv);
+  const accountClient = () => new AccountClient(accountEnv, fetch, telemetry);
+  if (invocation.command === 'telemetry') {
+    if (invocation.telemetryAction !== 'status') await telemetry.preference(invocation.telemetryAction === 'enable');
+    process.stdout.write(`Juiced telemetry is ${await telemetry.enabled() ? 'enabled' : 'disabled'}.\n`);
+    return;
+  }
   const parsed = invocation.command ? undefined : parseArguments(invocation.args);
   const offline = parsed?.command === 'help' || parsed?.command === 'version' || invocation.command === 'logout';
+  const introspectionOnly = parsed?.command === 'claude' && parsed.action === 'run' &&
+    parsed.argv.length === 1 && ['--help', '-h', '--version', '-v'].includes(parsed.argv[0]!);
+  if (managedMode && !offline && !introspectionOnly && invocation.command !== 'update') telemetry.firstRun(accountClient().origin);
   if (managedMode && !offline)
-    updater = new CliUpdater({ serviceOrigin: new AccountClient(accountEnv).origin });
+    updater = new CliUpdater({ serviceOrigin: accountClient().origin });
   if (invocation.command === 'update') {
     await updater.check(controller.signal, 'manual');
     return;
@@ -61,7 +84,7 @@ async function main() {
   }
   if (invocation.command) {
     commandStarted = true;
-    const client = new AccountClient(accountEnv);
+    const client = accountClient();
     if (invocation.command === 'login') await client.login(controller.signal, invocation.noBrowser);
     else if (invocation.command === 'whoami')
       process.stdout.write(JSON.stringify(await client.me(controller.signal), null, 2) + '\n');
@@ -73,6 +96,7 @@ async function main() {
         if ((error as { status?: number }).status !== 401) failure = error;
       } finally {
         await client.store.locked(controller.signal, () => client.store.clear());
+        await telemetry.resetIdentity();
       }
       if (failure)
         throw new Error('Local credentials removed; server revocation could not be confirmed.');
@@ -84,7 +108,7 @@ async function main() {
     const args = parsed!;
     const managed =
       managedMode && !['help', 'version'].includes(args.command)
-        ? await new AccountClient(accountEnv).prepare(
+        ? await accountClient().prepare(
             VERSION,
             compiledApp.runtimeId,
             invocation.account,
@@ -237,32 +261,57 @@ async function main() {
             : undefined;
           const publisher =
             repository && localTui ? new LocalPublisher(workspace, project, repository) : undefined;
-          process.exitCode = localTui
-            ? await runLocalTui(
-                new RemoteAgent(session, {
-                  ...(directoryName ? { directoryName } : {}),
-                  ...(git ? { git } : {}),
-                  ...(publisher && repository
-                    ? {
-                        localPublish: {
-                          head: repository.head,
-                          upload: new LocalUploader(workspace, project, repository),
-                          apply: (publication, signal) => publisher.apply(publication, signal),
-                        },
-                      }
-                    : {}),
-                }),
+          const usage = managed && !introspection ? accountClient() : undefined;
+          const properties = { session_mode: localTui ? 'interactive' as const : 'terminal' as const };
+          let connected = false, lastActivity = -Infinity;
+          const onConnected = () => {
+            if (connected) return;
+            connected = true;
+            usage?.track('cli_session_connected', properties);
+          };
+          const onActivity = () => {
+            if (!connected || Date.now() - lastActivity < 300000) return;
+            lastActivity = Date.now();
+            usage?.track('cli_session_active', properties);
+          };
+          if (localTui) {
+            const agent = new RemoteAgent(session, {
+              ...(directoryName ? { directoryName } : {}),
+              ...(git ? { git } : {}),
+              ...(publisher && repository
+                ? {
+                    localPublish: {
+                      head: repository.head,
+                      upload: new LocalUploader(workspace, project, repository),
+                      apply: (publication, signal) => publisher.apply(publication, signal),
+                    },
+                  }
+                : {}),
+            });
+            agent.on('status', status => { if (status === 'ready' || status === 'working') onConnected(); });
+            agent.on('activity', onActivity);
+            const activity = setInterval(() => { if (agent.status === 'working') onActivity(); }, 300000);
+            activity.unref();
+            try {
+              process.exitCode = await runLocalTui(
+                agent,
                 args.argv,
                 project.workspace,
                 process,
                 controller.signal,
-              )
-            : await runRemoteTerminal(session, args.argv, process, {
-                ...(directoryName ? { directoryName } : {}),
-                ...(git ? { git } : {}),
-                signal: controller.signal,
-                term: process.env.TERM ?? 'xterm-256color',
-              });
+              );
+            } finally { clearInterval(activity); }
+          } else {
+            process.exitCode = await runRemoteTerminal(session, args.argv, process, {
+              ...(directoryName ? { directoryName } : {}),
+              ...(git ? { git } : {}),
+              signal: controller.signal,
+              term: process.env.TERM ?? 'xterm-256color',
+              // Headless runs carry their work in argv; an idle interactive terminal is not activity.
+              onConnected: () => { onConnected(); if (!(process.stdin.isTTY && process.stdout.isTTY)) onActivity(); },
+              onActivity,
+            });
+          }
         }
       }
     }
@@ -331,5 +380,6 @@ try {
 } catch (error) {
   await reportError(error);
 } finally {
+  await telemetry?.flush();
   for (const { signal, handler } of handlers) process.off(signal, handler);
 }
