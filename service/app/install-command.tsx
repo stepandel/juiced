@@ -1,32 +1,43 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 export function InstallCommand({ command }: { command: string }) {
-  const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const code = useRef<HTMLElement>(null);
   // Keep the piped shell together when the command wraps.
   const pipe = command.lastIndexOf(' | ');
   async function copy() {
     try {
       await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
+      setStatus('copied');
     } catch {
-      // Clipboard access can be denied; the command stays selectable.
+      // Clipboard access can be denied; select the command to copy by hand.
+      if (code.current) getSelection()?.selectAllChildren(code.current);
+      setStatus('failed');
     }
+    setTimeout(() => setStatus('idle'), 1600);
   }
   return (
     <div className="install mono">
-      <code>
+      <code ref={code}>
         <span className="prompt" aria-hidden="true">
           ${' '}
         </span>
         {command.slice(0, pipe + 1)}
         <span className="nowrap">{command.slice(pipe + 1)}</span>
       </code>
-      <button type="button" onClick={copy} aria-label="Copy install command">
-        {copied ? 'copied' : 'copy'}
+      <button type="button" onClick={copy}>
+        {status === 'copied' ? 'copied' : 'copy'}
+        <span className="sr-only"> install command</span>
       </button>
+      <span className="sr-only" role="status">
+        {status === 'copied'
+          ? 'Install command copied.'
+          : status === 'failed'
+            ? 'Copy failed. The command is selected so you can copy it.'
+            : ''}
+      </span>
     </div>
   );
 }

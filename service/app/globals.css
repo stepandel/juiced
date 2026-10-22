@@ -2,6 +2,7 @@
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
     a{color:inherit;text-underline-offset:4px}a:focus-visible,button:focus-visible{outline:2px solid var(--green);outline-offset:4px}::selection{background:#2c5a37;color:#fff}
     .mono,code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
     .wrap{width:min(1120px,calc(100% - 64px));margin:auto}
     header{height:88px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);font-size:13px}header a{text-decoration:none}header a:hover{color:var(--green)}
     header .button{color:var(--bg);background:var(--green);border-radius:5px;padding:7px 12px;font-weight:600}header .button:hover{color:var(--bg);background:var(--green-bright)}
@@ -14,7 +15,7 @@
     .install .prompt{color:var(--green);user-select:none}.install .nowrap{white-space:nowrap}
     .install button{flex-shrink:0;font:inherit;font-size:12px;color:var(--bg);background:var(--green);border:0;border-radius:5px;padding:8px 14px;cursor:pointer;min-width:72px}.install button:hover{background:var(--green-bright)}
     .next{color:var(--muted);font-size:13px;margin:16px 0 0}.next code{color:var(--ink)}
-    .terminal{position:relative;border:1px solid #252d26;border-radius:10px;background:#0f130f;color:#d6ddd6;box-shadow:0 0 0 1px #0006,0 30px 80px -20px #4eba6526,0 24px 48px #0008;transform:rotate(1deg);overflow:hidden}
+    .terminal{position:relative;margin:0;border:1px solid #252d26;border-radius:10px;background:#0f130f;color:#d6ddd6;box-shadow:0 0 0 1px #0006,0 30px 80px -20px #4eba6526,0 24px 48px #0008;transform:rotate(1deg);overflow:hidden}
     .terminal-top{height:42px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #1d241e;padding:0 16px}.light{width:7px;height:7px;border-radius:50%;background:#2f3830}.terminal-title{margin:auto;color:var(--muted);font-size:11px;transform:translateX(-16px)}
     .terminal-body{padding:24px 24px 26px;font-size:13px;line-height:1.85;min-height:320px}.terminal-body b{font-weight:700;color:var(--ink)}
     .command{margin-bottom:16px}.turn{margin-top:16px}.indent{padding-left:18px}.green{color:var(--green)}.dim{color:var(--muted)}
