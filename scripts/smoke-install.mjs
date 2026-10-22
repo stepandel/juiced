@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 const execute = promisify(execFile),
   directory = await mkdtemp(join(tmpdir(), 'juiced-install-'));
-const { version: packageVersion } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const { version: packageVersion, dependencies } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+const sdkVersion = dependencies['@cantelop/sdk'];
 let server;
 try {
   const env = {
@@ -31,11 +32,11 @@ try {
       response.end(
         JSON.stringify({
           name: '@cantelop/sdk',
-          'dist-tags': { latest: '1.5.0' },
+          'dist-tags': { latest: sdkVersion },
           versions: {
-            '1.5.0': {
+            [sdkVersion]: {
               name: '@cantelop/sdk',
-              version: '1.5.0',
+              version: sdkVersion,
               type: 'module',
               dependencies: {
                 '@libsql/client': '^0.17.0',
@@ -44,7 +45,7 @@ try {
                 esbuild: '^0.25.0',
                 typescript: '^5.9.3',
               },
-              dist: { tarball: origin + '/sdk-1.5.0.tgz' },
+              dist: { tarball: `${origin}/sdk-${sdkVersion}.tgz` },
             },
           },
         }),

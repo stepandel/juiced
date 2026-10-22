@@ -38,6 +38,7 @@ jobs:
             npm test
           fi
       - run: npm run build
+      - run: npm run build:runtime
       - run: npm run build:release
       - name: Install the actual release with no Node or npm on PATH
         run: npm run test:installer -- dist/releases/juiced-${{ matrix.target }}.tar.gz

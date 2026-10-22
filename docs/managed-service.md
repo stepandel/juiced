@@ -144,8 +144,8 @@ database for the first deployment. Migration runs are transactional and serializ
 subsequent runs skip applied migrations and seed the CLI client idempotently.
 After launch, schema changes belong in new forward migrations.
 
-1. Install the pinned registry dependency with `npm ci`. SDK **1.5.0** supplies
-   compiled transport rebinding and the public relay validators; its registry
+1. Install the pinned registry dependency with `npm ci`. SDK **1.5.1** supplies
+   shared Fleet packages, compiled transport rebinding and the public relay validators; its registry
    integrity is recorded in the lockfile. `npm run check:package` verifies a fresh
    CLI tarball installation against that dependency. Public CLI distribution uses
    [GitHub Release archives](cli-releases.md), independently of npm publication.
@@ -229,6 +229,29 @@ identity. Billing references and anonymous accounting/audit records remain for
 operational reconciliation; publish a retention/privacy policy before launch.
 
 ## Releases and recovery
+
+Juiced requires shared Fleet execution protocol 1. `npm run build:runtime` checks
+the generated Edge manifest, and the compiled-package test verifies that concurrent
+installations use their own runtime capabilities and credentials. CI and CLI release
+builds run these checks. Updating the SDK dependency alone does not move existing
+installations onto shared execution.
+
+To adopt shared execution, first roll out Cantelop migration
+`0032_shared_fleet_packages`, the dispatcher with Worker Loader and FleetPackage
+bindings, compute, and the control worker. Deploy a source release built with SDK
+1.5.1 or newer, then publish a **new** immutable Fleet package from that successful
+release. Its Edge manifest must declare `fleet_execution_protocol_version: 1` and
+the optional `CANTELOP_FLEET_EXECUTION_VERSION` binding. Poll the package endpoint
+until `execution` is `ready`; do not promote `preparing` or `legacy` packages.
+Shared installations attach the source release's prepared runtime image and reuse
+the package's Edge code while retaining separate credentials, storage and budgets.
+
+Publish the matching CLI archives before setting the service's `JUICED_PACKAGE_ID`,
+`JUICED_RUNTIME_ID` and `JUICED_CLI_VERSION`. The existing bootstrap and upgrade jobs
+then move accounts through Cantelop's drain and release API. Verify a canary
+installation reports the new package/runtime and is ready before broader use.
+Package versions are immutable; the previous package remains available for rollback.
+See Cantelop's [shared-package rollout](https://github.com/stepandel/cantelop/blob/main/docs/managed-fleets.md).
 
 Bootstrap requires an exact compiled runtime fingerprint and a minimum CLI
 version. Published CLIs automatically install the service's `JUICED_CLI_VERSION`

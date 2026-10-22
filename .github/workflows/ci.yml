@@ -26,6 +26,7 @@ jobs:
       - run: npm run check
       - run: npm run check:service
       - run: npm test
+      - run: npm run build:runtime
       - run: npm run test:installer
       - run: npm run test:service
       - run: npm run build:service
