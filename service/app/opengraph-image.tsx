@@ -17,8 +17,8 @@ export default function OpenGraphImage() {
           flexDirection: 'column',
           justifyContent: 'space-between',
           padding: '64px 72px',
-          background: '#0b0d0b',
-          color: '#e4e9e4',
+          background: '#0b0e0c',
+          color: '#e8ece4',
           fontFamily: 'sans-serif',
         }}
       >
@@ -31,7 +31,7 @@ export default function OpenGraphImage() {
             fontWeight: 700,
           }}
         >
-          <LogoMark width={36} height={42} color="#4eba65" cutout="#0b0d0b" />
+          <LogoMark width={36} height={42} color="#bff04d" cutout="#0b0e0c" />
           juiced
         </div>
         <div
@@ -41,26 +41,26 @@ export default function OpenGraphImage() {
             fontSize: 88,
             lineHeight: 1.05,
             letterSpacing: '-4px',
-            fontWeight: 700,
+            fontWeight: 500,
           }}
         >
           <span>Claude Code,</span>
           <span style={{ display: 'flex', gap: 24 }}>
-            with more <span style={{ color: '#6fd987' }}>juice.</span>
+            with more <span style={{ color: '#bff04d' }}>juice.</span>
           </span>
         </div>
         <div
           style={{
             display: 'flex',
             justifyContent: 'space-between',
-            borderTop: '1px solid #1f2620',
+            borderTop: '1px solid #232b25',
             paddingTop: 28,
             fontSize: 24,
-            color: '#a4afa5',
+            color: '#8b948a',
           }}
         >
           <span>Your terminal. A persistent cloud workspace.</span>
-          <span style={{ color: '#6fd987' }}>juiced.codes</span>
+          <span style={{ color: '#bff04d' }}>juiced.codes</span>
         </div>
       </div>
     ),

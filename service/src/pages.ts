@@ -8,7 +8,7 @@ export function page(
   return new Response(
     `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escape(title)}</title>
 <meta name="color-scheme" content="dark"><link rel="icon" href="/favicon.svg">
-<style>:root{--bg:#0b0d0b;--ink:#e4e9e4;--muted:#7f8a80;--line:#1f2620;--panel:#111511;--green:#4eba65;--green-bright:#6fd987;--edge:#2f3830;--field-edge:#5f6b60;--danger:#ec8a78;--warn:#e0b85c;--green-wash:#1d3a24;--warn-edge:#5c4a2a;--warn-wash:#1a160e}
+<style>:root{--bg:#0b0e0c;--ink:#e8ece4;--muted:#8b948a;--line:#232b25;--panel:#121613;--green:#bff04d;--green-bright:#d3ff6a;--edge:#2e382f;--field-edge:#5f6b60;--danger:#ec8a78;--warn:#e0b85c;--green-wash:rgba(191,240,77,.12);--warn-edge:#5c4a2a;--warn-wash:#1a160e}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}main{max-width:520px;margin:0 auto;padding:56px 24px 80px}
 .top{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:48px}.brand{display:inline-flex;gap:10px;align-items:center;color:inherit;font-size:22px;font-weight:800;letter-spacing:-1px;text-decoration:none}.brand svg{color:var(--green)}.brand .cutout{fill:var(--bg)}
 h1{font-size:34px;line-height:1.15;letter-spacing:-.04em;font-weight:650;margin:0 0 16px}h2{font-size:20px;letter-spacing:-.02em;font-weight:600;margin:44px 0 8px;padding-top:28px;border-top:1px solid var(--line)}p,li{color:var(--muted)}#status{color:var(--ink)}a{color:var(--green);text-underline-offset:4px}

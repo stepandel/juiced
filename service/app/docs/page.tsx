@@ -20,9 +20,10 @@ export default function Docs() {
       <div className="guide-grid docs-index">
         {guides.map((guide) => (
           <a key={guide.slug} href={`/docs/${guide.slug}`} className="guide-card">
+            <span className="path mono">docs/{guide.slug}</span>
             <h2>{guide.title}</h2>
             <p>{guide.description}</p>
-            <span className="mono" aria-hidden="true">
+            <span className="go mono" aria-hidden="true">
               read →
             </span>
           </a>
