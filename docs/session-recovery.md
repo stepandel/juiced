@@ -108,6 +108,20 @@ replies remain available for diagnostics. A 30-second read watchdog reconnects
 half-open subscriptions after sleep. View/subscription
 reads do not keep compute alive; while a turn is working, a watchdog also checks
 the journal so sandbox loss can be reported.
+### Session admission timeouts
+
+Interactive sessions stay active for their 120-second keep-alive after `/detach`,
+`/exit` or a lost terminal. Until then, the platform can refuse to admit another
+session in the same workspace, such as a reconnect or `ls`/`peek`, with
+`session_admission_timeout`. The request never ran, so Juiced always retries it.
+`ls`, `peek`, `sessions`, `sync` and `fast-forward` print one notice and retry
+for up to 150 seconds. If admission still fails, they exit with a message that
+nothing changed and explain how to reopen the conversation. In the TUI, the
+connecting and reconnect states say that the workspace is waiting to admit the
+session, and keep retrying until admission succeeds or you press Ctrl+C. Your
+draft is kept locally. This explains and bounds the wait but does not remove the
+underlying platform limit.
+
 The streamed protocol requires rebuilding the CLI and deploying its matching
 runtime together; existing journals remain readable.
 

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { RemoteAppError } from '@cantelop/sdk';
 import type { TerminalCommand, TerminalReply } from '../protocol.js';
 import type { Approval } from '../agent-protocol.js';
 import { validateExportManifest, validOid, validTransferId } from '../git-protocol.js';
@@ -9,6 +10,24 @@ export type LocalPublish = {
   head: string; apply(publication: Publication, signal: AbortSignal): Promise<PublishResult>;
   upload?: { prepare(request: UploadRequest, signal: AbortSignal): Promise<Record<string, unknown>>; send(request: UploadRequest, signal: AbortSignal): Promise<PublishResult>; discard(id: string): Promise<void> };
 };
+
+/**
+ * Remote requests only download the artifact or send the upload, before either
+ * checkout is changed. Say so, so Claude does not mistake a capacity or
+ * connection error for a file conflict or a missing approval.
+ */
+export function transferFailure(transfer: LocalTransfer, error: unknown, fallback: string): PublishResult {
+  const message = (error instanceof Error ? error.message : fallback).slice(0, 2000);
+  // The SDK types request failures; GitWorkspaceClient also types stream failures
+  // at the subscription boundary. Local Git/filesystem errors keep their origin.
+  if (!(error instanceof RemoteAppError)) return { status: 'conflict', message };
+  if (transfer.kind === 'upload')
+    return { status: 'failed', message: `Juiced could not send the local changes to the workspace (${message}). This was a connection or capacity error, not a conflict; the remote checkout was not changed and the local client is still attached. Retry pull_local_changes in a minute.` };
+  const recovery = transfer.kind === 'snapshot'
+    ? 'Retry publish_snapshot in a minute, or commit the edits remotely and ask the user to run juiced claude sync --from-workspace locally.'
+    : 'Retry publish_commits in a minute, or ask the user to run juiced claude fast-forward locally.';
+  return { status: 'failed', message: `Juiced could not download this publication from the workspace (${message}). This was a connection or capacity error, not a file conflict, and the local approval was received. Local files, HEAD and the index were not changed, and the local client is still attached. ${recovery}` };
+}
 
 /** The agent state a broker shares: its approval list, events, runtime requests and lifetime. */
 export type PublicationHost = {
@@ -55,7 +74,7 @@ export class PublicationBroker {
         } catch (error) {
           if (!controller.signal.aborted) {
             await this.host.request({ type: 'publish-claim', id: publication.id, client: this.client });
-            await this.host.request({ type: 'publish-result', id: publication.id, client: this.client, result: { status: 'conflict', message: error instanceof Error ? error.message : 'Local capture failed.' } });
+            await this.host.request({ type: 'publish-result', id: publication.id, client: this.client, result: transferFailure(publication, error, 'Local capture failed.') });
           }
           this.done(publication.id);
           return;
@@ -99,7 +118,7 @@ export class PublicationBroker {
             signal.throwIfAborted();
             return publication.kind === 'upload' ? this.host.localPublish!.upload!.send(publication, signal) : this.host.localPublish!.apply(publication, signal);
           });
-        } catch (error) { result = { status: 'conflict', message: error instanceof Error ? error.message : 'Local application failed. Check the local checkout before retrying.' }; }
+        } catch (error) { result = transferFailure(publication, error, 'Local application failed. Check the local checkout before retrying.'); }
       }
       const reply = await this.host.request({ type: 'publish-result', id, client: this.client, result });
       if (reply.ok && reply.publication) result = reply.publication;

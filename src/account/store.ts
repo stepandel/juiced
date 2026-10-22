@@ -15,51 +15,39 @@ export interface Credentials {
 }
 export class CredentialStore {
   readonly path: string;
+  /**
+   * Releases up to 0.2.3 share this path and rewrite it with an OS-keyring
+   * pointer on every token refresh. A still-running older process would sign
+   * out newer ones, so current releases keep their own file beside it.
+   */
+  readonly legacyPath: string;
   constructor(
     readonly origin: string,
     env: NodeJS.ProcessEnv = process.env,
   ) {
     const root = configRoot(env);
-    this.path = join(root, createHash('sha256').update(origin).digest('hex') + '.json');
+    const name = createHash('sha256').update(origin).digest('hex') + '.json';
+    this.legacyPath = join(root, name);
+    this.path = join(root, 'credentials', name);
   }
   async read(): Promise<Credentials | undefined> {
-    let file;
-    try {
-      file = await open(this.path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-      throw error;
-    }
-    try {
-      const info = await file.stat();
-      if (
-        !info.isFile() ||
-        info.size > 32 * 1024 ||
-        (process.platform !== 'win32' && (info.mode & 0o077) !== 0)
-      )
-        throw new Error('Juiced credential file must be private.');
-      const value = parsePrivateJSON(await file.readFile('utf8'));
-      if (value.storage === 'keyring') {
-        if (value.origin !== this.origin) throw new Error('Invalid credential origin.');
-        // Older releases left a pointer to OS storage here. Renew the sign-in
-        // through the normal login flow without opening an OS password dialog.
-        return;
-      }
-      const v = value as unknown as Credentials;
-      if (
-        v.origin !== this.origin ||
-        typeof v.accessToken !== 'string' ||
-        typeof v.refreshToken !== 'string' ||
-        !Number.isFinite(v.expiresAt) ||
-        !/^[A-Za-z0-9_-]{20,512}$/.test(v.accessToken) ||
-        !/^[A-Za-z0-9_-]{20,512}$/.test(v.refreshToken) ||
-        (v.account !== undefined && !/^acc_[a-f0-9]{32}$/.test(v.account))
-      )
-        throw new Error('Invalid Juiced credentials. Sign in again.');
-      return v;
-    } finally {
-      await file.close();
-    }
+    const current = await readCredentialFile(this.path, this.origin);
+    if (current.kind === 'credentials') return current.value;
+    if (current.kind === 'keyring') throw new Error('Invalid Juiced credential file. Sign in again.');
+    // Another process may have moved the legacy file since our first read.
+    // Recheck both locations under the migration lock before reporting sign-out.
+    return withFileLock(this.legacyPath + '.lock', new AbortController().signal, async () => {
+      const raced = await readCredentialFile(this.path, this.origin);
+      if (raced.kind === 'credentials') return raced.value;
+      if (raced.kind === 'keyring') throw new Error('Invalid Juiced credential file. Sign in again.');
+      const legacy = await readCredentialFile(this.legacyPath, this.origin);
+      // Legacy keyring pointers renew sign-in without opening the OS store.
+      if (legacy.kind !== 'credentials') return;
+      // Move rather than copy: refresh tokens rotate and must have one owner.
+      await this.write(legacy.value);
+      await rm(this.legacyPath, { force: true });
+      return legacy.value;
+    }, 30000, 'Another Juiced process is refreshing credentials. Retry shortly.');
   }
   async write(value: Credentials) {
     if (
@@ -75,6 +63,7 @@ export class CredentialStore {
   }
   async clear() {
     await rm(this.path, { force: true });
+    await rm(this.legacyPath, { force: true });
   }
   async locked<T>(
     signal: AbortSignal,
@@ -124,6 +113,49 @@ export async function rememberOrigin(origin: string, env: NodeJS.ProcessEnv) {
 async function privateDirectory(path: string) {
   await mkdir(path, { recursive: true, mode: 0o700 });
   if (process.platform !== 'win32') await chmod(path, 0o700);
+}
+
+type CredentialFile =
+  | { kind: 'missing' }
+  | { kind: 'keyring' }
+  | { kind: 'credentials'; value: Credentials };
+
+async function readCredentialFile(path: string, origin: string): Promise<CredentialFile> {
+  let file;
+  try {
+    file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'missing' };
+    throw error;
+  }
+  try {
+    const info = await file.stat();
+    if (
+      !info.isFile() ||
+      info.size > 32 * 1024 ||
+      (process.platform !== 'win32' && (info.mode & 0o077) !== 0)
+    )
+      throw new Error('Juiced credential file must be private.');
+    const value = parsePrivateJSON(await file.readFile('utf8'));
+    if (value.storage === 'keyring') {
+      if (value.origin !== origin) throw new Error('Invalid credential origin.');
+      return { kind: 'keyring' };
+    }
+    const v = value as unknown as Credentials;
+    if (
+      v.origin !== origin ||
+      typeof v.accessToken !== 'string' ||
+      typeof v.refreshToken !== 'string' ||
+      !Number.isFinite(v.expiresAt) ||
+      !/^[A-Za-z0-9_-]{20,512}$/.test(v.accessToken) ||
+      !/^[A-Za-z0-9_-]{20,512}$/.test(v.refreshToken) ||
+      (v.account !== undefined && !/^acc_[a-f0-9]{32}$/.test(v.account))
+    )
+      throw new Error('Invalid Juiced credentials. Sign in again.');
+    return { kind: 'credentials', value: v };
+  } finally {
+    await file.close();
+  }
 }
 
 function parsePrivateJSON(text: string): Record<string, unknown> {

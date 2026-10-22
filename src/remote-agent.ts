@@ -494,7 +494,7 @@ export class RemoteAgent extends EventEmitter {
         if (expired) this.cursor = undefined;
         if (error instanceof RemoteProcessError || !expired && !isTransient(error)) throw error;
         recover = true;
-        this.emit('reconnecting', ++failures);
+        this.emit('reconnecting', ++failures, error);
         await delay(backoffMs(failures - 1), undefined, { signal: this.controller.signal });
       } finally { subscription.abort(); connection.dispose(); await events?.return?.(); }
     }
@@ -525,7 +525,7 @@ export class RemoteAgent extends EventEmitter {
         if (error instanceof RemoteProcessError || !isTransient(error)) throw error;
         ++failures;
         this.debug('stream.retry', { attempt: failures, name: (error as Error)?.name });
-        this.emit('reconnecting', failures);
+        this.emit('reconnecting', failures, error);
         await delay(backoffMs(failures - 1), undefined, { signal: this.controller.signal });
       }
     }

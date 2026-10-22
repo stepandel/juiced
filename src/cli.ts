@@ -22,6 +22,7 @@ import { listSessions } from './list-sessions.js';
 import { LocalUploader } from './local-upload.js';
 import { LocalPublisher } from './local-publish.js';
 import { CliUpdater, needsCliUpdate } from './update.js';
+import { ADMISSION_MESSAGE, isAdmissionTimeout } from './transport.js';
 import { CliTelemetry } from './telemetry.js';
 
 const controller = new AbortController();
@@ -38,6 +39,9 @@ const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map((signal, index) 
   process.on(signal, handler);
   return { signal, handler };
 });
+
+/** One-shot commands keep retrying an unadmitted Session; say why they are waiting. */
+const waitForAdmission = () => process.stderr.write(`juiced: ${ADMISSION_MESSAGE} Retrying for up to two and a half minutes…\n`);
 
 async function main() {
   if (process.argv[2] === '--internal-install-completed') {
@@ -139,9 +143,9 @@ async function main() {
     } else if (args.command === 'claude' && args.action === 'github-configure') {
       await configureGitHub(claudeApp.environment(), args.stdin, process, controller.signal);
     } else if (args.command === 'claude' && args.action === 'sessions') {
-      await listSessions(claudeApp, process.cwd(), args.workspace, controller.signal);
+      await listSessions(claudeApp, process.cwd(), args.workspace, controller.signal, process.stdout, waitForAdmission);
     } else if (args.command === 'claude' && (args.action === 'ls' || args.action === 'peek')) {
-      process.exitCode = await inspectWorkspace(claudeApp, process.cwd(), args, controller.signal);
+      process.exitCode = await inspectWorkspace(claudeApp, process.cwd(), { ...args, waiting: waitForAdmission }, controller.signal);
     } else if (args.command === 'claude' && args.action === 'delete') {
       const project = await selectProject(process.cwd(), args.workspace);
       await deleteWorkspace(claudeApp, project.workspace, args.yes, controller.signal);
@@ -177,7 +181,7 @@ async function main() {
         if (maintenance) {
           if (!repository)
             throw new Error('Git workspace commands require a local Git repository.');
-          const client = new GitWorkspaceClient(workspace, project, repository, controller.signal);
+          const client = new GitWorkspaceClient(workspace, project, repository, controller.signal, waitForAdmission);
           try {
             if (args.action === 'sync' && args.direction === 'to-workspace') {
               await client.send(args.includeUncommitted);
@@ -232,6 +236,7 @@ async function main() {
               project,
               repository,
               controller.signal,
+              waitForAdmission,
             );
             try {
               await client.send(false, true);
@@ -347,6 +352,10 @@ async function reportError(error: unknown) {
     ) {
       process.stderr.write(
         'juiced: Cantelop app credentials are missing or invalid. Configure the SDK integration profile or set CANTELOP_APP_SLUG, CANTELOP_INTEGRATION_TOKEN, and optionally CANTELOP_EDGE_URL. See docs/self-managed.md for deployment setup.\n',
+      );
+    } else if (isAdmissionTimeout(error)) {
+      process.stderr.write(
+        `juiced: ${ADMISSION_MESSAGE} Nothing was changed and remote work is preserved. Wait a minute, then run the command again; reopen a saved conversation with juiced claude --session ID (see juiced claude sessions).\n`,
       );
     } else if (code === 'managed_admission_closed') {
       process.stderr.write(`juiced: ${new ManagedError(code).message}\n`);

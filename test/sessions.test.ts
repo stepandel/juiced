@@ -151,6 +151,43 @@ test('real SDK listing uses an existing canonical workspace, includes legacy loc
   assert.equal(calls.at(-1)!.command.type, 'stop');
 });
 
+test('session listing waits through a finishing session keep-alive before reading histories', async t => {
+  const f = await fixture(t);
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
+  // AbortSignal's native timer is outside MockTimers; drive its deadline with the test clock too.
+  t.mock.method(AbortSignal, 'timeout', (milliseconds: number) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new DOMException('Listing timed out', 'TimeoutError')), milliseconds);
+    return controller.signal;
+  });
+  const workspaceId = `wsp_${'a'.repeat(32)}`;
+  let requests = 0, stopped = false, waited = 0, notify!: () => void;
+  const waiting = new Promise<void>(resolve => { notify = resolve; });
+  const app = new CantelopClient().app<TerminalCommand, TerminalEvent, TerminalReply>({ name: 'sessions-admission-test', runtime: { receive() {} }, connection: { async fetch(request) {
+    const body = await request.json() as AppCommandEnvelope<TerminalCommand>;
+    if (body.command.type === 'workspace.inspect') return Response.json({ protocolVersion: 2, workspace: { id: workspaceId, slug: 'chosen', app_id: `app_${'b'.repeat(32)}`, hostname: 'fixture.cantelop.dev', created_at: new Date().toISOString(), updated_at: new Date().toISOString() } });
+    if (body.command.type === 'stop') { stopped = true; return Response.json({ protocolVersion: 2, id: body.id }); }
+    assert.equal(body.command.type, 'request');
+    if (++requests === 1) {
+      t.mock.timers.tick(120_000);
+      request.signal.throwIfAborted();
+      return Response.json({ error: { code: 'session_admission_timeout' } }, { status: 409 });
+    }
+    request.signal.throwIfAborted();
+    return Response.json({ protocolVersion: 2, id: body.id, reply: { ok: true, sessions: { items: [{ key: sessionKey(id(1)), id: id(1), updatedAt: new Date().toISOString() }], unreadable: 0 } } });
+  } } });
+  const stdout = new PassThrough(); let output = ''; stdout.on('data', bytes => output += String(bytes));
+  const listed = listSessions(app, f.local, 'chosen', signal(), stdout, () => { waited++; notify(); });
+  // Fail promptly if the old 60-second deadline fires instead of reaching the retry.
+  await Promise.race([waiting, listed.then(() => assert.fail('Expected an admission retry'))]);
+  t.mock.timers.tick(1000);
+  await listed;
+  assert.equal(requests, 2);
+  assert.equal(waited, 1);
+  assert.equal(stopped, true);
+  assert.match(output, new RegExp(id(1)));
+});
+
 test('Git-aware listing matches the exact binding and relative launch directory', async t => {
   const f = await fixture(t); await git(f.local, ['init']);
   await git(f.local, ['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit', '--allow-empty', '-m', 'initial']);
