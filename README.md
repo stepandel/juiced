@@ -1,5 +1,7 @@
 # Juiced
 
+<img src="docs/assets/juiced-mascot.svg" width="240" alt="The Claude mascot drinks a glass of juice through a straw and turns green">
+
 Run Claude Code in a persistent cloud workspace, driven from your own terminal.
 
 ```sh
