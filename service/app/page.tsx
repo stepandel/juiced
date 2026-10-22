@@ -163,32 +163,6 @@ export default function Home() {
               </div>
             </div>
           </section>
-          <dl className="specs mono">
-            <div>
-              <dt>Runs in</dt>
-              <dd>
-                Private cloud <i>workspace</i>
-              </dd>
-            </div>
-            <div>
-              <dt>Isolation</dt>
-              <dd>
-                One <i>sandbox</i> per session
-              </dd>
-            </div>
-            <div>
-              <dt>Driven from</dt>
-              <dd>
-                <i>Your</i> terminal
-              </dd>
-            </div>
-            <div>
-              <dt>Local changes</dt>
-              <dd>
-                None until <i>you pull</i>
-              </dd>
-            </div>
-          </dl>
           <section className="band" aria-labelledby="how">
             <div className="section-head">
               <div>
