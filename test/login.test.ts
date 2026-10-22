@@ -27,7 +27,7 @@ test('expired Claude authorization explains how to restart in the selected works
   const f = fixture(t, async () => { throw expired; });
   const checked = assert.rejects(ensureLogin(f.auth, new AbortController().signal, { workspace: 'chosen', io: f }), error => {
     assert.match((error as Error).message, /sign-in attempt expired or was cancelled/);
-    assert.match((error as Error).message, /juiced --workspace chosen claude login/);
+    assert.match((error as Error).message, /Rerun your command, or run juiced --workspace chosen claude login,/);
     assert.match((error as Error).message, /new authorization URL and code/);
     assert.equal((error as Error).cause, expired);
     return true;
@@ -35,7 +35,7 @@ test('expired Claude authorization explains how to restart in the selected works
   await f.wait(() => f.output.includes('Paste the authorization code:'));
   f.stdin.write('expired-code\r');
   await checked;
-  assert.deepEqual(f.cancelled, ['attempt']);
+  assert.deepEqual(f.cancelled, [], 'An expired attempt is not cancelled again');
   assert.equal(f.output.includes('Claude is signed in'), false);
 });
 

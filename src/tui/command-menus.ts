@@ -55,7 +55,7 @@ function safe(value: unknown): string {
 function inspect(title: string, value: unknown, back?: MenuPage['back']): MenuPage {
   const text = typeof value === 'string' ? value : safe(value);
   const lines = text.split('\n').flatMap(line => line.match(/.{1,76}/gu) ?? ['']);
-  return { title, items: lines.map((line, index) => ({ id: String(index), label: line || ' ', description: line })), ...(back ? { back } : {}) };
+  return { title, items: [], details: lines.map(value => ({ value })), ...(back ? { back } : {}) };
 }
 function confirm(title: string, description: string, back: () => MenuPage | Promise<MenuPage>, change: () => Promise<MenuResult>): MenuPage {
   return { title, description, search: false, back, items: [

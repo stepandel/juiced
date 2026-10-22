@@ -185,7 +185,10 @@ test('explicit setting arguments can save an unchanged running choice', async ()
 test('read-only menus use summary APIs, fallback on unsupported RPCs, and propagate real errors', async () => {
   const a = await agent();
   assert.equal((await commandMenu(a, 'hooks')).title, 'Configured hooks');
-  assert.ok(JSON.stringify(await commandMenu(a, 'usage')).includes('Total cost: $0.12'));
+  const usage = await commandMenu(a, 'usage');
+  assert.ok(JSON.stringify(usage).includes('Total cost: $0.12'));
+  assert.equal(usage.items.length, 0, 'Inspected data is read-only, not a list of selectable lines');
+  assert.ok(usage.details?.every(field => field.label === undefined));
   const memory = await commandMenu(a, 'memory');
   assert.equal(memory.items[0]?.label, '/workspace/CLAUDE.md');
   assert.ok(JSON.stringify(await choose(memory, '0')).includes('Project instructions'));
@@ -309,7 +312,7 @@ test('status is a readable, scrollable details view without selectable JSON or r
     await delay(30);
     assert.equal(f.latest.includes('Filter:'), false);
     f.stdout.columns = 50; f.stdout.rows = 15; f.stdout.emit('resize');
-    await f.wait(() => f.latest.includes('↑/↓ scroll'));
+    await f.wait(() => f.latest.includes('↑/↓ or PgUp/PgDn to scroll'));
     assert.equal(f.latest.includes('Background tasks: 0'), false);
     f.stdin.write('\x1b[6~');
     await f.wait(() => f.latest.includes('Background tasks: 0'));

@@ -15,6 +15,12 @@ export type GitWorkspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, Ter
 type Project = Awaited<ReturnType<typeof selectProject>>;
 type Action = GitCommand extends infer C ? C extends GitCommand ? Omit<C, 'type' | 'directoryName' | 'binding'> : never : never;
 
+export function fastForwardMessage(branch: string | null, result: { head: string; advanced: boolean }): string {
+  return result.advanced
+    ? `Fast-forwarded ${branch} to ${result.head.slice(0, 12)}.\n`
+    : `Already up to date: ${branch} already contains ${result.head.slice(0, 12)}.\n`;
+}
+
 /** Retire only this attachment's observed checkout registrations after stopping. */
 export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<TerminalCommand>, 'database'>, project: Pick<Project, 'directoryName'>, id?: string,managedStop?:(session:string)=>Promise<void>): Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'view' | 'stop'> {
   const session = workspace.session({ keepAliveSeconds: 120, ...(id ? { id } : {}) });
@@ -226,10 +232,12 @@ export class GitWorkspaceClient {
     const branch = await gitText(this.repository.root, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => null);
     if (!branch || branch !== imported.sourceBranch || branch !== this.repository.branch) throw new Error(`Commits imported into ${imported.ref}. Check out the workspace's source branch before fast-forwarding.`);
     if (await gitText(this.repository.root, ['rev-parse', 'HEAD']) !== this.repository.head) throw new Error('Commits were imported, but local HEAD changed during the import. Retry fast-forward.');
+    // Local HEAD already contains the workspace head: nothing to merge, whatever the checkout state.
+    if (await ancestor(this.repository.root, imported.head, this.repository.head)) return { ...imported, advanced: false };
     if (!await cleanRepository(this.repository.root)) throw new Error(`Commits imported into ${imported.ref}. The local checkout must be clean before fast-forwarding.`);
     if (!await ancestor(this.repository.root, this.repository.head, imported.head)) throw new Error(`Commits imported into ${imported.ref}. Local and remote histories diverged; reconcile them with Git.`);
     await git(this.repository.root, ['merge', '--ff-only', '--no-overwrite-ignore', imported.head], { signal: this.signal });
-    return imported;
+    return { ...imported, advanced: true };
   }
 
   async close() { await this.session.stop(); }

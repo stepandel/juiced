@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import type { Writable } from 'node:stream';
 import type { WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
 import { discoverRepository, sha256 } from './git.js';
-import { selectProject } from './project.js';
+import { juicedCommand, selectProject } from './project.js';
 import { isENOENT } from './fs-util.js';
-import { ADMISSION_RETRY_MS, retryAdmission } from './transport.js';
+import { ADMISSION_RETRY_MS, errorCode, retryAdmission } from './transport.js';
 import { SESSION_LIST_TIMEOUT_MS, validSessionId, validateSessionListPage, type SessionListCommand } from './session-list-protocol.js';
 import { validWorkspaceId, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 
@@ -63,9 +63,8 @@ export async function listSessions(app: ListingApp, directory: string, workspace
     } while (after);
   } catch (error) {
     failed = true;
-    if ((error as { code?: string }).code === 'session_not_found') {
-      const command = `juiced${workspaceOverride ? ` --workspace ${project.workspace}` : ''} claude`;
-      throw new Error(`Saved conversations could not be read because the workspace session is unavailable. Run ${command} sessions again. If this is a new workspace, finish Claude sign-in with ${command} login.`, { cause: error });
+    if (errorCode(error) === 'session_not_found') {
+      throw new Error(`Saved conversations could not be read because the workspace session is unavailable. Run ${juicedCommand(workspaceOverride, 'sessions')} again. If this is a new workspace, finish Claude sign-in with ${juicedCommand(workspaceOverride, 'login')}.`, { cause: error });
     }
     throw error;
   } finally {
@@ -73,14 +72,14 @@ export async function listSessions(app: ListingApp, directory: string, workspace
     catch (error) {
       // A zero-keep-alive inspection may already have ended. Cleanup must not
       // hide a valid list or replace the original read failure with a stop error.
-      if (!failed && (error as { code?: string }).code !== 'session_not_found') throw error;
+      if (!failed && errorCode(error) !== 'session_not_found') throw error;
     }
   }
   sessions.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
   const lines = [`Sessions in ${project.workspace}:`];
   if (sessions.length) {
     lines.push('LAST UPDATED (UTC)    SESSION ID', ...sessions.map(item => `${new Date(item.updatedAt).toISOString().slice(0, 19).replace('T', ' ')}   ${item.id}`));
-    lines.push('', `Reopen: juiced${workspaceOverride ? ` --workspace ${project.workspace}` : ''} claude --session ID`);
+    lines.push('', `Reopen: ${juicedCommand(workspaceOverride, '--session ID')}`);
   } else lines.push('No saved sessions with a known Juiced ID.');
   if (unidentified) lines.push(`${unidentified} older ${unidentified === 1 ? 'history has' : 'histories have'} no saved Juiced ID. Reopen from the original tab to make ${unidentified === 1 ? 'it' : 'them'} discoverable.`);
   if (unreadable) lines.push(`${unreadable} ${unreadable === 1 ? 'history could' : 'histories could'} not be read.`);

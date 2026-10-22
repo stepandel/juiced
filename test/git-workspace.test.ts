@@ -9,7 +9,7 @@ import { createClient } from '@libsql/client';
 import { CantelopClient, RemoteAppError, type AppCommandEnvelope, type SessionEvent } from '@cantelop/sdk';
 import type { WorkspaceDatabase } from '@cantelop/sdk/session';
 import { createUpload, discoverRepository, fileInfo, git, gitText } from '../src/git.js';
-import { createGitSession, GitWorkspaceClient } from '../src/git-workspace.js';
+import { createGitSession, fastForwardMessage, GitWorkspaceClient } from '../src/git-workspace.js';
 import { selectProject } from '../src/project.js';
 import { createGitRuntime } from '../src/runtime/git.js';
 import { acquireCheckout, CheckoutBusy } from '../src/runtime/project-state.js';
@@ -111,9 +111,30 @@ test('SDK round trip preserves exact unpublished commits and imports branches be
   assert.equal(await gitText(f.local, ['rev-parse', 'HEAD']), base);
   assert.equal(await gitText(f.local, ['rev-parse', `refs/remotes/juiced/${f.project.workspace}/agent/result`]), remoteHead);
   await assert.rejects(readFile(join(f.local, 'agent.bin')), /ENOENT/);
-  await client.fastForward();
+  const advanced = await client.fastForward();
+  assert.equal(advanced.advanced, true);
+  assert.equal(fastForwardMessage('main', advanced), `Fast-forwarded main to ${remoteHead.slice(0, 12)}.\n`);
   assert.equal(await gitText(f.local, ['rev-parse', 'HEAD']), remoteHead);
   assert.deepEqual(await readFile(join(f.local, 'agent.bin')), await readFile(join(f.target, 'agent.bin')));
+  await client.close();
+});
+
+test('repeated fast-forward reports up to date even with a dirty or locally advanced checkout', { timeout: 30_000 }, async t => {
+  const f = await fixture(t);
+  let client = await f.client(); await client.send(false); await client.close();
+  const base = await gitText(f.local, ['rev-parse', 'HEAD']);
+  await writeFile(join(f.local, 'README.md'), 'uncommitted edit');
+  client = await f.client();
+  const unchanged = await client.fastForward();
+  assert.equal(unchanged.advanced, false);
+  assert.equal(fastForwardMessage('main', unchanged), `Already up to date: main already contains ${base.slice(0, 12)}.\n`);
+  assert.equal(await readFile(join(f.local, 'README.md'), 'utf8'), 'uncommitted edit');
+  await client.close();
+  await git(f.local, ['add', '.']); await git(f.local, ['commit', '-m', 'local ahead']);
+  const ahead = await gitText(f.local, ['rev-parse', 'HEAD']);
+  client = await f.client();
+  assert.equal((await client.fastForward()).advanced, false);
+  assert.equal(await gitText(f.local, ['rev-parse', 'HEAD']), ahead);
   await client.close();
 });
 
