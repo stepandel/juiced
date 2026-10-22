@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { services } from '../src/services';
+import { application } from '../src/app';
+import type { Auth } from '../src/auth';
 
 const base: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
@@ -35,4 +37,18 @@ test('a partial Stripe configuration is rejected', () => {
     () => services({ ...base, STRIPE_SECRET_KEY: 'sk_test_fixture' }),
     /STRIPE_PRICE_ID is required/,
   );
+});
+
+test('public configuration advertises the CLI paired with the deployed service', async () => {
+  const s = services({ ...base, JUICED_CLI_VERSION: '0.2.2', JUICED_MINIMUM_CLI: '0.2.1' });
+  try {
+    const response = await application({ ...s, auth: {} as Auth })(new Request('https://juiced.example/v1/config'));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal((await response.json()).cliVersion, '0.2.2');
+  } finally {
+    await s.pool.end();
+  }
+  for (const cliVersion of ['invalid', '0.2.0'])
+    assert.throws(() => services({ ...base, JUICED_CLI_VERSION: cliVersion, JUICED_MINIMUM_CLI: '0.2.1' }), /JUICED_CLI_VERSION/);
 });

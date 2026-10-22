@@ -16,6 +16,7 @@ export interface Account {
   period_id: string | null;
   period_end: Date | null;
   included_credits: string;
+  created_at: Date;
 }
 export interface Installation {
   id: string;
@@ -36,7 +37,7 @@ export interface Installation {
 export class Accounts {
   constructor(
     readonly pool: Pool,
-    readonly release: { packageId: string; runtimeId: string; minimumCli: string },
+    readonly release: { packageId: string; runtimeId: string; minimumCli: string; cliVersion?: string },
   ) {}
   async ensure(user: string) {
     return transaction(this.pool, async (tx) => {

@@ -1,6 +1,6 @@
 {
   "name": "juiced",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "description": "Run Claude Code on Cantelop from your terminal",
   "type": "module",
   "private": false,
@@ -41,7 +41,7 @@
     "dev:service": "npm run dev --workspace @juiced/service"
   },
   "dependencies": {
-    "@cantelop/sdk": "1.5.0",
+    "@cantelop/sdk": "1.5.1",
     "ink": "^8.0.0",
     "react": "^19.3.1",
     "string-width": "^8.3.0"

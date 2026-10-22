@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdtemp, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,7 @@ test(
       target: 'node22',
       format: 'esm',
       packages: 'external',
+      define: { JUICED_VERSION: JSON.stringify('0.2.1'), JUICED_INSTALLER_SOURCE: JSON.stringify('exec "$FIXTURE_NODE" "$FIXTURE_INSTALLER" "$@"\n') },
       plugins: [createCantelopCompilerPlugin({ definition: join(projectRoot, 'src/cantelop.ts') })],
       outfile: join(output, 'cli.mjs'),
     });
@@ -62,10 +63,11 @@ test(
  if(u.origin==='https://api.github.com')return Response.json({login:'octocat'});
  assert.equal(u.origin,${JSON.stringify(origin)});assert.equal(r.headers.get('authorization'),'Bearer '+'a'.repeat(40));
  if(u.pathname==='/v1/me')return Response.json({userId:'user',deviceId:'device',accounts:[{id:${JSON.stringify(account)},status:'active',entitlement:'active'},{id:${JSON.stringify(other)},status:'active',entitlement:'active'}]});
+ if(u.pathname==='/v1/logout'){const body=await r.json();calls.push({type:'logout',all:body.all});return process.env.TEST_LOGOUT_FAILURE?Response.json({error:'service_unavailable'},{status:503}):Response.json({revoked:true});}
  const selected=u.pathname.split('/')[3],installation='jin_'+(selected===${JSON.stringify(account)}?'a':'b').repeat(32);
- if(u.pathname.endsWith('/bootstrap')){const body=await r.json();runtime=body.runtimeId;assert.equal(typeof runtime,'string');assert.ok(runtime.length>20);return Response.json({id:installation,status:'ready',runtimeId:runtime,minimumCli:'0.2.0',error:null,operationId:'provision:'+installation});}
+ if(u.pathname.endsWith('/bootstrap')){if(process.env.TEST_UPGRADE_REQUIRED)return Response.json({error:'cli_upgrade_required'},{status:409});const body=await r.json();runtime=body.runtimeId;assert.equal(typeof runtime,'string');assert.ok(runtime.length>20);return Response.json({id:installation,status:'ready',runtimeId:runtime,minimumCli:'0.2.0',error:null,operationId:'provision:'+installation});}
  assert.equal(r.headers.get('x-juiced-installation'),installation);assert.equal(r.headers.get('x-cantelop-session-runtime'),runtime);
- const body=await r.json();assert.equal(body.workspace,null);assert.equal(body.session,null);assert.ok(['app.environment.set','app.environment.status'].includes(body.command.type));calls.push({account:selected,installation,type:body.command.type});
+ const body=await r.json();assert.equal(body.workspace,null);assert.equal(body.session,null);assert.ok(['app.environment.set','app.environment.status'].includes(body.command.type));if(process.env.TEST_RUNTIME_MISMATCH)return Response.json({error:'session_runtime_mismatch'},{status:409,headers:{'X-Juiced-Error':'1'}});calls.push({account:selected,installation,type:body.command.type});
  return Response.json({protocolVersion:2,id:body.id,revision:2,status:body.command.type==='app.environment.set'?'pending':'applied'});
  };
  process.on('exit',()=>process.stdout.write(JSON.stringify(calls)+'\\n'));await import('./cli.mjs');
@@ -83,5 +85,90 @@ test(
       assert.equal(calls[0]!.installation, 'jin_' + (selected === account ? 'a' : 'b').repeat(32));
       assert.doesNotMatch(result.stderr, /fixture-token|aaaaaaaaaaaaaaaaaaaa/);
     }
+    for (const failure of ['TEST_UPGRADE_REQUIRED', 'TEST_RUNTIME_MISMATCH']) {
+      await assert.rejects(execute(process.execPath, [bootstrap, 'claude', 'github-configure'], {
+        cwd: root, env: { ...env, [failure]: '1' }, timeout: 6000,
+      }), error => {
+        assert.match((error as { stderr: string }).stderr, /CLI and the service runtime are incompatible[\s\S]*source or package-manager installation[\s\S]*juiced update[\s\S]*curl -fsSL/);
+        return true;
+      });
+    }
+    await t.test('installed CLI updates before work, retries bootstrap and avoids replaying started commands', async () => {
+      const install = join(output, 'data'), old = join(install, 'releases/old'), bin = join(output, 'bin');
+      await mkdir(join(old, 'bin'), { recursive: true });
+      await mkdir(bin);
+      await copyFile(join(output, 'cli.mjs'), join(old, 'bin/juiced.mjs'));
+      await writeFile(join(old, 'release.json'), JSON.stringify({ version: '0.2.1', platform: process.platform, arch: process.arch }));
+      await writeFile(join(old, 'install-paths'), `${install}\0${bin}\0`);
+      await writeFile(join(old, 'bin/juiced'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const installer = join(output, 'install.mjs'), replacement = join(output, 'replacement.mjs');
+      await writeFile(installer, `
+import { mkdir, rename, symlink, writeFile } from 'node:fs/promises';import {join} from 'node:path';
+const version=process.argv[2],root=join(process.env.JUICED_INSTALL_DIR,'releases',version);
+await mkdir(join(root,'bin'),{recursive:true});
+await writeFile(join(root,'release.json'),JSON.stringify({version,platform:process.platform,arch:process.arch}));
+await writeFile(join(root,'bin/juiced'),'#!/bin/sh\\nexec "$FIXTURE_NODE" "$FIXTURE_REPLACEMENT" "$@"\\n',{mode:0o755});
+const temp=join(process.env.JUICED_BIN_DIR,'new-link');await symlink(join(root,'bin/juiced'),temp);await rename(temp,join(process.env.JUICED_BIN_DIR,'juiced'));
+`);
+      await writeFile(replacement, `let input='';for await(const chunk of process.stdin)input+=chunk;process.stdout.write(JSON.stringify({args:process.argv.slice(2),input}));process.exitCode=7;`);
+      const mock = join(output, 'update-fetch.mjs');
+      await writeFile(mock, `
+import assert from 'node:assert/strict';let checks=0,runtime;
+globalThis.fetch=async(input,init)=>{const r=new Request(input,init),u=new URL(r.url),mode=process.env.FIXTURE_MODE;
+if(u.pathname==='/v1/config'){assert.equal(r.headers.has('authorization'),false);return Response.json({cliVersion:mode==='startup'||++checks>1?'0.2.2':'0.2.1'});}
+assert.notEqual(mode,'startup','Update must precede authenticated work');
+if(u.origin==='https://api.github.com')return Response.json({login:'octocat'});
+if(u.pathname==='/v1/me')return Response.json({userId:'user',deviceId:'device',accounts:[{id:${JSON.stringify(account)},status:'active',entitlement:'active'}]});
+if(u.pathname.endsWith('/bootstrap')){if(mode==='bootstrap')return Response.json({error:'cli_upgrade_required'},{status:409});runtime=(await r.json()).runtimeId;return Response.json({id:'jin_'+'a'.repeat(32),status:'ready',runtimeId:runtime,minimumCli:'0.2.0',error:null,operationId:'provision:test'});}
+return Response.json({error:'session_runtime_mismatch'},{status:409,headers:{'X-Juiced-Error':'1'}});
+};
+`);
+      for (const mode of ['startup', 'bootstrap', 'runtime']) {
+        await rm(join(bin, 'juiced'), { force: true });
+        await symlink(join(old, 'bin/juiced'), join(bin, 'juiced'));
+        const args = mode === 'startup' ? ['env', 'set', 'EXAMPLE', '--stdin'] : ['claude', 'github-configure'];
+        const child = spawn(process.execPath, ['--import', mock, join(old, 'bin/juiced.mjs'), ...args], {
+          cwd: root, env: { ...env, FIXTURE_MODE: mode, FIXTURE_NODE: process.execPath, FIXTURE_INSTALLER: installer, FIXTURE_REPLACEMENT: replacement },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        let stdout = '', stderr = '';
+        child.stdout.on('data', chunk => { stdout += chunk; });
+        child.stderr.on('data', chunk => { stderr += chunk; });
+        child.stdin.end('piped secret\n');
+        const code = await new Promise((accept, reject) => { child.on('error', reject); child.on('close', accept); });
+        if (mode === 'runtime') {
+          assert.equal(code, 1, stderr);
+          assert.equal(stdout, '', 'A started command must not be replayed');
+          assert.match(stderr, /Updated successfully.*Run your command again/);
+        } else {
+          assert.equal(code, 7, stderr);
+          assert.deepEqual(JSON.parse(stdout), { args, input: 'piped secret\n' });
+        }
+      }
+    });
+    await t.test('login reuses the computer sign-in and logout removes it for other terminals', async () => {
+      const login = await execute(process.execPath, [bootstrap, 'login', '--no-browser'], { cwd: root, env, timeout: 6000 });
+      assert.match(login.stderr, /Already signed in to Juiced/);
+      assert.match(login.stderr, /juiced logout/);
+      assert.equal((await store.read())?.account, account);
+
+      for (const all of [false, true]) {
+        await store.write({ origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000, account });
+        const logout = await execute(process.execPath, [bootstrap, 'logout', ...(all ? ['--all'] : [])], { cwd: root, env, timeout: 6000 });
+        assert.deepEqual(JSON.parse(logout.stdout), [{ type: 'logout', all }]);
+        assert.match(logout.stderr, all ? /Signed out of all Juiced CLI sessions/ : /Signed out of Juiced on this computer/);
+        assert.equal(await new CredentialStore(origin, env).read(), undefined);
+      }
+
+      await store.write({ origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000, account });
+      await assert.rejects(
+        execute(process.execPath, [bootstrap, 'logout'], { cwd: root, env: { ...env, TEST_LOGOUT_FAILURE: '1' }, timeout: 6000 }),
+        (error) => {
+          assert.match((error as { stderr: string }).stderr, /Local credentials removed; server revocation could not be confirmed/);
+          return true;
+        },
+      );
+      assert.equal(await store.read(), undefined);
+    });
   },
 );

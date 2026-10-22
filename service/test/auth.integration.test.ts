@@ -85,6 +85,10 @@ test(
       const me = await app.request(`${cfg.origin}/v1/me`, { headers });
       assert.equal(me.status, 200);
       const account = await accounts.ensure(user.id);
+      assert.equal(account.entitlement, 'active');
+      assert.equal(account.period_id, 'free');
+      assert.ok(accounts.entitled(account));
+      await pool.query(`UPDATE accounts SET entitlement='inactive' WHERE id=$1`, [account.id]);
       const blocked = await json(
         `/v1/accounts/${account.id}/bootstrap`,
         { version: '0.2.0', runtimeId: 'runtime-v1' },

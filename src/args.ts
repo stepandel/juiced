@@ -134,6 +134,7 @@ Usage:
   juiced login [--no-browser]
   juiced logout [--all]
   juiced whoami
+  juiced update
   juiced env set NAME --stdin [--plain]
   juiced env unset NAME [--plain]
   juiced claude github-configure [--stdin]
@@ -217,5 +218,9 @@ Claude login is separate for each project workspace.
 
 First run: juiced login signs in to Juiced. Then juiced claude login signs in to
 Claude inside the project workspace. Managed mode requires an active subscription.
+Juiced sign-in is shared across terminal windows on this computer. Running
+juiced login again reuses it. Use juiced logout to sign out on this computer,
+or juiced logout --all to sign out all CLI sessions. To switch accounts, sign out
+before running juiced login again.
 For an existing deployment use --self-managed or JUICED_MODE=self-managed.
 `;

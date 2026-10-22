@@ -22,9 +22,15 @@ npm link
 juiced login
 juiced whoami
 juiced claude
-juiced logout                  # revoke this CLI device
-juiced logout --all            # revoke every CLI device for this user
+juiced logout                  # sign out on this computer, across terminal windows
+juiced logout --all            # sign out every CLI session for this user
 ```
+
+Juiced sign-in is shared by terminal windows for the same user on a computer.
+Running `juiced login` again reuses a valid sign-in, including when multiple
+terminals run it at once. To switch accounts, run `juiced logout` first.
+The account console lists CLI sign-ins and can revoke one or all of them.
+Its **Sign out of browser** button ends the browser session; CLI sessions stay signed in.
 
 The service choice is remembered after login. `JUICED_SERVICE_URL` overrides it.
 Builds default to `https://juiced.codes`; `JUICED_DEFAULT_SERVICE_URL` overrides
@@ -60,7 +66,8 @@ production branch `main`, root directory `service`, framework Next.js and Node 2
 Source files outside the root directory must be enabled for shared contracts and
 the workspace lockfile. `service/vercel.json` declares the private `juiced-jobs`
 queue trigger and the once-per-minute `/api/cron` schedule. Vercel builds run
-`next build`; they do not publish the CLI or compile a Cantelop runtime.
+`npm run migrate && next build`, migrating with the Neon integration's owner
+`DATABASE_URL`; they do not publish the CLI or compile a Cantelop runtime.
 
 The website is `https://juiced.codes`.
 `https://juiced-eight.vercel.app` redirects to the canonical domain.
@@ -68,7 +75,10 @@ The homepage is a static Next.js page and
 `/health` checks the HTTP handler without account credentials. Account routes and
 `/ready` return HTTP 503 until production configuration is supplied. The homepage
 links to public docs and pricing. Free includes 10 vCPU hours; Unlimited
-($25/month) is marked coming soon. Both plans include all features. See
+($25/month) is marked coming soon. Both plans include all features. In the service
+every account starts on the `free` epoch with an effectively unlimited allowance
+(10^15 credits until 2100). A paid Stripe
+invoice replaces that epoch when billing is configured later. See
 [search and AI discovery](search-discovery.md) for verification, sitemap submission,
 and baseline measurement after deployment.
 `service/public/install.sh` is served at `/install.sh` by Vercel's CDN.
@@ -128,15 +138,21 @@ References: [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/ne
 
 ### Account infrastructure
 
-1. Install the pinned registry dependency with `npm ci`. SDK **1.5.0** supplies
-   compiled transport rebinding and the public relay validators; its registry
+`service/migrations/0001-initial.sql` creates the complete service and
+authentication schema, including free-account defaults. Apply it to an empty
+database for the first deployment. Migration runs are transactional and serialized;
+subsequent runs skip applied migrations and seed the CLI client idempotently.
+After launch, schema changes belong in new forward migrations.
+
+1. Install the pinned registry dependency with `npm ci`. SDK **1.5.1** supplies
+   shared Fleet packages, compiled transport rebinding and the public relay validators; its registry
    integrity is recorded in the lockfile. `npm run check:package` verifies a fresh
    CLI tarball installation against that dependency. Public CLI distribution uses
    [GitHub Release archives](cli-releases.md), independently of npm publication.
 2. Set the values in `service/.env.example`. Production requires both OAuth
    providers, PostgreSQL, a Fleet and approved package/runtime IDs. Stripe is
    optional: without `STRIPE_SECRET_KEY`, billing routes and the webhook return
-   `billing_unavailable` and accounts are activated only by operator alpha grants.
+   `billing_unavailable` and accounts use the default free allowance.
    With it, Stripe's fixed-price subscription and portal configuration is required. Remote PostgreSQL uses
    certificate verification. Register OAuth callbacks at
    `https://juiced.codes/api/auth/callback/github` and `/google`.
@@ -214,15 +230,43 @@ operational reconciliation; publish a retention/privacy policy before launch.
 
 ## Releases and recovery
 
+Juiced requires shared Fleet execution protocol 1. `npm run build:runtime` checks
+the generated Edge manifest, and the compiled-package test verifies that concurrent
+installations use their own runtime capabilities and credentials. CI and CLI release
+builds run these checks. Updating the SDK dependency alone does not move existing
+installations onto shared execution.
+
+To adopt shared execution, first roll out Cantelop migration
+`0032_shared_fleet_packages`, the dispatcher with Worker Loader and FleetPackage
+bindings, compute, and the control worker. Deploy a source release built with SDK
+1.5.1 or newer, then publish a **new** immutable Fleet package from that successful
+release. Its Edge manifest must declare `fleet_execution_protocol_version: 1` and
+the optional `CANTELOP_FLEET_EXECUTION_VERSION` binding. Poll the package endpoint
+until `execution` is `ready`; do not promote `preparing` or `legacy` packages.
+Shared installations attach the source release's prepared runtime image and reuse
+the package's Edge code while retaining separate credentials, storage and budgets.
+
+Publish the matching CLI archives before setting the service's `JUICED_PACKAGE_ID`,
+`JUICED_RUNTIME_ID` and `JUICED_CLI_VERSION`. The existing bootstrap and upgrade jobs
+then move accounts through Cantelop's drain and release API. Verify a canary
+installation reports the new package/runtime and is ready before broader use.
+Package versions are immutable; the previous package remains available for rollback.
+See Cantelop's [shared-package rollout](https://github.com/stepandel/cantelop/blob/main/docs/managed-fleets.md).
+
 Bootstrap requires an exact compiled runtime fingerprint and a minimum CLI
-version. Changing the approved package queues a durable upgrade generation.
+version. Published CLIs automatically install the service's `JUICED_CLI_VERSION`
+(defaulting to its source CLI version) before managed commands. Publish the
+matching CLI archives before promoting that version with its package/runtime;
+raise `JUICED_MINIMUM_CLI` when older versions must stop starting work. See
+[CLI update and recovery behavior](cli-releases.md#updates-rollback-and-removal).
+Changing the approved package queues a durable upgrade generation.
 Managed admission drains existing VMs before package activation; old connections
 stay pinned and cannot submit new work during the transition. Publish an older
 compatible package as the desired release to roll back. Existing Cantelop release
 activation and additive database migration rules still apply; never claim a
 rollback reverses destructive application data changes.
 
-For canaries, deploy the new Next.js app and jobs to a separate alpha Fleet/service origin
+For canaries, deploy the new Next.js app and jobs to a separate staging Fleet/service origin
 first. Pin its package/runtime pair, qualify two accounts, then promote the same
 immutable package in the production Fleet and CLI build. Keep Fleet and host
 capacity limits deliberately small until load/lease-renewal latency is measured.
@@ -234,13 +278,12 @@ Operator commands use the worker database credential:
 
 ```sh
 node --import tsx service/scripts/admin.ts status
-node --import tsx service/scripts/admin.ts grant-alpha acc_... CREDITS ISO_EXPIRY
 node --import tsx service/scripts/admin.ts suspend-all
 node --import tsx service/scripts/admin.ts invalidate-devices
 ```
 
-Alpha grants are explicitly operator funded, integral and expire within seven
-days. Watch pending/stale jobs, billing retries, unreconciled reservations,
+Accounts start with the free allowance automatically. Watch pending/stale jobs,
+billing retries, unreconciled reservations,
 policy/enforced revision lag, principal expiry, purge failures, pool wait times
 and lease-renewal latency. Job diagnostics must not contain credentials, command bodies or terminal content.
 

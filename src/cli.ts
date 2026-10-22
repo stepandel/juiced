@@ -21,9 +21,12 @@ import { terminalIdentity, usesTerminalSession } from './terminal-session.js';
 import { listSessions } from './list-sessions.js';
 import { LocalUploader } from './local-upload.js';
 import { LocalPublisher } from './local-publish.js';
+import { CliUpdater, needsCliUpdate } from './update.js';
 
 const controller = new AbortController();
 let managedMode = true;
+let commandStarted = false;
+let updater = new CliUpdater();
 let interrupted = 0;
 const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map((signal, index) => {
   const handler = () => {
@@ -34,14 +37,30 @@ const handlers = (['SIGINT', 'SIGTERM', 'SIGHUP'] as const).map((signal, index) 
   return { signal, handler };
 });
 
-try {
+async function main() {
   const invocation = parseInvocation(process.argv.slice(2));
   managedMode = invocation.mode === 'managed';
   const accountEnv = {
     ...process.env,
     ...(invocation.service ? { JUICED_SERVICE_URL: invocation.service } : {}),
   };
+  const parsed = invocation.command ? undefined : parseArguments(invocation.args);
+  const offline = parsed?.command === 'help' || parsed?.command === 'version' || invocation.command === 'logout';
+  if (managedMode && !offline)
+    updater = new CliUpdater({ serviceOrigin: new AccountClient(accountEnv).origin });
+  if (invocation.command === 'update') {
+    await updater.check(controller.signal, 'manual');
+    return;
+  }
+  if (managedMode && !offline) {
+    const command = await updater.check(controller.signal);
+    if (command) {
+      process.exitCode = await updater.restart(command, controller.signal);
+      return;
+    }
+  }
   if (invocation.command) {
+    commandStarted = true;
     const client = new AccountClient(accountEnv);
     if (invocation.command === 'login') await client.login(controller.signal, invocation.noBrowser);
     else if (invocation.command === 'whoami')
@@ -57,10 +76,12 @@ try {
       }
       if (failure)
         throw new Error('Local credentials removed; server revocation could not be confirmed.');
-      process.stderr.write('Signed out of Juiced.\n');
+      process.stderr.write(
+        invocation.all ? 'Signed out of all Juiced CLI sessions.\n' : 'Signed out of Juiced on this computer.\n',
+      );
     }
   } else {
-    const args = parseArguments(invocation.args);
+    const args = parsed!;
     const managed =
       managedMode && !['help', 'version'].includes(args.command)
         ? await new AccountClient(accountEnv).prepare(
@@ -72,6 +93,7 @@ try {
               (args.command === 'env' && args.action === 'unset'),
           )
         : undefined;
+    commandStarted = true;
     const claudeApp = managed ? compiledApp.connect(managed.connection) : compiledApp;
     const selectProject = async (directory: string, workspace?: string) => {
       const project = await selectProjectBase(directory, workspace);
@@ -245,7 +267,9 @@ try {
       }
     }
   }
-} catch (error) {
+}
+
+async function reportError(error: unknown) {
   const code = (error as { code?: string }).code;
   if (process.env.JUICED_DEBUG) {
     const detail = error as Error & {
@@ -277,18 +301,35 @@ try {
       );
     } else if (code === 'managed_admission_closed') {
       process.stderr.write(`juiced: ${new ManagedError(code).message}\n`);
-    } else if (code === 'session_runtime_mismatch') {
-      process.stderr.write(
-        managedMode
-          ? 'juiced: update Juiced and reconnect; this CLI and the managed runtime differ.\n'
-          : 'juiced: the CLI and deployed runtime differ. Run npm run build and cantelop deploy from the same source.\n',
-      );
+    } else if (needsCliUpdate(error)) {
+      if (managedMode) {
+        process.stderr.write('juiced: This CLI and the service runtime are incompatible. Checking for a required update…\n');
+        try {
+          const command = await updater.check(controller.signal, 'mismatch');
+          if (command && !commandStarted) {
+            process.exitCode = await updater.restart(command, controller.signal);
+            return;
+          }
+          process.stderr.write('juiced: Updated successfully. Run your command again to reconnect.\n');
+        } catch (updateError) {
+          if (!interrupted)
+            process.stderr.write(`juiced: ${updateError instanceof Error ? updateError.message : 'Run juiced update, then retry.'}\n`);
+        }
+      } else {
+        process.stderr.write('juiced: The CLI and deployed runtime differ. Run npm run build and cantelop deploy from the same source, then retry your command.\n');
+      }
     } else
       process.stderr.write(
         `juiced: ${error instanceof Error ? error.message : 'Unable to start Claude'}\n`,
       );
   }
   process.exitCode = interrupted || (code === 'inspection_incomplete' ? 2 : 1);
+}
+
+try {
+  await main();
+} catch (error) {
+  await reportError(error);
 } finally {
   for (const { signal, handler } of handlers) process.off(signal, handler);
 }

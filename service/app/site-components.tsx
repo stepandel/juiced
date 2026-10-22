@@ -39,6 +39,7 @@ export function SiteHeader() {
         <a href={site.github} className="github">
           github <span aria-hidden="true">↗</span>
         </a>
+        <a href="/account">console</a>
         <a href="/docs/getting-started" className="button">
           get started
         </a>

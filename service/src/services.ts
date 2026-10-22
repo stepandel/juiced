@@ -4,8 +4,14 @@ import { database } from './db';
 import { Accounts } from './accounts';
 import { Platform } from './platform';
 import { Billing } from './billing';
+import { VERSION } from '../../src/version';
+import { cliVersionAtLeast, isCliVersion } from '../../contracts/cli-version';
 
 export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'worker' = 'api') {
+  const cliVersion = env.JUICED_CLI_VERSION ?? VERSION;
+  const minimumCli = env.JUICED_MINIMUM_CLI ?? '0.2.0';
+  if (!isCliVersion(cliVersion) || !cliVersionAtLeast(cliVersion, minimumCli))
+    throw new Error('JUICED_CLI_VERSION must be a valid release at or above JUICED_MINIMUM_CLI');
   const cfg = config(env),
     pool = database(
       role === 'worker' ? (env.JUICED_WORKER_DATABASE_URL ?? cfg.databaseUrl) : cfg.databaseUrl,
@@ -13,7 +19,8 @@ export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'wo
   const accounts = new Accounts(pool, {
     packageId: required(env, 'JUICED_PACKAGE_ID'),
     runtimeId: required(env, 'JUICED_RUNTIME_ID'),
-    minimumCli: env.JUICED_MINIMUM_CLI ?? '0.2.0',
+    minimumCli,
+    cliVersion,
   });
   const platform = new Platform(
     required(env, 'CANTELOP_API_URL'),
@@ -23,7 +30,7 @@ export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'wo
     cfg.development,
   );
   // Billing is enabled by STRIPE_SECRET_KEY. Without it, billing routes return
-  // billing_unavailable and accounts are funded only by operator alpha grants.
+  // billing_unavailable and accounts use the default free allowance.
   const billing = env.STRIPE_SECRET_KEY
     ? new Billing(
         pool,

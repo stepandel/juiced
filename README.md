@@ -85,6 +85,11 @@ juiced claude login     # sign in to Claude for this project's workspace
 juiced claude           # start working
 ```
 
+Your Juiced sign-in is shared across terminal windows on this computer. Running
+`juiced login` again reuses it. Run `juiced logout` to sign out on this computer,
+or `juiced logout --all` to sign out all CLI sessions. To switch accounts, sign
+out first, then run `juiced login` again.
+
 When Claude is done, review and bring back its work:
 
 ```sh
@@ -97,6 +102,8 @@ juiced claude fast-forward             # apply them to your branch
 
 | Command | What it does |
 | --- | --- |
+| `juiced logout` | Sign out of Juiced across terminal windows on this computer |
+| `juiced logout --all` | Sign out all Juiced CLI sessions |
 | `juiced claude` | Start or reconnect to this tab's session (open more tabs for more sessions) |
 | `juiced claude --new` | Start a fresh session |
 | `juiced claude sessions` | List saved conversations |

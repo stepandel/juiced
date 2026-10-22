@@ -79,6 +79,32 @@ and [native runner architectures](https://docs.github.com/en/actions/reference/r
 
 ## Updates, rollback and removal
 
+Installer-owned releases check for updates before managed commands, install the
+service's recommended CLI automatically, then restart with the original arguments
+and stdin. Help, version and logout skip this check; self-managed commands and
+source/package-manager installations keep their existing installation method.
+`juiced update` checks explicitly without signing in. Checks time out after five
+seconds; an unavailable update check warns and lets a compatible CLI continue.
+Downloads retain checksum verification and atomic activation, and concurrent
+terminals share one update lock. Updates do not replace running CLI processes.
+
+The service advertises `JUICED_CLI_VERSION` through public `/v1/config`. It defaults
+to the source CLI version and must match the approved package/runtime; it must be
+at least `JUICED_MINIMUM_CLI`. Publish all release assets first, then promote the
+matching service package/runtime, recommended CLI and minimum together. This keeps
+clients from automatically installing a newer GitHub release before its runtime
+is approved. Services without this field fall back to GitHub's latest stable
+release. Pin `JUICED_CLI_VERSION` explicitly in production so source version bumps
+cannot promote an unqualified CLI. Never point the service at an unpublished release.
+
+`cli_upgrade_required` and `session_runtime_mismatch` trigger one required update
+attempt. A mismatch during bootstrap can restart automatically; after command
+execution starts, an update asks the user to rerun the command so operations and
+piped secrets are not replayed. Repeated mismatches, missing matching releases and
+failed updates give the manual installer command without looping. Source installs
+receive rebuild instructions. Existing binaries need a one-time manual install of
+an updater-enabled release; updates cannot add this behavior to a running old CLI.
+
 Rerun the installation command to update, or use `sh -s -- <version>` to install
 an older compatible version. `JUICED_VERSION` also accepts a version; an argument
 takes precedence. The installer checks the new CLI before atomically replacing

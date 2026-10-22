@@ -19,6 +19,7 @@ const account: Account = {
   period_id: 'invoice',
   period_end: new Date(Date.now() + 86400000),
   included_credits: '1000000',
+  created_at: new Date(),
 };
 const installation: Installation = {
   id: 'jin_' + 'a'.repeat(32),
