@@ -27,9 +27,8 @@ export function InstallCommand({ command }: { command: string }) {
         {command.slice(0, pipe + 1)}
         <span className="nowrap">{command.slice(pipe + 1)}</span>
       </code>
-      <button type="button" onClick={copy}>
+      <button type="button" onClick={copy} aria-label="Copy install command">
         {status === 'copied' ? 'copied' : 'copy'}
-        <span className="sr-only"> install command</span>
       </button>
       <span className="sr-only" role="status">
         {status === 'copied'
