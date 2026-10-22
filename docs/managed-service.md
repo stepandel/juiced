@@ -71,9 +71,12 @@ The project is `stepandels-projects/juiced`, connected to `stepandel/juiced` wit
 production branch `main`, root directory `service`, framework Next.js and Node 24.
 Source files outside the root directory must be enabled for shared contracts and
 the workspace lockfile. `service/vercel.json` declares the private `juiced-jobs`
-queue trigger and the once-per-minute `/api/cron` schedule. Vercel builds run
+queue trigger and the once-per-minute `/api/cron` schedule. Production builds run
 `npm run migrate && next build`, migrating with the Neon integration's owner
-`DATABASE_URL`; they do not publish the CLI or compile a Cantelop runtime.
+`DATABASE_URL`. Preview builds skip migrations when `VERCEL_ENV=preview` and run
+`next build` without account credentials or database access. Preview account routes
+return HTTP 503 until separate preview service configuration is supplied. Vercel
+builds do not publish the CLI or compile a Cantelop runtime.
 
 The website is `https://juiced.codes`.
 `https://juiced-eight.vercel.app` redirects to the canonical domain.
