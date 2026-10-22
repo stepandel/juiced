@@ -20,6 +20,7 @@ export default function Docs() {
       <div className="guide-list">
         {guides.map((guide) => (
           <article key={guide.slug}>
+            <span className="path mono">docs/{guide.slug}</span>
             <h2>
               <a href={`/docs/${guide.slug}`}>{guide.title}</a>
             </h2>
