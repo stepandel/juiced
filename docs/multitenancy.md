@@ -71,8 +71,8 @@ Use a maintained OAuth device authorization flow for V1 desktop and remote CLI
 login, with explicit browser approval. A future loopback authorization-code
 flow must use state and PKCE, following
 [OAuth for native apps, RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html).
-Store a revocable Juiced device credential in the OS credential
-store, with a private file fallback where needed. Rotate refresh credentials
+Store a revocable Juiced device credential in a private `0600` file inside a
+`0700` configuration directory on macOS/Linux. Rotate refresh credentials
 and detect replay. Access tokens should be short-lived and audience-bound.
 
 For each request, the backend derives the account from the authenticated

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 
 export function InstallCommand({
   command,
@@ -9,22 +9,25 @@ export function InstallCommand({
   command: string;
   children?: ReactNode;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const code = useRef<HTMLElement>(null);
   // Keep the piped shell together when the command wraps.
   const pipe = command.lastIndexOf(' | ');
   async function copy() {
     try {
       await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
+      setStatus('copied');
     } catch {
-      // Clipboard access can be denied; the command stays selectable.
+      // Clipboard access can be denied; select the command to copy by hand.
+      if (code.current) getSelection()?.selectAllChildren(code.current);
+      setStatus('failed');
     }
+    setTimeout(() => setStatus('idle'), 1600);
   }
   return (
     <div className="install mono">
       <div className="row">
-        <code>
+        <code ref={code}>
           <span className="prompt" aria-hidden="true">
             ${' '}
           </span>
@@ -41,7 +44,7 @@ export function InstallCommand({
             strokeLinejoin="round"
             aria-hidden="true"
           >
-            {copied ? (
+            {status === 'copied' ? (
               <path d="m5 12 5 5L20 7" />
             ) : (
               <>
@@ -50,10 +53,17 @@ export function InstallCommand({
               </>
             )}
           </svg>
-          {copied ? 'copied' : 'copy'}
+          {status === 'copied' ? 'copied' : 'copy'}
         </button>
       </div>
       {children && <div className="row">{children}</div>}
+      <span className="sr-only" role="status">
+        {status === 'copied'
+          ? 'Install command copied.'
+          : status === 'failed'
+            ? 'Copy failed. The command is selected so you can copy it.'
+            : ''}
+      </span>
     </div>
   );
 }

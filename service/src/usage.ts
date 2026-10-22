@@ -43,7 +43,8 @@ export class UsageIngestor {
         ).rows[0];
         // Unknown App evidence must be investigated, never skipped by advancing
         // a cursor that could silently lose a customer's usage.
-        if (!account) throw new Error('usage_app_unmapped');
+        if (!account)
+          throw new Error(`usage_app_unmapped: app=${event.app_id} sequence=${event.sequence}`);
         await tx.query(
           'INSERT INTO usage_events(id,account_id,sequence,credits,payload) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING',
           [event.id, account.id, event.sequence, event.credits, JSON.stringify(event)],

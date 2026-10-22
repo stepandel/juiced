@@ -42,7 +42,6 @@ test(
       JUICED_MODE: 'managed',
       JUICED_SERVICE_URL: origin,
       JUICED_CONFIG_HOME: join(root, 'config'),
-      JUICED_CREDENTIAL_STORE: 'file',
       GH_TOKEN: 'fixture-token',
     };
     const store = new CredentialStore(origin, env);

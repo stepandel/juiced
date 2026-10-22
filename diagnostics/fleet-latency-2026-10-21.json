@@ -1,0 +1,304 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-22T02:46:54.279Z",
+  "service": "https://juiced.codes",
+  "cliVersion": "0.2.3",
+  "sdkVersion": "1.5.1",
+  "runtimeId": "rt_c50272aa7fa8f4eae3c99e442af6a30ade9aea3f5a1247f050387b1b08703d26",
+  "inspectedSources": {
+    "juiced": "6ea24ab",
+    "cantelop": "432070ac",
+    "sdk": "98e4302",
+    "sdkWorkingTree": "Pre-existing protocol documentation/comment/test edits were left untouched. These source revisions do not establish the deployed platform revision."
+  },
+  "method": "Monotonic client elapsed times. Read-only account/inspection/view calls, empty agent-replay requests after Number.MAX_SAFE_INTEGER, native auth status, and claude --version in a randomly named disposable workspace. No model prompts submitted; no transcript content recorded.",
+  "account": {
+    "firstAuthenticatedCallMs": 6245,
+    "firstCallCaution": "Includes client token handling; token refresh, function startup and database latency were not isolated in this call.",
+    "warmMeMs": [
+      165,
+      109,
+      109,
+      110,
+      109
+    ],
+    "readyBootstrapMs": [
+      167,
+      150,
+      205,
+      148
+    ],
+    "tokenReadMs": 17
+  },
+  "inspection": {
+    "managedAbsentWorkspaceMs": [
+      465,
+      392,
+      328,
+      301
+    ],
+    "directExistingWorkspaceMs": [
+      1045,
+      335,
+      270,
+      282,
+      247,
+      216
+    ],
+    "caution": "Different Apps and workspace existence. This comparison is directional and does not isolate credential lookup or Fleet routing."
+  },
+  "existingSession": {
+    "samples": [
+      {
+        "sample": 0,
+        "viewMs": 756,
+        "requestMs": 961,
+        "replyBytes": 51,
+        "agentSequence": 40
+      },
+      {
+        "sample": 1,
+        "viewMs": 371,
+        "requestMs": 491,
+        "replyBytes": 51,
+        "agentSequence": 40
+      },
+      {
+        "sample": 2,
+        "viewMs": 388,
+        "requestMs": 448,
+        "replyBytes": 51,
+        "agentSequence": 40
+      },
+      {
+        "sample": 3,
+        "viewMs": 392,
+        "requestMs": 520,
+        "replyBytes": 51,
+        "agentSequence": 40
+      },
+      {
+        "sample": 4,
+        "viewMs": 371,
+        "requestMs": 461,
+        "replyBytes": 51,
+        "agentSequence": 40
+      },
+      {
+        "sample": 5,
+        "viewMs": 318,
+        "requestMs": 486,
+        "replyBytes": 51,
+        "agentSequence": 40
+      }
+    ],
+    "nativeAuthStatusMs": [
+      1068,
+      1544
+    ],
+    "baseline": {
+      "source": "streaming-latency-2026-10-20.json",
+      "path": "Direct self-managed SDK path",
+      "requestMedianMs": 377,
+      "viewMedianMs": 236
+    },
+    "caution": "Different conversations, package versions and dates. The existing conversation had only 40 journal entries. This is not a full reconnect/history benchmark."
+  },
+  "disposableWorkspace": {
+    "resolveMs": 1342,
+    "samples": [
+      {
+        "sample": 0,
+        "ackMs": 884,
+        "totalMs": 1243,
+        "bytes": 22,
+        "code": 0
+      },
+      {
+        "sample": 1,
+        "ackMs": 1429,
+        "totalMs": 1942,
+        "bytes": 22,
+        "code": 0
+      }
+    ],
+    "cleanup": {
+      "archivalRequested": true,
+      "archiveConfirmed": true,
+      "archivedAt": "2026-10-22T02:44:34.657072848Z",
+      "note": "The immediate inspection after DELETE still found it. Read-only compute state confirmed asynchronous archival afterwards. Both probe sessions were stopped; physical purge is asynchronous."
+    }
+  },
+  "compute": {
+    "hostLoadAverage": [
+      0.28,
+      0.25,
+      0.17
+    ],
+    "services": "standard runtime, managed runtime, gateway, both dispatchers, and watchdog active",
+    "observedMicroVmStartupMs": [
+      199.029,
+      215.411
+    ],
+    "observedWarmupMs": [
+      241.599,
+      264.938
+    ],
+    "hostPoolHit": true,
+    "caution": "Selected recent managed runtime log samples, not a fleet-wide percentile or controlled before/after comparison. Long session-event polls were excluded from boot/command latency."
+  },
+  "jobs": {
+    "logSample": {
+      "requests": 50,
+      "unmappedUsageFailures": 31,
+      "oldest": "2026-10-22T02:38:31.723Z",
+      "newest": "2026-10-22T02:39:42.590Z",
+      "affectedDeploymentCount": 6
+    },
+    "confirmedDefect": "Usage ingestion throws when a Fleet usage event has no installation/account mapping. reconcile previously threw immediately after its first allSettled round, preventing further batch rounds and skipping the next durable retry wake-up.",
+    "effect": "Each delivery could advance only one provisioning job and then fall back to queue error retries (configured 10 seconds) or minute cron instead of the short durable schedule. This is a confirmed contributor, not proof of every reported latency symptom.",
+    "fix": "Log and disable a failed worker for the rest of the invocation; drain independent workers; publish one wake-up at the earlier of the next due task and a 10-second failed-worker retry. Failed publication still throws for queue redelivery. Unknown usage remains unconsumed with its cursor rolled back; new logs identify App and sequence.",
+    "outstanding": "Identify and reconcile the historical/test/migrated App that produced the unmapped usage. Existing logs did not include its App ID. Do not skip ledger evidence or advance the cursor manually."
+  },
+  "remainingCriticalPath": {
+    "juiced": "relay() fetches Fleet credentials from the Cantelop console on every runtime request, after Juiced authentication/account/installation database reads. Startup also serializes workspace resolution, native auth status, agent start, view/history recovery and get_settings. The isolated agent handshake measured 6,033 ms initially and 2,784 ms on reopening; the first view alone took 3,001 ms versus 317 ms on reopening. The slow first view phase was not split into service, console and compute components.",
+    "cantelop": "Shared execution adds FleetRunner and FleetRuntime authorization RPCs back to the installation release gate. Their individual contribution is not isolated by the public API measurements.",
+    "sdk": "The inspected 1.5.1 transport uses request-scoped Fleet capabilities. No independent SDK latency defect was established."
+  },
+  "limitations": [
+    "The measured path is already configured and ready; disposable workspace provisioning is not first-account installation provisioning.",
+    "The full user reconnect delay has not been reproduced on its original conversation/history. A separate diagnostic conversation exercised the agent handshake and was stopped after each run.",
+    "No production environment secrets were exported. No production code/configuration was deployed.",
+    "The fix isolates the observed worker failure; it does not repair the unresolved App-to-account usage mapping or remove steady-state network hops."
+  ],
+  "isolatedAgent": {
+    "samples": [
+      {
+        "sample": 0,
+        "readyMs": 6033
+      },
+      {
+        "sample": 1,
+        "readyMs": 2784
+      }
+    ],
+    "trace": [
+      {
+        "event": "agent.view",
+        "elapsedMs": 3001.143292,
+        "sequence": 2
+      },
+      {
+        "event": "agent.replay.start",
+        "after": 0
+      },
+      {
+        "event": "agent.stream.first-event",
+        "elapsedMs": 3566.301667
+      },
+      {
+        "event": "agent.replay.first-chunk",
+        "elapsedMs": 563.0569169999999
+      },
+      {
+        "event": "agent.replay.complete",
+        "elapsedMs": 573.4607499999993,
+        "chunks": 1,
+        "entries": 2
+      },
+      {
+        "event": "agent.caught-up",
+        "elapsedMs": 3577.1766250000005,
+        "sequence": 2
+      },
+      {
+        "event": "control.dispatch",
+        "type": "agent-input"
+      },
+      {
+        "event": "control.accepted",
+        "type": "agent-input",
+        "elapsedMs": 539
+      },
+      {
+        "event": "control.dispatch",
+        "type": "agent-input"
+      },
+      {
+        "event": "agent.status",
+        "status": "ready"
+      },
+      {
+        "sample": 0,
+        "readyMs": 6033
+      },
+      {
+        "event": "agent.status",
+        "status": "closed"
+      },
+      {
+        "phase": "stopped",
+        "sample": 0
+      },
+      {
+        "event": "agent.view",
+        "elapsedMs": 317.37991599999987,
+        "sequence": 10
+      },
+      {
+        "event": "agent.replay.start",
+        "after": 0
+      },
+      {
+        "event": "agent.stream.first-event",
+        "elapsedMs": 825.6163749999996
+      },
+      {
+        "event": "agent.replay.first-chunk",
+        "elapsedMs": 506.36816700000054
+      },
+      {
+        "event": "agent.replay.complete",
+        "elapsedMs": 507.09649999999965,
+        "chunks": 1,
+        "entries": 10
+      },
+      {
+        "event": "agent.caught-up",
+        "elapsedMs": 826.6529159999991,
+        "sequence": 10
+      },
+      {
+        "event": "control.dispatch",
+        "type": "agent-input"
+      },
+      {
+        "event": "control.accepted",
+        "type": "agent-input",
+        "elapsedMs": 509
+      },
+      {
+        "event": "control.dispatch",
+        "type": "agent-input"
+      },
+      {
+        "event": "agent.status",
+        "status": "ready"
+      },
+      {
+        "sample": 1,
+        "readyMs": 2784
+      },
+      {
+        "event": "agent.status",
+        "status": "closed"
+      },
+      {
+        "phase": "stopped",
+        "sample": 1
+      }
+    ],
+    "cleanup": "Each diagnostic native process was stopped with close(true) in finally; no model prompt was submitted. A small diagnostic journal remains in the existing workspace. The user conversation was untouched.",
+    "caution": "New isolated conversation in the authenticated existing workspace, then reopened after stopping its compute. Excludes account bootstrap, workspace resolve, native auth status, Git setup and long-history replay."
+  }
+}
