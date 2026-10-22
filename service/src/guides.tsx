@@ -386,4 +386,37 @@ export const guides: {
       </>
     ),
   },
+  {
+    slug: 'telemetry',
+    label: 'Telemetry',
+    title: 'CLI telemetry',
+    description: 'What Juiced measures and how to control optional CLI analytics.',
+    body: (
+      <>
+        <h2>What is collected</h2>
+        <p>When the service enables analytics, Juiced reports completed installs, first runs,
+          successful Juiced logins, session connections, and basic session activity to PostHog.
+          Events include CLI version, OS, architecture, and a random installation ID.
+          After login, an opaque user ID connects usage across your computers.</p>
+        <p>Analytics never includes prompts, source code, terminal output, command arguments,
+          file paths, repository names, email addresses, or credentials. PostHog GeoIP enrichment
+          is disabled. Hosting and authentication logs are separate.</p>
+        <h2>Control collection</h2>
+        <Shell>{'juiced telemetry status\njuiced telemetry disable\n# To enable again:\njuiced telemetry enable'}</Shell>
+        <p>The preference is stored on this computer and survives upgrades. Set
+          {' '}<code>JUICED_TELEMETRY_DISABLED=1</code> or <code>DO_NOT_TRACK=1</code> to
+          override it. CI and self-managed mode disable product telemetry.</p>
+        <Shell>{'curl -fsSL https://juiced.codes/install.sh | JUICED_TELEMETRY_DISABLED=1 sh'}</Shell>
+        <p>For future CLI runs, also set the environment variable in your shell or run
+          {' '}<code>juiced telemetry disable</code> after installing. Telemetry settings
+          work offline. Reporting failures never fail an installation or command.</p>
+        <h2>How activity is measured</h2>
+        <p>A session connection is counted after the agent or terminal is ready.
+          Activity is recorded when input is accepted or an attached interactive agent is
+          working, at most once per five minutes per CLI process. Idle sessions do not
+          emit activity. Logout resets the anonymous identity used for account linking;
+          the installation ID survives. Deleting local configuration creates a new ID.</p>
+      </>
+    ),
+  },
 ];

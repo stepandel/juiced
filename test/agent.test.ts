@@ -91,7 +91,10 @@ test('commands are available before the first prompt and init updates retain the
   f.output({ type: 'system', subtype: 'init', slash_commands: ['compact', 'new-command'] });
   await until(() => f.agent.commands.some(command => command.name === 'new-command'));
   assert.deepEqual(f.agent.commands, [command, { name: 'new-command', description: '', argumentHint: '' }]);
+  const activity: unknown[][] = [];
+  f.agent.on('activity', (...args) => activity.push(args));
   await f.agent.submit('/compact keep the decisions');
+  assert.deepEqual(activity, [[]], 'Activity events must never carry the prompt');
   assert.equal(object(f.frames.at(-1)?.message).content, '/compact keep the decisions');
 });
 

@@ -277,6 +277,7 @@ export class RemoteAgent extends EventEmitter {
       this.controller.signal.throwIfAborted();
       if (submission !== this.submission) throw new Error('Prompt submission was interrupted before sending');
       await this.sendBytes(bytes);
+      this.emit('activity');
     } catch (error) {
       if (!this.controller.signal.aborted && submission === this.submission) this.setStatus('ready');
       throw error;

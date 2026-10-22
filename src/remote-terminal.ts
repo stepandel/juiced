@@ -27,7 +27,7 @@ export async function runRemoteTerminal(
   session: TerminalSession,
   argv: string[],
   io: TerminalIO,
-  options: { signal?: AbortSignal; term?: string; startupTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; inputBatchMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string } } = {},
+  options: { signal?: AbortSignal; term?: string; startupTimeoutMs?: number; heartbeatMs?: number; stopTimeoutMs?: number; inputBatchMs?: number; directoryName?: string; git?: { binding: string; relativeDirectory: string }; onConnected?: () => void; onActivity?: () => void } = {},
 ): Promise<number> {
   const controller = new AbortController();
   const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
@@ -61,6 +61,7 @@ export async function runRemoteTerminal(
     const reply = await withTimeout(signal, 35_000, signal => session.request(command, { timeoutMs: 30_000, signal }));
     debug('control.accepted', { type: command.type, elapsedMs: Date.now() - startedAt });
     if (reply?.ok !== true) throw new Error('The remote terminal rejected input');
+    if (command.type === 'input') { try { options.onActivity?.(); } catch {} }
   };
   const enqueue = (task: () => Promise<void>) => {
     pending = pending.then(async () => { if (!exited) await task(); });
@@ -123,6 +124,7 @@ export async function runRemoteTerminal(
   const attach = () => {
     if (attached) return;
     attached = true;
+    try { options.onConnected?.(); } catch {}
     clearTimeout(startup);
     if (tty && io.stdin.setRawMode) {
       io.stdin.setRawMode(true);

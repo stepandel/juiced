@@ -8,6 +8,8 @@ import { Accounts } from '../src/accounts';
 import { application } from '../src/app';
 import { config } from '../src/config';
 import type { Platform } from '../src/platform';
+import { Telemetry } from '../src/telemetry';
+import { TELEMETRY_HEADER } from '../../contracts/telemetry';
 
 test(
   'real device approval, rotating refresh, account isolation and revocation',
@@ -42,7 +44,13 @@ test(
           throw new Error('No upstream call permitted');
         },
       } as unknown as Platform;
-      const handle = application({ pool, cfg, accounts, platform, auth });
+      const analytics: { batch: { event: string; distinct_id: string }[] }[] = [];
+      const telemetry = new Telemetry({ JUICED_POSTHOG_KEY: 'phc_fixture' }, async (_url, init) => {
+        analytics.push(JSON.parse(String(init?.body)));
+        return new Response(null, { status: 200 });
+      });
+      const metadata = JSON.stringify({ installationId: crypto.randomUUID(), anonymousId: crypto.randomUUID(), version: '0.2.4', platform: 'darwin', arch: 'arm64' });
+      const handle = application({ pool, cfg, accounts, platform, auth, telemetry });
       const app = { request: (url: string, init?: RequestInit) => handle(new Request(url, init)) };
       const json = (path: string, body: unknown, headers: Record<string, string> = {}) =>
         app.request(`${cfg.origin}${path}`, {
@@ -70,7 +78,7 @@ test(
       assert.equal(approved.status, 200, await approved.text());
       const token = await app.request(`${cfg.origin}/api/auth/oauth2/token`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', [TELEMETRY_HEADER]: metadata },
         body: new URLSearchParams({
           grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
           client_id: CLIENT_ID,
@@ -79,6 +87,9 @@ test(
       });
       const tokens = (await token.json()) as { access_token: string; refresh_token: string };
       assert.equal(token.status, 200, JSON.stringify(tokens));
+      assert.equal(analytics.length, 1);
+      assert.equal(analytics[0]!.batch[1]!.event, 'cli_login_succeeded');
+      assert.equal(analytics[0]!.batch[1]!.distinct_id, `user:${user.id}`);
       const headers = { Authorization: `Bearer ${tokens.access_token}` };
       const who = await authenticate(pool, cfg, new Request(cfg.origin, { headers }));
       assert.equal(who.userId, user.id);
@@ -140,7 +151,7 @@ test(
       // Refresh uses the provider's standard form endpoint and the same device lineage.
       const refreshed = await app.request(`${cfg.origin}/api/auth/oauth2/token`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', [TELEMETRY_HEADER]: metadata },
         body: new URLSearchParams({
           grant_type: 'refresh_token',
           client_id: CLIENT_ID,
@@ -149,6 +160,7 @@ test(
       });
       const next = (await refreshed.json()) as { access_token: string; refresh_token: string };
       assert.equal(refreshed.status, 200, JSON.stringify(next));
+      assert.equal(analytics.length, 1, 'refresh tokens must not produce login events');
       const renewed = await authenticate(
         pool,
         cfg,

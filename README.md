@@ -63,6 +63,11 @@ curl -fsSL https://juiced.codes/install.sh | sh -s -- 0.2.0
 command directories; set them on `sh` when piping. See
 [CLI releases](docs/cli-releases.md) for removal and other details.
 
+The managed CLI reports basic install and usage events when analytics is enabled
+on the service. It never sends prompts, source code, terminal output, or command
+arguments to analytics. Run `juiced telemetry disable` to opt out, or set
+`JUICED_TELEMETRY_DISABLED=1` on the installer and CLI. See [telemetry](docs/telemetry.md).
+
 > The unrelated `juiced` package on the npm registry is not this project. Don't
 > install it.
 

@@ -29,7 +29,7 @@ export default async function Guide({ params }: Props) {
       intro={guide.description}
       aside={
         <nav className="docs-nav" aria-label="Documentation">
-          <p className="number mono">Guides</p>
+          <p className="label">Guides</p>
           <a href="/docs">Overview</a>
           {guides.map((entry) => (
             <a
