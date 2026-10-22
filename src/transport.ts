@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 
 /** Shared Cantelop request/stream helpers: retry policy, backoff, signals and IDs. */
 const TRANSIENT = /stream|fetch|network|socket|terminated|connection|timed out/i;
@@ -9,6 +10,7 @@ const TRANSIENT = /stream|fetch|network|socket|terminated|connection|timed out/i
  * local cancellation (also an AbortError) is never mistaken for a dropped request.
  */
 export function isTransient(error: unknown): boolean {
+  if (isAdmissionTimeout(error)) return true;
   const remote = (error ?? {}) as { status?: unknown; name?: unknown; message?: unknown };
   if (typeof remote.status === 'number') return remote.status === 0 || remote.status >= 500;
   return remote.name === 'AbortError' || typeof remote.message === 'string' && TRANSIENT.test(remote.message);
@@ -25,6 +27,33 @@ export const messageId = (uuid: string = randomUUID()) => `msg_${uuid.replaceAll
 const code = (error: unknown) => String((error as { code?: unknown } | null | undefined)?.code);
 /** A session that has never been viewed has no view yet; treat as "no boundary". */
 export const isViewMissing = (error: unknown) => ['session_view_not_found', 'session_not_found', 'resource_not_found'].includes(code(error));
+/**
+ * The platform did not admit the Session's runtime in time, for example while
+ * another Session of the Workspace is still finishing. The request never ran,
+ * so it is safe to retry whatever its HTTP status.
+ */
+export const isAdmissionTimeout = (error: unknown) => code(error) === 'session_admission_timeout';
+/** Interactive Sessions stay admitted for their 120-second keep-alive after a detach or exit. */
+export const ADMISSION_RETRY_MS = 150_000;
+export const ADMISSION_MESSAGE = 'The workspace did not admit this session in time. Another Juiced session may still be finishing; sessions stay active for up to two minutes after you detach or exit.';
+
+/**
+ * Retry `work` while the platform reports an admission timeout, for at most
+ * `budgetMs`. `waiting` is called once, before the first retry.
+ */
+export async function retryAdmission<T>(signal: AbortSignal, work: () => Promise<T>, waiting?: () => void, budgetMs = ADMISSION_RETRY_MS): Promise<T> {
+  const until = Date.now() + budgetMs;
+  for (let attempt = 0; ; attempt++) {
+    try { return await work(); }
+    catch (error) {
+      if (signal.aborted || !isAdmissionTimeout(error) || Date.now() >= until) throw error;
+      if (!attempt) waiting?.();
+      // A deadline expiring mid-wait still reports why the command was waiting.
+      await delay(Math.min(backoffMs(attempt, { base: 1000 }), Math.max(0, until - Date.now())), undefined, { signal }).catch(() => { throw error; });
+    }
+  }
+}
+
 /** The retained event window no longer covers the requested cursor. */
 export const isCursorExpired = (error: unknown) => ['event_cursor_expired', 'event_stream_reset'].includes(code(error));
 

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm, readFile, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { parseInvocation } from '../src/account/invocation.js';
 import { CredentialStore } from '../src/account/store.js';
 import { AccountClient, ManagedError } from '../src/account/client.js';
@@ -172,7 +172,7 @@ test('a crashed lock owner or reaper does not block credential refresh', async (
     const store = new CredentialStore('https://service.example', {
       JUICED_CONFIG_HOME: root,
     });
-    await mkdir(root, { recursive: true });
+    await mkdir(dirname(store.path), { recursive: true });
     const old = new Date(Date.now() - 60000);
     // Killed between creating the lock and recording a PID, then while electing a reaper.
     for (const path of [store.path + '.lock', store.path + '.lock.reap']) {
@@ -200,8 +200,9 @@ test('managed origin rejects credentials, non-loopback HTTP and insecure implici
 test('credential files stay private across replacements and reject unsafe reads', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'juiced-private-credentials-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const directory = join(root, 'config'), env = { JUICED_CONFIG_HOME: directory };
+  const env = { JUICED_CONFIG_HOME: join(root, 'config') };
   const store = new CredentialStore('https://example.test', env);
+  const directory = dirname(store.path);
   const credentials = {
     origin: store.origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40),
     expiresAt: Date.now() + 300000,
@@ -258,7 +259,7 @@ test('legacy OS storage renews login once and saves subsequent sign-ins to the p
     assert.equal(request.headers.get('authorization'), 'Bearer ' + 'a'.repeat(40));
     return Response.json({ userId: 'user', deviceId: 'device', accounts: [{ id: account, status: 'active', entitlement: 'active' }] });
   });
-  await writeFile(client.store.path, JSON.stringify({ origin: client.origin, storage: 'keyring' }), { mode: 0o600 });
+  await writeFile(client.store.legacyPath, JSON.stringify({ origin: client.origin, storage: 'keyring' }), { mode: 0o600 });
   assert.equal(await client.store.read(), undefined);
   await client.login(new AbortController().signal, true);
   await client.login(new AbortController().signal, true);
@@ -268,8 +269,33 @@ test('legacy OS storage renews login once and saves subsequent sign-ins to the p
   assert.equal(saved?.refreshToken, 'b'.repeat(40));
   assert.equal(JSON.parse(await readFile(client.store.path, 'utf8')).storage, undefined);
 
-  await writeFile(client.store.path, JSON.stringify({ origin: 'https://other.test', storage: 'keyring' }), { mode: 0o600 });
+  // A still-running 0.2.3 process rewrites its pointer after every refresh.
+  await writeFile(client.store.legacyPath, JSON.stringify({ origin: client.origin, storage: 'keyring' }), { mode: 0o600 });
+  assert.equal((await client.store.read())?.refreshToken, 'b'.repeat(40));
+  await client.login(new AbortController().signal, true);
+  assert.equal(approvals, 1);
+
+  await client.store.clear();
+  await writeFile(client.store.legacyPath, JSON.stringify({ origin: 'https://other.test', storage: 'keyring' }), { mode: 0o600 });
   await assert.rejects(client.store.read(), /Invalid credential origin/);
   await client.store.clear();
   assert.equal(await client.store.read(), undefined);
+});
+
+test('legacy private-file credentials move to the current file exactly once', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'juiced-legacy-file-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const env = { JUICED_CONFIG_HOME: root };
+  const store = new CredentialStore('https://example.test', env);
+  const credentials = { origin: store.origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000 };
+  await writeFile(store.legacyPath, JSON.stringify(credentials), { mode: 0o600 });
+  const [first, second] = await Promise.all([store.read(), new CredentialStore(store.origin, env).read()]);
+  assert.deepEqual(first, credentials);
+  assert.deepEqual(second, credentials);
+  // One owner per refresh token: the older path no longer holds a copy.
+  await assert.rejects(stat(store.legacyPath), { code: 'ENOENT' });
+  assert.deepEqual(JSON.parse(await readFile(store.path, 'utf8')), credentials);
+  if (process.platform !== 'win32') assert.equal((await stat(store.path)).mode & 0o777, 0o600);
+  await store.clear();
+  assert.equal(await store.read(), undefined);
 });

@@ -9,7 +9,7 @@ import { ancestor, cleanRepository, createUpload, fileInfo, git, gitText, sha256
 import { MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, validTransferId, validateExportManifest, type GitCommand, type GitResult, type GitStatus, type ExportManifest, type FileInfo } from './git-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
 import type { selectProject } from './project.js';
-import { backoffMs, isTransient, messageId } from './transport.js';
+import { ADMISSION_RETRY_MS, backoffMs, isAdmissionTimeout, isTransient, messageId } from './transport.js';
 
 export type GitWorkspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'session'>;
 type Project = Awaited<ReturnType<typeof selectProject>>;
@@ -45,8 +45,9 @@ export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<Ter
 
 export class GitWorkspaceClient {
   private session;
+  private waited = false;
   private get namespace() {return this.project.scope?`${sha256(this.project.scope).slice(0,24)}/${this.project.workspace}`:this.project.workspace;}
-  constructor(private workspace: GitWorkspace, private project: Project, private repository: Repository, private signal: AbortSignal) {
+  constructor(private workspace: GitWorkspace, private project: Project, private repository: Repository, private signal: AbortSignal, private waiting?: () => void) {
     this.session = workspace.session({ keepAliveSeconds: 120 });
   }
 
@@ -59,8 +60,11 @@ export class GitWorkspaceClient {
       let reply: TerminalReply;
       try { reply = await this.session.request(command, { id, signal: this.signal, timeoutMs: 240_000 }); }
       catch (error) {
-        if (this.signal.aborted || attempt >= 2 || !isTransient(error)) throw error;
-        await delay(backoffMs(attempt), undefined, { signal: this.signal }); continue;
+        if (this.signal.aborted || !isTransient(error)) throw error;
+        // An unadmitted request never ran; wait out a finishing session's keep-alive.
+        if (isAdmissionTimeout(error) ? Date.now() - startedAt >= ADMISSION_RETRY_MS : attempt >= 2) throw error;
+        if (isAdmissionTimeout(error) && !this.waited) { this.waited = true; this.waiting?.(); }
+        await delay(isAdmissionTimeout(error) ? backoffMs(attempt, { base: 1000 }) : backoffMs(attempt), undefined, { signal: this.signal }); continue;
       }
       if (!reply?.ok) {
         if (reply && reply.stale?.length && action.action !== 'reap' && attempt < 2) {

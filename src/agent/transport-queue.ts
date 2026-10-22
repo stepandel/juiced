@@ -34,7 +34,7 @@ export class TransportQueue {
       } catch (error) {
         if (this.signal.aborted) throw this.signal.reason;
         if (!isTransient(error) || error instanceof RemoteProcessError) throw error;
-        this.host.emit('reconnecting', failures + 1);
+        this.host.emit('reconnecting', failures + 1, error);
         await delay(backoffMs(failures), undefined, { signal: this.signal });
       }
     }

@@ -13,6 +13,7 @@ import { Prompt, useDraft } from './prompt.js';
 import { Permission } from './permission.js';
 import { Transcript } from './transcript-view.js';
 import { needsCliUpdate } from '../update.js';
+import { isAdmissionTimeout } from '../transport.js';
 
 function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent: RemoteAgent; argv: string[]; workspace: string; rows: number; columns: number; reflow: number; quit(code: number, stop?: boolean): void }) {
   const [conversation, setConversation] = useState(emptyConversation);
@@ -47,7 +48,9 @@ function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent
     const state = (value: AgentStatus) => { setStatus(value); if (value === 'ready') setNotice(''); };
     const permission = () => setApprovals([...agent.approvals.values()]);
     const failure = (error: Error) => { setClosing(true); setNotice(plain(error.message)); quit(1, false); };
-    const reconnect = () => setNotice('Reconnecting to the output stream… Your draft is kept locally.');
+    const reconnect = (_attempt: number, error?: unknown) => setNotice(isAdmissionTimeout(error)
+      ? 'Waiting for the workspace to admit this session; another session may still be finishing (up to two minutes after a detach or exit). Your draft is kept locally.'
+      : 'Reconnecting to the output stream… Your draft is kept locally.');
     const reconnected = () => setNotice('');
     const model = (value: string) => setConversation(previous => ({ ...previous, model: plain(value) }));
     agent.on('frame', frame).on('status', state).on('approvals', permission).on('commands', setCommands).on('model', model).on('failure', failure).on('reconnecting', reconnect).on('reconnected', reconnected);

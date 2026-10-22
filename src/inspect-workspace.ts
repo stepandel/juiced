@@ -8,11 +8,11 @@ import { captureInspection } from './inspection-snapshot.js';
 import { compareInspection, renderInspection, renderRemoteListing } from './inspection-view.js';
 import { INSPECTION_CHUNK_BYTES, INSPECTION_TIMEOUT_MS, MAX_INSPECTION_BYTES, InspectionIncomplete, inspectionScope, validateInspectionListing, validateInspectionSnapshot, type InspectionListing, type InspectionSnapshot } from './inspection-protocol.js';
 import { BASE64, validWorkspaceId, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
-import { isCursorExpired, isViewMissing } from './transport.js';
+import { isCursorExpired, isViewMissing, retryAdmission } from './transport.js';
 
 type Workspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'inspect' | 'session' | 'selector'>;
 type InspectionApp = { workspace(selector: WorkspaceSelector): Workspace };
-type InspectionOptions = { workspace?: string | undefined; path: string; includeIgnored: boolean } & (
+type InspectionOptions = { workspace?: string | undefined; path: string; includeIgnored: boolean; waiting?: () => void } & (
   | { action: 'ls' }
   | { action: 'peek'; changesOnly: boolean }
 );
@@ -107,13 +107,13 @@ export async function inspectWorkspace(app: InspectionApp, directory: string, op
     const color = Boolean(stdout.isTTY) && !process.env.NO_COLOR && process.env.TERM !== 'dumb';
     const view = { remoteRoot: posix.join(project.remoteDirectory, scope), workspace: project.workspace, workspaceId: existing.id, includeIgnored: options.includeIgnored, columns: stdout.isTTY ? stdout.columns ?? 80 : undefined, color };
     if (options.action === 'ls') {
-      const remote = await checkoutContext('Remote', remoteListing(app.workspace({ id: existing.id }), command, combined));
+      const remote = await checkoutContext('Remote', retryAdmission(combined, () => remoteListing(app.workspace({ id: existing.id }), command, combined), options.waiting));
       stdout.write(renderRemoteListing(remote, view));
       return remote.kind === 'ignored' || remote.kind === 'missing' ? 2 : 0;
     }
     const work = [
       checkoutContext('Local', captureInspection(repository.root, scope, options.includeIgnored, combined)),
-      checkoutContext('Remote', remoteSnapshot(app.workspace({ id: existing.id }), command, combined)),
+      checkoutContext('Remote', retryAdmission(combined, () => remoteSnapshot(app.workspace({ id: existing.id }), command, combined), options.waiting)),
     ];
     // Abort the sibling operation on failure and let both release their resources.
     const settled = await Promise.allSettled(work.map(promise => promise.catch(error => { controller.abort(error); throw error; })));

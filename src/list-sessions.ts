@@ -5,6 +5,7 @@ import type { WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
 import { discoverRepository, sha256 } from './git.js';
 import { selectProject } from './project.js';
 import { isENOENT } from './fs-util.js';
+import { retryAdmission } from './transport.js';
 import { SESSION_LIST_TIMEOUT_MS, validSessionId, validateSessionListPage, type SessionListCommand } from './session-list-protocol.js';
 import { validWorkspaceId, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
 
@@ -27,7 +28,7 @@ async function localIdentities(project: { localDirectory: string; workspace: str
   return ids;
 }
 
-export async function listSessions(app: ListingApp, directory: string, workspaceOverride: string | undefined, signal: AbortSignal, stdout: Writable = process.stdout): Promise<void> {
+export async function listSessions(app: ListingApp, directory: string, workspaceOverride: string | undefined, signal: AbortSignal, stdout: Writable = process.stdout, waiting?: () => void): Promise<void> {
   signal.throwIfAborted();
   const project = await selectProject(directory, workspaceOverride);
   const existing = await app.workspace({ slug: project.workspace }).inspect({ signal });
@@ -45,7 +46,7 @@ export async function listSessions(app: ListingApp, directory: string, workspace
       combined.throwIfAborted();
       const command: SessionListCommand = { type: 'sessions-list', directoryName: project.directoryName,
         ...(repository ? { git: { binding: repository.binding, relativeDirectory: repository.relativeDirectory } } : {}), ...(after ? { after } : {}) };
-      const reply = await session.request(command, { signal: combined, timeoutMs: 30_000 });
+      const reply = await retryAdmission(combined, () => session.request(command, { signal: combined, timeoutMs: 30_000 }), waiting);
       if (!reply?.ok || !reply.sessions) throw new Error(reply && !reply.ok ? reply.error : 'Session listing is unavailable. Build and deploy matching Juiced sources.');
       const page = validateSessionListPage(reply.sessions, after);
       for (const item of page.items) {

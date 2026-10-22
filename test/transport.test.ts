@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { backoffMs, isCursorExpired, isTransient, isViewMissing, messageId, withTimeout } from '../src/transport.js';
+import { RemoteAppError } from '@cantelop/sdk';
+import { backoffMs, isAdmissionTimeout, isCursorExpired, isTransient, isViewMissing, messageId, retryAdmission, withTimeout } from '../src/transport.js';
+import { transferFailure } from '../src/agent/publications.js';
 
 const status = (code: number, message = 'x') => Object.assign(new Error(message), { status: code });
 
@@ -61,4 +63,50 @@ test('withTimeout forwards the parent reason, times out with TimeoutError and un
   long.signal.removeEventListener = ((...args: Parameters<typeof remove>) => { removed++; remove(...args); }) as typeof remove;
   for (let i = 0; i < 3; i++) assert.equal(await withTimeout(long.signal, 1000, async () => i), i);
   assert.deepEqual([added, removed], [3, 3]);
+});
+
+test('an admission timeout is retryable whatever its HTTP status', () => {
+  for (const code of [0, 408, 409, 429, 503]) {
+    const error = new RemoteAppError('session_admission_timeout', code);
+    assert.equal(isAdmissionTimeout(error), true);
+    assert.equal(isTransient(error), true, String(code));
+  }
+  assert.equal(isAdmissionTimeout(new RemoteAppError('session_not_found', 404)), false);
+});
+
+test('retryAdmission waits out admission timeouts within its budget and passes other failures through', async () => {
+  const signal = new AbortController().signal;
+  let calls = 0, waited = 0;
+  assert.equal(await retryAdmission(signal, async () => {
+    if (++calls < 3) throw new RemoteAppError('session_admission_timeout', 409);
+    return 'admitted';
+  }, () => waited++, 30_000), 'admitted');
+  assert.equal(calls, 3);
+  assert.equal(waited, 1);
+
+  calls = 0;
+  await assert.rejects(retryAdmission(signal, async () => { calls++; throw new RemoteAppError('forbidden', 403); }), /forbidden/);
+  assert.equal(calls, 1);
+
+  calls = 0;
+  await assert.rejects(retryAdmission(signal, async () => { calls++; throw new RemoteAppError('session_admission_timeout', 409); }, undefined, 1500), /session_admission_timeout/);
+  assert.ok(calls >= 2);
+});
+
+test('a failed publication download is reported as retryable, not as a conflict', () => {
+  const manifest = { head: 'a'.repeat(40), sourceBranch: 'main' } as never;
+  const snapshot = { id: 'x', kind: 'snapshot' as const, summary: 's', expiresAt: 0, manifest, paths: [], fileCount: 0 };
+  const admission = transferFailure(snapshot, new RemoteAppError('session_admission_timeout', 409), 'fallback');
+  assert.equal(admission.status, 'failed');
+  assert.match(admission.message, /session_admission_timeout/);
+  assert.match(admission.message, /not a file conflict/);
+  assert.match(admission.message, /Local files, HEAD and the index were not changed/);
+  assert.match(admission.message, /publish_snapshot/);
+  const local = transferFailure(snapshot, new Error('Local edits overlap this snapshot. Nothing was applied.'), 'fallback');
+  assert.deepEqual(local, { status: 'conflict', message: 'Local edits overlap this snapshot. Nothing was applied.' });
+  // An expired or cancelled application is not a connection failure.
+  assert.equal(transferFailure(snapshot, new DOMException('expired', 'TimeoutError'), 'fallback').status, 'conflict');
+  const upload = transferFailure({ id: 'x', kind: 'upload', summary: 's', expiresAt: 0, head: 'a'.repeat(40), sourceBranch: null, includeUncommitted: true }, new Error('fetch failed'), 'fallback');
+  assert.equal(upload.status, 'failed');
+  assert.match(upload.message, /pull_local_changes/);
 });
