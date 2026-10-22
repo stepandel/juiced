@@ -50,7 +50,7 @@
     .lede{font-size:20px;line-height:1.65;color:var(--muted);margin:0 0 44px}
     .prose{line-height:1.8;color:var(--ink)}
     .prose h2{font-size:25px;font-weight:600;line-height:1.3;letter-spacing:-.025em;margin:44px 0 16px}
-    .prose p,.prose ul{margin:0 0 22px}.prose li{margin-bottom:8px}
+    .prose p,.prose ul{margin:0 0 22px}.prose p,.prose ul,.prose ol,.lede{max-width:34em}.prose li{margin-bottom:8px}
     .prose a{color:var(--green)}.prose a:hover{color:var(--green-bright)}
     .prose code{font-size:.88em;overflow-wrap:anywhere;color:var(--ink);background:var(--panel);padding:2px 5px;border-radius:3px}
     .prose pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:20px 24px;overflow-x:auto;font-size:14px;line-height:1.8;margin:0 0 24px}
