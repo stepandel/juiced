@@ -1,33 +1,91 @@
+import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { appendFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 import { targets } from './release-artifacts.mjs';
 
 const execute = promisify(execFile);
+const defaultAPI = async path => JSON.parse((await execute('gh', ['api', path], { maxBuffer: 2 ** 20 })).stdout);
+const validSource = (sha, repository) => {
+  assert.match(sha, /^[a-f0-9]{40}$/);
+  assert.match(repository, /^[\w.-]+\/[\w.-]+$/);
+};
+export function preparationRuns(runs, sha, repository) {
+  return runs.filter(run => run.head_branch === 'main' &&
+    run.head_repository?.full_name === repository && run.path === '.github/workflows/release.yml' &&
+    ((run.event === 'push' && run.head_sha === sha) ||
+      (run.event === 'workflow_dispatch' && run.display_title === `Prepare ${sha}`)));
+}
 export function preparedRuns(runs, sha, repository) {
-  return runs.filter(run => run.head_sha === sha && run.event === 'push' && run.head_branch === 'main' &&
-    run.conclusion === 'success' && run.head_repository?.full_name === repository &&
-    run.path === '.github/workflows/release.yml');
+  return preparationRuns(runs, sha, repository).filter(run => run.conclusion === 'success');
 }
 export function completeArtifacts(artifacts) {
   const names = new Set(artifacts.filter(a => !a.expired).map(a => a.name));
   return ['release-qualified', ...targets.map(t => `juiced-${t}`)].every(name => names.has(name));
 }
-export async function findPrepared(sha, repository, api = async path =>
-  JSON.parse((await execute('gh', ['api', path], { maxBuffer: 2 ** 20 })).stdout)) {
-  if (!/^[a-f0-9]{40}$/.test(sha) || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Invalid release source');
-  const { workflow_runs } = await api(`repos/${repository}/actions/workflows/release.yml/runs?head_sha=${sha}&event=push&branch=main&status=success&per_page=100`);
-  for (const run of preparedRuns(workflow_runs, sha, repository)) {
+export async function listPreparations(sha, repository, api = defaultAPI) {
+  validSource(sha, repository);
+  const base = `repos/${repository}/actions/workflows/release.yml/runs`;
+  const responses = await Promise.all([
+    api(`${base}?head_sha=${sha}&event=push&branch=main&per_page=100`),
+    api(`${base}?event=workflow_dispatch&branch=main&per_page=100`),
+  ]);
+  const runs = [...new Map(responses.flatMap(r => r.workflow_runs).map(r => [r.id, r])).values()];
+  return preparationRuns(runs, sha, repository);
+}
+export async function findPrepared(sha, repository, api = defaultAPI, runs) {
+  validSource(sha, repository);
+  for (const run of preparedRuns(runs ?? await listPreparations(sha, repository, api), sha, repository)) {
     const { artifacts } = await api(`repos/${repository}/actions/runs/${run.id}/artifacts?per_page=100`);
     if (completeArtifacts(artifacts)) return String(run.id);
   }
   return '';
 }
 
+// Selection never depends on a cancellable background run. Dispatch stays on the trusted main workflow.
+export async function selectPreparation(sha, repository, api) {
+  validSource(sha, repository);
+  const runs = await listPreparations(sha, repository, api);
+  const runId = await findPrepared(sha, repository, api, runs);
+  if (runId) return { runId };
+  const active = runs.filter(r => r.event === 'workflow_dispatch' && r.status !== 'completed');
+  if (active.length) return { pendingRunIds: active.map(r => r.id) };
+  const { workflow_run_id: id } = await api(`repos/${repository}/actions/workflows/release.yml/dispatches`,
+    { ref: 'main', inputs: { commit: sha }, return_run_details: true });
+  assert.ok(Number.isSafeInteger(id) && id > 0, 'GitHub did not return the selected preparation run');
+  return { pendingRunIds: [id] };
+}
+
+// A selected run can wait on the same commit's existing background work without
+// taking more Mac slots. If main advances and cancels it, this run builds instead.
+export async function reuseBackground(sha, repository, api = defaultAPI, sleep = delay) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const runs = await listPreparations(sha, repository, api);
+    const found = await findPrepared(sha, repository, api, runs);
+    if (found) return found;
+    const background = runs.filter(r => r.event === 'push');
+    if (!background.some(r => r.status !== 'completed')) return '';
+    await sleep(15000);
+  }
+  throw new Error('Background qualification is still pending; inspect runner availability before retrying');
+}
+
+export async function releaseSource(env, git = async args => (await execute('git', args)).stdout.trim()) {
+  const selected = env.GITHUB_EVENT_NAME === 'workflow_dispatch';
+  if (selected) assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Select releases through the main workflow');
+  const sha = selected ? env.SELECTED_COMMIT : env.GITHUB_SHA;
+  assert.match(sha, /^[a-f0-9]{40}$/, 'An exact source commit is required');
+  await git(['merge-base', '--is-ancestor', sha, 'origin/main']);
+  return sha;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const runId = process.env.GITHUB_REF_TYPE === 'tag'
-    ? await findPrepared(process.env.GITHUB_SHA, process.env.GITHUB_REPOSITORY) : '';
-  if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `run_id=${runId}\n`);
-  console.log(runId ? `Reuse qualified artifacts from run ${runId}` : 'Build and qualify fresh artifacts');
+  const sha = await releaseSource(process.env);
+  const runId = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch'
+    ? await reuseBackground(sha, process.env.GITHUB_REPOSITORY)
+    : process.env.GITHUB_REF_TYPE === 'tag' ? await findPrepared(sha, process.env.GITHUB_REPOSITORY) : '';
+  if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `run_id=${runId}\nsource_sha=${sha}\n`);
+  console.log(runId ? `Reuse qualified artifacts from run ${runId}` : `Build and qualify ${sha}`);
 }
