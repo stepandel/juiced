@@ -9,14 +9,13 @@ No npm publication is needed; npm is used only to build the archives.
 ## Build and verify
 
 ```sh
-npm ci
+npm ci --ignore-scripts
 npm run build
 npm run build:runtime
 npm run build:release
 npm run test:installer -- dist/releases/juiced-darwin-arm64.tar.gz
 ```
 
-The current SDK source pin requires Go 1.26.2 during dependency installation.
 Use the archive matching the build machine. Build on Node 24 and a native macOS
 or Linux x64/arm64 host. Packaging retains the lockfile's production dependency
 versions and integrity checks and excludes the private service workspace and

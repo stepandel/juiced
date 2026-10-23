@@ -234,11 +234,12 @@ pinned to its reviewed source commit until that support is published on npm;
 source installs build the SDK package and require Go. Replace the pin with the
 published SDK release when available.
 
-The entitlement projection key includes the resource-policy version. Promotion
-queues existing installations even when the package, runtime and billing period
-are unchanged. Bootstrap also wakes repair of an older policy without first
-marking a usable installation unavailable. The worker observes the enforced
-revision. No manual database edit or billing renewal
+The entitlement projection key includes the resource-policy version, derived
+from the projected limits. Promotion queues existing installations even when the
+package, runtime and billing period are unchanged; policy-only repairs are not
+upgrades and are spaced one second apart. Bootstrap also wakes repair of an older
+policy. A ready installation stays usable under its previous policy while the
+worker observes the enforced revision. No manual database edit or billing renewal
 is needed to remove the old caps.
 
 Only the service holds App integration tokens. The CLI sends opaque device

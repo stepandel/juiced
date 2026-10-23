@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { transaction, type Queryable } from './db';
 import { ServiceError } from './config';
-import { RESOURCE_POLICY_VERSION } from './resource-policy';
+import { POLICY_EPOCH_SUFFIX } from './resource-policy';
 
 export interface ReleaseIdentity {
   packageId: string;
@@ -41,15 +41,17 @@ export async function promoteRelease(pool: Pool, release: ReleaseIdentity) {
       promoted_at=CASE WHEN juiced_release.generation=excluded.generation
         THEN juiced_release.promoted_at ELSE now() END`,
     [release.generation, release.packageId, release.runtimeId]);
-    const installations = (await tx.query(`SELECT i.id,i.account_id FROM installations i
-      JOIN accounts a ON a.id=i.account_id WHERE a.status='active' AND a.entitlement='active'
+    const installations = (await tx.query(`SELECT i.id,i.account_id,
+      (i.package_id<>$1 OR i.runtime_id<>$2 OR i.status<>'ready' OR i.desired_package_id IS NOT NULL) AS upgrade
+      FROM installations i JOIN accounts a ON a.id=i.account_id WHERE a.status='active' AND a.entitlement='active'
       AND i.status NOT IN ('deleted','deleting')
       AND (i.package_id<>$1 OR i.runtime_id<>$2 OR i.status<>'ready' OR i.desired_package_id IS NOT NULL
-        OR i.entitlement_epoch IS DISTINCT FROM concat(a.period_id, ':', $3::text))
-      ORDER BY i.account_id FOR UPDATE OF a,i`, [release.packageId, release.runtimeId, RESOURCE_POLICY_VERSION])).rows;
-    if (installations.length) {
-      const ids = installations.map(i => String(i.id));
-      const accounts = installations.map(i => String(i.account_id));
+        OR i.entitlement_epoch IS DISTINCT FROM coalesce(a.period_id,'')||$3::text)
+      ORDER BY i.account_id FOR UPDATE OF a,i`, [release.packageId, release.runtimeId, POLICY_EPOCH_SUFFIX])).rows;
+    const upgrades = installations.filter(i => i.upgrade);
+    if (upgrades.length) {
+      const ids = upgrades.map(i => String(i.id));
+      const accounts = upgrades.map(i => String(i.account_id));
       await tx.query(`UPDATE installations SET desired_package_id=$2,desired_runtime_id=$3,
         operation_id='release:'||$4::text||':'||id WHERE id=ANY($1::text[])`,
       [ids, release.packageId, release.runtimeId, release.generation]);
@@ -61,6 +63,17 @@ export async function promoteRelease(pool: Pool, release: ReleaseIdentity) {
       await tx.query(`UPDATE jobs SET available_at=now(),attempts=0 WHERE account_id=ANY($1::text[])
         AND kind IN ('provision','upgrade') AND status='pending'`, [accounts]);
     }
+    // A policy-only change stays usable under its old policy, so it is not an upgrade.
+    // Key it by target epoch and spread projections one second apart; bootstrap
+    // still repairs an installation on demand.
+    const policies = installations.filter(i => !i.upgrade).map(i => String(i.id));
+    if (policies.length)
+      await tx.query(`INSERT INTO jobs(id,account_id,kind,payload,idempotency_key,available_at)
+        SELECT 'job_'||md5(k),account_id,'provision','{}',k,now()+(n-1)*interval '1 second'
+        FROM (SELECT i.account_id,'policy:'||i.id||':'||coalesce(a.period_id,'')||$2::text AS k,
+          row_number() OVER (ORDER BY i.id) AS n
+          FROM installations i JOIN accounts a ON a.id=i.account_id WHERE i.id=ANY($1::text[])) p
+        ON CONFLICT(idempotency_key) DO NOTHING`, [policies, POLICY_EPOCH_SUFFIX]);
     // The exclusive lock means no projection is in flight. A remaining lease belongs
     // to a claim that will now fail its fence, and RLS blocks its own release.
     await tx.query(`UPDATE jobs SET status='pending',lease_until=NULL

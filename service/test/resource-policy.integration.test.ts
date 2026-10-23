@@ -44,7 +44,7 @@ test('bootstrap replaces legacy caps within the same entitlement and waits for e
     assert.ok(sourceFence);
     assert.deepEqual(policy, { active: true, expiresAt: f.account.period_end!.toISOString(),
       maxSandboxes: null, maxVcpus: null, maxMemoryMib: null, maxWorkspaces: 8, maxStorageBytes: 10 * 1024 ** 3 });
-    assert.equal((await f.accounts.installation(f.account.id))!.status, 'provisioning');
+    assert.equal((await f.accounts.installation(f.account.id))!.status, 'ready', 'awaiting enforcement keeps the installation usable');
     f.remote.enforced_revision = f.remote.policy_revision;
     await f.pool.query('UPDATE jobs SET available_at=now()');
     await f.worker.runOnce();
@@ -68,11 +68,18 @@ test('promotion upgrades ready policies without a package, runtime, or billing-p
     assert.equal(await promoteRelease(f.pool, release), 1);
     assert.equal(await promoteRelease(f.pool, release), 1);
     assert.equal((await f.pool.query("SELECT count(*)::int AS n FROM jobs WHERE status='pending'")).rows[0]!.n, 1);
+    const queued = (await f.accounts.installation(f.account.id))!;
+    assert.equal(queued.desired_package_id, null, 'a policy-only change is not an upgrade');
+    assert.equal(queued.status, 'ready');
     await f.worker.runOnce();
     assert.equal(f.projected[0]!.policy.maxSandboxes, null);
     f.remote.enforced_revision = f.remote.policy_revision;
     await f.pool.query('UPDATE jobs SET available_at=now()');
     await f.worker.runOnce();
     assert.equal(await promoteRelease(f.pool, release), 0);
+    // A renewal stales the epoch again; re-promoting the same generation still queues work.
+    await f.pool.query("UPDATE accounts SET period_id='renewed' WHERE id=$1", [f.account.id]);
+    assert.equal(await promoteRelease(f.pool, release), 1);
+    assert.equal((await f.pool.query("SELECT count(*)::int AS n FROM jobs WHERE status='pending'")).rows[0]!.n, 1);
   } finally { await f.close(); }
 });

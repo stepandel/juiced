@@ -6,7 +6,7 @@ import { transaction } from './db';
 import { ServiceError } from './config';
 import { logError } from './log';
 import { currentRelease } from './release';
-import { policyEpoch } from './resource-policy';
+import { ACCOUNT_LIMITS, policyEpoch } from './resource-policy';
 
 /** Deletion retries must converge once the platform no longer has the installation. */
 async function unlessMissing<T>(work: Promise<T>) {
@@ -168,14 +168,17 @@ export class Provisioner {
             );
             return;
           }
+          // A ready, entitled installation keeps serving under its previous policy
+          // while a policy-only change awaits enforcement.
+          const usable = i.status === 'ready' && i.desired_package_id === null && i.entitlement_epoch !== null;
           await tx.query('UPDATE installations SET package_id=$2,runtime_id=$3,desired_package_id=NULL,desired_runtime_id=NULL WHERE id=$1', [i.id, remote.package_id, remote.runtime_id]);
           i.package_id = remote.package_id;
           i.runtime_id = remote.runtime_id;
           i.desired_package_id = null;
           i.desired_runtime_id = null;
           await tx.query(
-            `UPDATE installations SET platform_id=$2,app_id=$3,status='provisioning',error_code=NULL,updated_at=now() WHERE id=$1`,
-            [i.id, remote.id, remote.app_id],
+            `UPDATE installations SET platform_id=$2,app_id=$3,status=$4,error_code=NULL,updated_at=now() WHERE id=$1`,
+            [i.id, remote.id, remote.app_id, usable ? 'ready' : 'provisioning'],
           );
           let revision = i.policy_revision;
           if (i.entitlement_epoch !== policyEpoch(a.period_id)) {
@@ -185,11 +188,7 @@ export class Provisioner {
               policy: {
                 active: true,
                 expiresAt: a.period_end!.toISOString(),
-                maxSandboxes: null,
-                maxVcpus: null,
-                maxMemoryMib: null,
-                maxWorkspaces: 8,
-                maxStorageBytes: 10 * 1024 ** 3,
+                ...ACCOUNT_LIMITS,
               },
             });
             revision = result.revision;
@@ -204,7 +203,7 @@ export class Provisioner {
             !i.desired_package_id;
           await tx.query(`UPDATE installations SET status=$2,updated_at=now() WHERE id=$1`, [
             i.id,
-            done ? 'ready' : 'provisioning',
+            done || usable ? 'ready' : 'provisioning',
           ]);
         }
         await tx.query(
