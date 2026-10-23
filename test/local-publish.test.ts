@@ -10,9 +10,11 @@ import test from 'node:test';
 import { createClient } from '@libsql/client';
 import { CantelopClient, type AppCommandEnvelope, type SessionEvent } from '@cantelop/sdk';
 import type { WorkspaceDatabase } from '@cantelop/sdk/session';
-import { discoverRepository, git, gitText } from '../src/git.js';
+import { discoverRepository, git, gitText, sha256 } from '../src/git.js';
 import { GitWorkspaceClient } from '../src/git-workspace.js';
 import { LocalUploader } from '../src/local-upload.js';
+import { LocalFiles } from '../src/local-files.js';
+import type { LocalFilesRequest } from '../src/local-files-protocol.js';
 import { PublicationBroker } from '../src/agent/publications.js';
 import type { Approval } from '../src/agent-protocol.js';
 import { acquireCheckout } from '../src/runtime/project-state.js';
@@ -26,6 +28,202 @@ import { createTerminal } from '../src/runtime/terminal.js';
 import { until as poll } from './fixtures/wait.js';
 
 const until = (check: () => boolean) => poll(check, { message: 'Publication did not arrive' });
+const publicationResult = (response: Record<string, unknown>): PublishResult => JSON.parse((response.content as { text: string }[])[0]!.text);
+
+test('local listings require approval, include requested dotfiles and paginate without contents', { timeout: 30_000 }, async t => {
+  const f = await fixture(t), attached = f.attachUploader();
+  await writeFile(join(f.local, '.env'), 'DO_NOT_SEND_THIS_VALUE');
+  await mkdir(join(f.local, 'data'));
+  await symlink(f.root, join(f.local, 'outside'));
+  const denied = await f.selectFiles('list_local_files', { include_hidden: true });
+  await until(() => attached.approvals.has(denied.request.id));
+  assert.equal(attached.approvals.get(denied.request.id)!.localFiles, 'list');
+  assert.ok(!JSON.stringify(attached.approvals.get(denied.request.id)).includes('DO_NOT_SEND_THIS_VALUE'));
+  await attached.broker.answer(denied.request.id, false);
+  assert.equal(publicationResult(await denied.response).listing, undefined);
+  const list = await f.selectFiles('list_local_files', { include_hidden: true });
+  await until(() => attached.approvals.has(list.request.id));
+  await attached.broker.answer(list.request.id, true);
+  const result = publicationResult(await list.response);
+  assert.equal(result.status, 'applied');
+  assert.ok(result.listing!.entries.some(entry => entry.path === '.env' && entry.kind === 'file'));
+  assert.ok(result.listing!.entries.some(entry => entry.path === 'outside' && entry.kind === 'symlink'));
+  assert.ok(!result.listing!.entries.some(entry => entry.path === '.git'));
+  assert.ok(!JSON.stringify(result).includes('DO_NOT_SEND_THIS_VALUE'));
+  for (let i = 0; i < 105; i++) await writeFile(join(f.local, 'data', `file${String(i).padStart(3, '0')}`), 'data');
+  const page = await f.selectFiles('list_local_files', { path: 'data' });
+  await until(() => attached.approvals.has(page.request.id)); await attached.broker.answer(page.request.id, true);
+  const first = publicationResult(await page.response).listing!;
+  assert.equal(first.entries.length, 100); assert.equal(first.nextOffset, 100);
+  const next = await f.selectFiles('list_local_files', { path: 'data', offset: first.nextOffset });
+  await until(() => attached.approvals.has(next.request.id)); await attached.broker.answer(next.request.id, true);
+  const second = publicationResult(await next.response).listing!;
+  assert.equal(second.entries.length, 5); assert.equal(second.nextOffset, undefined);
+});
+
+test('selective pulls pin ignored dotfiles, binaries and executable files without changing Git state', { timeout: 30_000 }, async t => {
+  const f = await fixture(t), attached = f.attachUploader();
+  await writeFile(join(f.local, '.env'), 'APP_KEY=approved\n');
+  await mkdir(join(f.local, 'fixtures'));
+  const bytes = randomBytes(180_000);
+  await writeFile(join(f.local, 'fixtures', 'binary.bin'), bytes);
+  await writeFile(join(f.local, 'fixtures', '.hidden'), 'hidden fixture');
+  await writeFile(join(f.local, 'fixtures', 'run'), '#!/bin/sh\nexit 0\n'); await chmod(join(f.local, 'fixtures', 'run'), 0o755);
+  await writeFile(join(f.target, 'README.md'), 'remote staged work\n'); await git(f.target, ['add', 'README.md']);
+  await writeFile(join(f.target, 'README.md'), 'remote unstaged work\n');
+  const head = await gitText(f.target, ['rev-parse', 'HEAD']), index = await readFile(join(f.target, '.git', 'index'));
+  const localIndex = await readFile(join(f.local, '.git', 'index'));
+  const lease = await acquireCheckout(await f.context('claude').database(), f.project.directoryName, 'claude', 'session', () => {}); f.releases.push(() => lease.release());
+  const pending = await f.selectFiles('pull_local_files', { paths: ['.env', 'fixtures', 'fixtures/.hidden'], destination: 'incoming' });
+  await until(() => attached.approvals.has(pending.request.id));
+  assert.equal(attached.approvals.get(pending.request.id)!.input.files, 4);
+  await assert.rejects(readFile(join(f.target, 'incoming', '.env')), /ENOENT/);
+  await writeFile(join(f.local, '.env'), 'APP_KEY=later\n');
+  await attached.broker.answer(pending.request.id, true);
+  assert.equal(publicationResult(await pending.response).status, 'applied');
+  assert.equal(await readFile(join(f.target, 'incoming', '.env'), 'utf8'), 'APP_KEY=approved\n');
+  assert.deepEqual(await readFile(join(f.target, 'incoming', 'fixtures', 'binary.bin')), bytes);
+  assert.equal(await readFile(join(f.target, 'incoming', 'fixtures', '.hidden'), 'utf8'), 'hidden fixture');
+  assert.ok((await lstat(join(f.target, 'incoming', 'fixtures', 'run'))).mode & 0o100);
+  assert.equal(await gitText(f.target, ['rev-parse', 'HEAD']), head);
+  assert.deepEqual(await readFile(join(f.target, '.git', 'index')), index);
+  assert.deepEqual(await readFile(join(f.local, '.git', 'index')), localIndex);
+  assert.equal(await readFile(join(f.target, 'README.md'), 'utf8'), 'remote unstaged work\n');
+  const identical = await f.selectFiles('pull_local_files', { paths: ['fixtures'], destination: 'incoming' });
+  await until(() => attached.approvals.has(identical.request.id)); await attached.broker.answer(identical.request.id, true);
+  assert.equal(publicationResult(await identical.response).status, 'already-applied');
+});
+
+test('selective pulls reject every conflicting destination before installing any file', { timeout: 30_000 }, async t => {
+  const f = await fixture(t), attached = f.attachUploader();
+  await writeFile(join(f.local, 'new-file'), 'new'); await writeFile(join(f.local, '.env'), 'local secret');
+  await writeFile(join(f.target, '.env'), 'remote secret');
+  const pending = await f.selectFiles('pull_local_files', { paths: ['new-file', '.env'] });
+  await until(() => attached.approvals.has(pending.request.id)); await attached.broker.answer(pending.request.id, true);
+  const result = publicationResult(await pending.response);
+  assert.equal(result.status, 'conflict'); assert.match(result.message, /already exists/);
+  assert.equal(await readFile(join(f.target, '.env'), 'utf8'), 'remote secret');
+  await assert.rejects(readFile(join(f.target, 'new-file')), /ENOENT/);
+});
+
+test('selective pulls reject traversal, symlinks, nested repositories and active peers', { timeout: 30_000 }, async t => {
+  const f = await fixture(t), attached = f.attachUploader();
+  for (const path of ['../outside', '/tmp/file', '.git/config', 'dir/../../file', 'dir/.git/config', '.', 'dir\\file'])
+    await assert.rejects(f.rpc('tools/call', { name: 'pull_local_files', arguments: { summary: 'invalid', paths: [path] } }), /Invalid publication arguments/);
+  await assert.rejects(f.rpc('tools/call', { name: 'list_local_files', arguments: { summary: 'invalid', path: '../' } }), /Invalid publication arguments/);
+  await writeFile(join(f.local, 'input'), 'local data');
+  await symlink(f.root, join(f.local, 'outside'));
+  const escape = await f.selectFiles('pull_local_files', { paths: ['outside'] });
+  assert.match(publicationResult(await escape.response).message, /Symlink/);
+  await mkdir(join(f.local, 'nested')); await mkdir(join(f.local, 'nested', '.git'));
+  const nested = await f.selectFiles('pull_local_files', { paths: ['nested'] });
+  assert.match(publicationResult(await nested.response).message, /Nested repositories/);
+  await writeFile(join(f.local, 'nested', 'private'), 'nested project file');
+  const nestedFile = await f.selectFiles('pull_local_files', { paths: ['nested/private'] });
+  assert.match(publicationResult(await nestedFile.response).message, /Nested repositories/);
+  await symlink(f.root, join(f.target, 'outside'));
+  const destination = await f.selectFiles('pull_local_files', { paths: ['input'], destination: 'outside' });
+  await until(() => attached.approvals.has(destination.request.id)); await attached.broker.answer(destination.request.id, true);
+  assert.match(publicationResult(await destination.response).message, /Symlink/);
+  const peer = await acquireCheckout(await f.context('peer').database(), f.project.directoryName, 'peer', 'session', () => {}); f.releases.push(() => peer.release());
+  const busy = await f.selectFiles('pull_local_files', { paths: ['input'] });
+  await until(() => attached.approvals.has(busy.request.id)); await attached.broker.answer(busy.request.id, true);
+  assert.match(publicationResult(await busy.response).message, /checkout is in use/);
+  await assert.rejects(readFile(join(f.target, 'input')), /ENOENT/);
+});
+
+test('declined and cancelled selective pulls send no files and cannot be replayed', { timeout: 30_000 }, async t => {
+  const f = await fixture(t), attached = f.attachUploader();
+  await writeFile(join(f.local, '.env'), 'secret');
+  const denied = await f.selectFiles('pull_local_files', { paths: ['.env'] });
+  await until(() => attached.approvals.has(denied.request.id)); await attached.broker.answer(denied.request.id, false);
+  assert.equal(publicationResult(await denied.response).status, 'declined');
+  const cancelled = await f.selectFiles('pull_local_files', { paths: ['.env'] });
+  await until(() => attached.approvals.has(cancelled.request.id)); cancelled.cancel();
+  assert.equal((await cancelled.response).isError, true);
+  await until(() => f.completed.includes(cancelled.request.id));
+  await assert.rejects(attached.broker.answer(cancelled.request.id, true), /no longer active/);
+  await assert.rejects(readFile(join(f.target, '.env')), /ENOENT/);
+  attached.broker.offer(denied.request); await attached.broker.settled();
+  assert.equal(attached.approvals.size, 0);
+});
+
+test('file chunk protocol checks ownership, scope, integrity and retries before applying', { timeout: 30_000 }, async t => {
+  const f = await fixture(t);
+  const pending = await f.selectFiles('pull_local_files', { paths: ['selected'] });
+  const client = randomUUID(), id = pending.request.id, bytes = Buffer.from('approved bytes');
+  const info = { path: 'selected', size: bytes.length, sha256: sha256(bytes), executable: false };
+  await assert.rejects(f.bridge.input({ type: 'publish-files', id, client, action: 'begin', files: [info] }), /Claim/);
+  await f.bridge.input({ type: 'publish-claim', id, client });
+  await assert.rejects(f.bridge.input({ type: 'publish-files', id, client, action: 'begin', files: [{ ...info, path: 'outside-scope' }] }), /out-of-scope/);
+  await f.bridge.input({ type: 'publish-files', id, client, action: 'begin', files: [info] });
+  await f.bridge.input({ type: 'publish-files', id, client, action: 'begin', files: [info] });
+  await assert.rejects(f.bridge.input({ type: 'publish-files', id, client: randomUUID(), action: 'chunk', index: 0, offset: 0, data: bytes.toString('base64') }), /Another local client/);
+  await assert.rejects(f.bridge.input({ type: 'publish-files', id, client, action: 'chunk', index: 0, offset: 2, data: 'YQ==' }), /out of order/);
+  const corrupt = Buffer.alloc(bytes.length, 1).toString('base64');
+  await f.bridge.input({ type: 'publish-files', id, client, action: 'chunk', index: 0, offset: 0, data: corrupt });
+  await f.bridge.input({ type: 'publish-files', id, client, action: 'chunk', index: 0, offset: 0, data: corrupt });
+  await assert.rejects(f.bridge.input({ type: 'publish-files', id, client, action: 'chunk', index: 0, offset: 0, data: bytes.toString('base64') }), /Conflicting/);
+  const result: PublishResult = { status: 'applied', message: 'Uploaded' };
+  const applied = await f.bridge.input({ type: 'publish-result', id, client, result });
+  assert.equal(applied!.status, 'conflict'); assert.match(applied!.message, /corrupt/);
+  assert.equal(publicationResult(await pending.response).status, 'conflict');
+  await assert.rejects(readFile(join(f.target, 'selected')), /ENOENT/);
+  assert.deepEqual(await f.bridge.input({ type: 'publish-result', id, client, result }), applied);
+  await writeFile(join(f.local, 'selected'), bytes);
+  const cancelled = await f.selectFiles('pull_local_files', { paths: ['selected'] });
+  await f.localFiles.prepare(cancelled.request, f.signal);
+  await f.bridge.input({ type: 'publish-claim', id: cancelled.request.id, client });
+  const uploaded = await f.localFiles.send(cancelled.request, f.signal, async command => {
+    await f.bridge.input({ ...command, client }); return { ok: true };
+  });
+  cancelled.cancel(); assert.equal((await cancelled.response).isError, true);
+  await until(() => f.completed.includes(cancelled.request.id));
+  await assert.rejects(f.bridge.input({ type: 'publish-result', id: cancelled.request.id, client, result: uploaded }), /no longer pending/);
+  await assert.rejects(readFile(join(f.target, 'selected')), /ENOENT/);
+});
+
+test('native terminal routes selective file chunks on the attached session and confirms completed application', { timeout: 30_000 }, async t => {
+  const f = await fixture(t);
+  await writeFile(join(f.local, '.env'), 'native approved bytes');
+  const terminal = createTerminal(f.context('native-files'), { workspace: f.remote, binary: process.execPath });
+  const received: TerminalEvent[] = [];
+  const script = `
+    const {spawn} = require('node:child_process');
+    const {createInterface} = require('node:readline');
+    const config = JSON.parse(process.argv[process.argv.indexOf('--mcp-config') + 1]).mcpServers['juiced-local'];
+    const mcp = spawn(process.execPath, config.args, {env:{...process.env,...config.env},stdio:['pipe','pipe','inherit']});
+    const send = value => mcp.stdin.write(JSON.stringify({jsonrpc:'2.0',...value})+'\\n');
+    createInterface({input:mcp.stdout}).on('line', line => {
+      const response = JSON.parse(line);
+      if (response.id === 1) {
+        send({method:'notifications/initialized'});
+        send({id:2,method:'tools/call',params:{name:'pull_local_files',arguments:{summary:'Use local config',paths:['.env']}}});
+      }
+      if (response.id === 2) { console.log(response.result.content[0].text); mcp.stdin.end(); }
+    });
+    mcp.on('exit', code => process.exit(code));
+    send({id:1,method:'initialize',params:{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'native-file-fixture',version:'1'}}});
+  `;
+  const running = terminal.run({ type: 'start', durable: true, localPublish: f.repository.head, argv: ['-e', script, '--'], tty: false, columns: 80, rows: 24, term: 'dumb', directoryName: f.project.directoryName, git: { binding: f.repository.binding, relativeDirectory: '' } }, { signal: f.signal, output: { async send(event) { received.push(event); } } });
+  void running.catch(() => {});
+  try {
+    await until(() => received.some(event => event.type === 'local-files'));
+    const request = (received.find(event => event.type === 'local-files') as Extract<TerminalEvent, { type: 'local-files' }>).request;
+    const client = randomUUID();
+    await terminal.input({ type: 'publish-status', id: request.id });
+    await f.localFiles.prepare(request, f.signal);
+    await terminal.input({ type: 'publish-claim', id: request.id, client });
+    const result = await f.localFiles.send(request, f.signal, command => terminal.input({ ...command, client }));
+    const reply = await terminal.input({ type: 'publish-result', id: request.id, client, result });
+    assert.ok(reply.ok && reply.publication?.status === 'applied');
+    await running;
+    const output = received.filter(event => event.type === 'output' && event.channel === 'stdout').map(event => Buffer.from((event as Extract<TerminalEvent, { type: 'output' }>).data, 'base64').toString()).join('');
+    assert.equal(JSON.parse(output).status, 'applied');
+    assert.equal(await readFile(join(f.target, '.env'), 'utf8'), 'native approved bytes');
+    await f.localFiles.discard(request.id);
+  } finally { terminal.cancel(); await running.catch(() => {}); }
+});
 
 async function fixture(t: test.TestContext, initialEdits = false, relativeDirectory?: string) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'juiced-publish-')));
@@ -80,10 +278,10 @@ async function fixture(t: test.TestContext, initialEdits = false, relativeDirect
   const workspace = app.workspace({ slug: project.workspace });
   const client = new GitWorkspaceClient(workspace, project, repository, lifetime.signal);
   await client.send(initialEdits); await client.close();
-  const offers: Publication[] = [], uploads: UploadRequest[] = [], completed: string[] = [];
+  const offers: Publication[] = [], uploads: UploadRequest[] = [], fileRequests: LocalFilesRequest[] = [], completed: string[] = [];
   let broker: PublicationBroker | undefined;
   const bridge = await createPublishBridge(context('claude'), { workspace: remote, directoryName: project.directoryName, binding: repository.binding, known: repository.head, ...(relativeDirectory ? { relativeDirectory } : {}),
-    async send(event) { if (event.type === 'local-publish') offers.push(event.publication); if (event.type === 'local-upload') { uploads.push(event.request); broker?.offer(event.request); } if (event.type === 'local-publish-done') { completed.push(event.id); broker?.done(event.id); } } });
+    async send(event) { if (event.type === 'local-publish') offers.push(event.publication); if (event.type === 'local-upload') { uploads.push(event.request); broker?.offer(event.request); } if (event.type === 'local-files') { fileRequests.push(event.request); broker?.offer(event.request); } if (event.type === 'local-publish-done') { completed.push(event.id); broker?.done(event.id); } } });
   const config = JSON.parse(bridge.configuration).mcpServers['juiced-local'];
   const child = spawn(process.execPath, config.args, { env: { ...process.env, ...config.env }, stdio: ['pipe', 'pipe', 'pipe'] });
   const exit = once(child, 'exit');
@@ -113,12 +311,13 @@ async function fixture(t: test.TestContext, initialEdits = false, relativeDirect
     return bridge.input({ type: 'publish-result', id: publication.id, client: owner, result });
   };
   const uploader = new LocalUploader(workspace, project, repository);
+  const localFiles = new LocalFiles(repository.root);
   const attachUploader = () => {
     const approvals = new Map<string, Approval>(), frames: Record<string, unknown>[] = [];
-    broker = new PublicationBroker({ approvals, signal: lifetime.signal, localPublish: { head: repository.head, apply: (publication, signal) => publisher.apply(publication, signal), upload: uploader },
+    broker = new PublicationBroker({ approvals, signal: lifetime.signal, localPublish: { head: repository.head, apply: (publication, signal) => publisher.apply(publication, signal), upload: uploader, files: localFiles },
       emit(event, ...args) { if (event === 'frame') frames.push(args[0] as Record<string, unknown>); return true; },
       async request(command) {
-        if (command.type !== 'publish-status' && command.type !== 'publish-claim' && command.type !== 'publish-result') throw new Error('Expected publication control');
+        if (command.type !== 'publish-status' && command.type !== 'publish-claim' && command.type !== 'publish-result' && command.type !== 'publish-files') throw new Error('Expected publication control');
         const result = await bridge.input(command);
         return { ok: true, ...(result ? { publication: result } : {}) };
       } });
@@ -131,8 +330,15 @@ async function fixture(t: test.TestContext, initialEdits = false, relativeDirect
     await until(() => uploads.length > index);
     return { request: uploads[index]!, response, cancel: () => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId } }) + '\n') };
   };
-  t.after(async () => { child.stdin.end(); await bridge.close(); await broker?.settled(); for (const request of uploads) await uploader.discard(request.id); child.kill(); await exit; lines.close(); for (const release of releases) await release(); lifetime.abort(); db.close(); await rm(root, { recursive: true, force: true }); assert.equal(diagnostic, ''); });
-  return { local, target: join(remote, project.directoryName), remote, root, repository, project, publisher, uploader, attachUploader, pull, uploads, offers, completed, bridge, rpc, offer, finish, context, releases, signal: lifetime.signal };
+  const selectFiles = async (name: 'list_local_files' | 'pull_local_files', args: Record<string, unknown> = {}) => {
+    const index = fileRequests.length;
+    const response = rpc('tools/call', { name, arguments: { summary: 'Use selected laptop files', ...args } });
+    const requestId = next;
+    await until(() => fileRequests.length > index);
+    return { request: fileRequests[index]!, response, cancel: () => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId } }) + '\n') };
+  };
+  t.after(async () => { child.stdin.end(); await bridge.close(); await broker?.settled(); for (const request of uploads) await uploader.discard(request.id); for (const request of fileRequests) await localFiles.discard(request.id); child.kill(); await exit; lines.close(); for (const release of releases) await release(); lifetime.abort(); db.close(); await rm(root, { recursive: true, force: true }); assert.equal(diagnostic, ''); });
+  return { local, target: join(remote, project.directoryName), remote, root, repository, project, publisher, uploader, localFiles, selectFiles, fileRequests, attachUploader, pull, uploads, offers, completed, bridge, rpc, offer, finish, context, releases, signal: lifetime.signal };
 }
 
 test('native terminal startup injects the MCP server and routes the claimed local result back to Claude', { timeout: 30_000 }, async t => {
@@ -180,7 +386,7 @@ test('native terminal startup injects the MCP server and routes the claimed loca
 
 test('real stdio MCP publishes a pinned commit through SDK transfers and reports local completion', { timeout: 30_000 }, async t => {
   const f = await fixture(t);
-  assert.deepEqual((await f.rpc('tools/list')).tools && ((await f.rpc('tools/list')).tools as Array<{ name: string }>).map(tool => tool.name), ['publish_commits', 'publish_snapshot', 'pull_local_changes']);
+  assert.deepEqual((await f.rpc('tools/list')).tools && ((await f.rpc('tools/list')).tools as Array<{ name: string }>).map(tool => tool.name), ['publish_commits', 'publish_snapshot', 'pull_local_changes', 'list_local_files', 'pull_local_files']);
   await assert.rejects(f.rpc('tools/call', { name: 'publish_commits', arguments: { summary: 'bad path', path: '/another/repository' } }), /Invalid publication arguments/);
   await writeFile(join(f.target, 'result'), 'completed\n'); await git(f.target, ['add', '.']); await git(f.target, ['commit', '-m', 'agent result']);
   const head = await gitText(f.target, ['rev-parse', 'HEAD']);

@@ -63,7 +63,7 @@ export function createTerminal(
       throw new Error('The remote terminal is not running');
     }
     switch (command.type) {
-      case 'publish-status': case 'publish-claim': case 'publish-result':
+      case 'publish-status': case 'publish-claim': case 'publish-result': case 'publish-files':
         if (!publisher) throw new Error('The local publication bridge is unavailable.');
         { const result = await publisher.input(command); return { ok: true, ...(result ? { publication: result } : {}) }; }
       case 'input':
@@ -300,7 +300,7 @@ export async function receiveTerminal(context: SessionContext<TerminalCommand, T
     catch (error) { context.reply({ ok: false, error: error instanceof Error ? error.message : 'Unable to save Claude settings' }); }
     return;
   }
-  if (command.type === 'publish-status' || command.type === 'publish-claim' || command.type === 'publish-result') {
+  if (command.type === 'publish-status' || command.type === 'publish-claim' || command.type === 'publish-result' || command.type === 'publish-files') {
     try { context.reply(await agent.input(command)); }
     catch (error) { context.reply({ ok: false, error: error instanceof Error ? error.message : 'Local publication failed' }); }
     return;

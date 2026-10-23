@@ -165,6 +165,12 @@ Claude to move code directly:
   Nothing leaves your laptop before approval. The remote checkout must be clean,
   its HEAD must be an ancestor of the laptop's HEAD, and no other Claude session
   may use it.
+- **Use my local `.env` and `test/data`** (`pull_local_files`). Juiced pins
+  only the selected files, including hidden and ignored files, for laptop
+  approval. It preserves their project-relative paths under an optional
+  destination, leaves Git HEAD and staging unchanged, and refuses differing
+  existing files. **List my local files, including hidden files**
+  (`list_local_files`) shares directory names, types and sizes after approval.
 
 Keep the local TUI connected to review requests. See
 [local publication](local-publication.md) for the full workflow.

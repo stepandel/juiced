@@ -4,6 +4,7 @@ import type { SavedSettings } from './settings.js';
 import type { ClaudeFrame } from './agent-protocol.js';
 import type { SessionListCommand, SessionListPage } from './session-list-protocol.js';
 import type { Publication, PublishCommand, PublishResult, UploadRequest } from './publish-protocol.js';
+import type { LocalFilesRequest } from './local-files-protocol.js';
 
 export type AgentJournalEvent =
   | { type: 'bytes'; channel: 'stdout' | 'stderr'; data: string }
@@ -11,6 +12,7 @@ export type AgentJournalEvent =
   | { type: 'approval-answer'; id: string }
   | { type: 'local-publish'; publication: Publication }
   | { type: 'local-upload'; request: UploadRequest }
+  | { type: 'local-files'; request: LocalFilesRequest }
   | { type: 'local-publish-done'; id: string }
   | { type: 'reset'; epoch: string; interrupted: boolean }
   | { type: 'state'; state: 'ready' | 'working' | 'sleeping' | 'interrupted' };
@@ -42,6 +44,7 @@ export type TerminalEvent =
   | { type: 'error'; message: string }
   | { type: 'local-publish'; publication: Publication }
   | { type: 'local-upload'; request: UploadRequest }
+  | { type: 'local-files'; request: LocalFilesRequest }
   | { type: 'local-publish-done'; id: string }
   | GitEvent
   | InspectionEvent;

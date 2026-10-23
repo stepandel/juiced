@@ -19,6 +19,7 @@ import { prepareAgentSession } from './session-state.js';
 import { terminalIdentity, usesTerminalSession } from './terminal-session.js';
 import { listSessions } from './list-sessions.js';
 import { LocalUploader } from './local-upload.js';
+import { LocalFiles } from './local-files.js';
 import { LocalPublisher } from './local-publish.js';
 import { CliUpdater, needsCliUpdate } from './update.js';
 import { ADMISSION_MESSAGE, isAdmissionTimeout } from './transport.js';
@@ -290,6 +291,7 @@ async function main() {
                     localPublish: {
                       head: repository.head,
                       upload: new LocalUploader(workspace, project, repository),
+                      files: new LocalFiles(repository.root),
                       apply: (publication, signal) => publisher.apply(publication, signal),
                     },
                   }
