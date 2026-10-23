@@ -161,12 +161,21 @@ export async function relay(
   outHeaders.set('X-Accel-Buffering', 'no');
   if (!upstream.body) return new Response(null, { status: upstream.status, headers: outHeaders });
   const reader = upstream.body.getReader();
+  let checking = false;
   const recheck = setInterval(
-    () =>
+    () => {
+      if (checking || signal.aborted) return;
+      checking = true;
+      // A stalled authorization read closes this stream instead of starting an
+      // ever-growing queue of checks against an already overloaded database.
+      const deadline = setTimeout(() => cancel.abort(), 5000);
+      deadline.unref();
       void (async () => {
         if (!(await deviceActive(ctx.pool, ctx.identity))) throw new Error('revoked');
-        const a = await ctx.accounts.authorize(ctx.identity, ctx.account.id),
-          live = await ctx.accounts.installation(a.id);
+        signal.throwIfAborted();
+        const a = await ctx.accounts.authorize(ctx.identity, ctx.account.id);
+        signal.throwIfAborted();
+        const live = await ctx.accounts.installation(a.id);
         if (
           a.status !== 'active' ||
           !live ||
@@ -177,14 +186,17 @@ export async function relay(
       })().catch(() => {
         cancel.abort();
         void reader.cancel().catch(() => {});
-      }),
+      }).finally(() => { clearTimeout(deadline); checking = false; });
+    },
     5000,
   );
   recheck.unref();
   const abort = () => {
+    clearInterval(recheck);
     void reader.cancel().catch(() => {});
   };
   signal.addEventListener('abort', abort, { once: true });
+  if (signal.aborted) abort();
   const close = () => {
     clearInterval(recheck);
     signal.removeEventListener('abort', abort);

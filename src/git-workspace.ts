@@ -15,6 +15,17 @@ export type GitWorkspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, Ter
 type Project = Awaited<ReturnType<typeof selectProject>>;
 type Action = GitCommand extends infer C ? C extends GitCommand ? Omit<C, 'type' | 'directoryName' | 'binding'> : never : never;
 
+function deviceQuotaExceeded(error: unknown) {
+  // The SDK preserves a managed-service rejection as the cause of an
+  // unknown-outcome transport error. The service rejected it before delivery.
+  for (let depth = 0; error && typeof error === 'object' && depth < 8; depth++) {
+    const value = error as { status?: number; code?: string; cause?: unknown };
+    if (value.status === 429 && value.code === 'rate_limit_exceeded') return true;
+    error = value.cause;
+  }
+  return false;
+}
+
 /** Stop through the authorized service, which owns checkout lease cleanup. */
 export function createGitSession(workspace: GitWorkspace, stopSession: (session: string) => Promise<void>, id?: string): Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'view' | 'stop'> {
   const session = workspace.session({ keepAliveSeconds: 120, ...(id ? { id } : {}) });
@@ -47,6 +58,13 @@ export class GitWorkspaceClient {
       let reply: TerminalReply;
       try { reply = await this.session.request(command, { id, signal: this.signal, timeoutMs: 240_000 }); }
       catch (error) {
+        // Pipelined transfers can fill the service's one-minute device quota.
+        // It rejects these before runtime delivery, so retain the delivery ID
+        // and wait for a fresh window rather than failing an otherwise valid upload.
+        if (!this.signal.aborted && deviceQuotaExceeded(error) && Date.now() - startedAt < 240_000) {
+          await delay(60_000, undefined, { signal: this.signal });
+          continue;
+        }
         if (this.signal.aborted || !isTransient(error)) throw error;
         // An unadmitted request never ran; wait out a finishing session's keep-alive.
         if (isAdmissionTimeout(error) ? Date.now() - startedAt >= ADMISSION_RETRY_MS : attempt >= 2) throw error;
@@ -103,16 +121,31 @@ export class GitWorkspaceClient {
     for (const info of upload.manifest.files) {
       const file = await open(join(upload.directory, info.name), 'r');
       try {
-        const bytes = Buffer.alloc(UPLOAD_CHUNK_BYTES);
-        for (let offset = 0; offset < info.size;) {
-          const { bytesRead } = await file.read(bytes, 0, Math.min(bytes.length, info.size - offset), offset);
-          if (!bytesRead) throw new Error('The prepared Git transfer was truncated');
-          const result = await this.call({ action: 'chunk', id: upload.id, file: info.name, offset, data: bytes.subarray(0, bytesRead).toString('base64') });
-          offset += bytesRead;
-          if (result.offset !== offset) throw new Error('The remote Git upload returned an unexpected offset');
-        }
+        let next = 0, failed = false;
+        const worker = async () => {
+          try {
+            const bytes = Buffer.alloc(UPLOAD_CHUNK_BYTES);
+            while (!failed && next < info.size) {
+              this.signal.throwIfAborted();
+              const offset = next, length = Math.min(bytes.length, info.size - offset);
+              next += length;
+              for (let read = 0; read < length;) {
+                const { bytesRead } = await file.read(bytes, read, length - read, offset + read);
+                if (!bytesRead) throw new Error('The prepared Git transfer was truncated');
+                read += bytesRead;
+              }
+              const result = await this.call({ action: 'chunk', id: upload.id, file: info.name, offset, data: bytes.subarray(0, length).toString('base64'), part: true });
+              if (result.offset !== offset + length) throw new Error('The remote Git upload returned an unexpected offset');
+            }
+          } catch (error) { failed = true; throw error; }
+        };
+        // Each worker owns its buffer. Wait for in-flight writes to settle before
+        // closing the file or reporting failure; application requires finish.
+        const results = await Promise.allSettled(Array.from({ length: Math.min(8, Math.ceil(info.size / UPLOAD_CHUNK_BYTES)) }, worker));
+        for (const result of results) if (result.status === 'rejected') throw result.reason;
       } finally { await file.close(); }
     }
+    await this.call({ action: 'finish', id: upload.id });
   }
 
   private async *downloadEvents(signal: AbortSignal, after?: SessionEventCursor) {

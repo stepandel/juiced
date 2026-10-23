@@ -103,13 +103,16 @@ export async function createUpload(repository: Repository, includeUncommitted: b
   try {
     if ((await run(['ls-files', '--unmerged'])).length) throw new Error('Resolve the local merge conflicts before transferring this repository.');
     if ((await run(['ls-files', '--stage'])).toString().split('\n').some(line => line.startsWith('160000 '))) throw new Error('Submodule contents are not supported by Git workspace transfer yet.');
-    await run(['update-ref', ref, repository.head]);
-    let exclusions: string[] = [];
-    if (base && base !== repository.head) {
-      try { await run(['cat-file', '-e', `${base}^{commit}`]); exclusions = [`^${base}`]; } catch {}
+    const files: FileInfo[] = [];
+    if (base !== repository.head) {
+      await run(['update-ref', ref, repository.head]);
+      let exclusions: string[] = [];
+      if (base) {
+        try { await run(['cat-file', '-e', `${base}^{commit}`]); exclusions = [`^${base}`]; } catch {}
+      }
+      await run(['bundle', 'create', join(directory, 'bundle'), ref, ...exclusions]);
+      files.push(await fileInfo(join(directory, 'bundle'), 'bundle'));
     }
-    await run(['bundle', 'create', join(directory, 'bundle'), ref, ...exclusions]);
-    const files = [await fileInfo(join(directory, 'bundle'), 'bundle')];
     if (includeUncommitted) {
       const indexPath = resolve(repository.root, await gitText(repository.root, ['rev-parse', '--git-path', 'index']));
       const indexDirectory = await mkdtemp(join(dirname(indexPath), 'juiced-index-'));
@@ -132,7 +135,8 @@ export async function createUpload(repository: Repository, includeUncommitted: b
       } finally { await rm(indexDirectory, { recursive: true, force: true }); }
     }
     if (await gitText(repository.root, ['rev-parse', 'HEAD']) !== repository.head) throw new Error('Local HEAD changed during transfer preparation. Retry.');
-    const manifest: UploadManifest = { version: 1, head: repository.head, branch: repository.branch, author: repository.author, objectFormat: repository.objectFormat, files };
+    const manifest: UploadManifest = { version: 1, head: repository.head, branch: repository.branch, author: repository.author, objectFormat: repository.objectFormat, files,
+      ...(base === repository.head ? { base } : {}) };
     return { id, directory, manifest, close: () => rm(directory, { recursive: true, force: true }) };
   } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
   finally { await git(repository.root, ['update-ref', '-d', ref]).catch(() => {}); }

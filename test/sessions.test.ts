@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { promises as fs } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -70,6 +72,11 @@ test('pagination crosses empty filtered pages and stays within the reply limit',
   const ordered = Array.from({ length: SESSION_PAGE_SIZE + 3 }, (_, n) => n).sort((a, b) => sessionKey(id(a)).localeCompare(sessionKey(id(b))));
   const matching = new Set(ordered.slice(SESSION_PAGE_SIZE));
   for (const n of ordered) await f.history(n, { directoryName: matching.has(n) ? 'project' : 'other-project' });
+  const originalRead = fs.readdir;
+  let inventories = 0;
+  t.mock.method(fs, 'readdir', (...args: Parameters<typeof readdir>) => { inventories++; return originalRead(...args); });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   let after: string | undefined, pages = 0;
   const ids: string[] = [];
   do {
@@ -80,7 +87,11 @@ test('pagination crosses empty filtered pages and stays within the reply limit',
     ids.push(...page.items.map(item => item.id!)); after = page.after; pages++;
   } while (after);
   assert.equal(pages, 2);
+  assert.equal(inventories, 1, 'Pages share one sorted directory inventory');
   assert.deepEqual(new Set(ids), new Set([...matching].map(id)));
+  await f.history(10000);
+  await listRemoteSessions({ type: 'sessions-list', directoryName: 'project' }, signal(), f.remote);
+  assert.equal(inventories, 2, 'A new session invalidates the cached inventory');
 });
 
 test('legacy IDs are restored on reattachment and unknown, corrupt, and unsafe histories are handled explicitly', async t => {

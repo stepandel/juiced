@@ -8,6 +8,8 @@ export type FileInfo = { name: TransferFile; size: number; sha256: string };
 export type UploadManifest = {
   version: 1; head: string; branch: string | null; objectFormat: 'sha1' | 'sha256';
   author: { name: string; email: string }; files: FileInfo[];
+  /** A patch-only upload requires this exact commit to exist in the receiver. */
+  base?: string;
 };
 export type GitStatus = { initialized: boolean; head?: string; sourceBranch?: string | null; dirty?: boolean };
 export type SnapshotManifest = { baseHead: string; baseTree: string; tree: string; file: FileInfo };
@@ -17,7 +19,8 @@ export type GitCommand = { type: 'git'; directoryName: string; binding: string }
   | { action: 'status' }
   | { action: 'configure'; configuration: GitRemoteConfiguration }
   | { action: 'begin'; id: string; manifest: UploadManifest }
-  | { action: 'chunk'; id: string; file: TransferFile; offset: number; data: string }
+  | { action: 'chunk'; id: string; file: TransferFile; offset: number; data: string; part?: boolean }
+  | { action: 'finish'; id: string }
   | { action: 'apply'; id: string; initializeOnly: boolean }
   | { action: 'export'; id: string; known: string; head?: string; snapshot?: boolean }
   | { action: 'download'; id: string; offset: number; file?: 'bundle' | 'snapshot' }
