@@ -48,19 +48,31 @@ export default function OpenGraphImage() {
           <span style={{ display: 'flex', gap: 24 }}>
             with more <span style={{ color: '#bff04d' }}>juice.</span>
           </span>
+          <span
+            style={{
+              marginTop: 32,
+              fontSize: 30,
+              lineHeight: 1.3,
+              letterSpacing: 0,
+              fontWeight: 400,
+              color: '#8b948a',
+            }}
+          >
+            Your terminal. A persistent cloud workspace.
+          </span>
         </div>
+        {/* X draws the page title over the bottom-left corner, so keep it empty. */}
         <div
           style={{
             display: 'flex',
-            justifyContent: 'space-between',
+            justifyContent: 'flex-end',
             borderTop: '1px solid #232b25',
             paddingTop: 28,
             fontSize: 24,
-            color: '#8b948a',
+            color: '#bff04d',
           }}
         >
-          <span>Your terminal. A persistent cloud workspace.</span>
-          <span style={{ color: '#bff04d' }}>juiced.codes</span>
+          juiced.codes
         </div>
       </div>
     ),

@@ -6,7 +6,7 @@ export const site = {
   github: 'https://github.com/stepandel/juiced',
   title: 'Juiced — Claude Code, with more juice.',
   description:
-    'Juiced runs Claude Code in a private cloud workspace that you drive from your terminal. Close your laptop. Claude keeps working.',
+    'Juiced runs Claude Code in a private cloud workspace you drive from your terminal. Close your laptop. Claude keeps working.',
 };
 
 // The root layout's title templates add the site name to plain titles.
