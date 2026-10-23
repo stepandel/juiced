@@ -236,8 +236,9 @@ published SDK release when available.
 
 The entitlement projection key includes the resource-policy version. Promotion
 queues existing installations even when the package, runtime and billing period
-are unchanged. Bootstrap also repairs an older policy and waits for its enforced
-revision before reporting readiness. No manual database edit or billing renewal
+are unchanged. Bootstrap also wakes repair of an older policy without first
+marking a usable installation unavailable. The worker observes the enforced
+revision. No manual database edit or billing renewal
 is needed to remove the old caps.
 
 Only the service holds App integration tokens. The CLI sends opaque device

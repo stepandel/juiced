@@ -34,7 +34,9 @@ test('bootstrap replaces legacy caps within the same entitlement and waits for e
   const f = await fixture();
   try {
     const input = { version: '0.3.3', runtimeId: release.runtimeId };
-    assert.equal((await f.accounts.bootstrap(f.account, input)).status, 'provisioning');
+    const repair = await f.accounts.bootstrap(f.account, input);
+    assert.equal(repair.status, 'ready', 'queuing a policy repair preserves a usable installation');
+    assert.equal(repair.workQueued, true);
     assert.equal(await f.worker.runOnce(), true);
     assert.equal(f.projected.length, 1);
     const { policy, expectedRevision, sourceFence } = f.projected[0]!;
@@ -46,7 +48,9 @@ test('bootstrap replaces legacy caps within the same entitlement and waits for e
     f.remote.enforced_revision = f.remote.policy_revision;
     await f.pool.query('UPDATE jobs SET available_at=now()');
     await f.worker.runOnce();
-    assert.equal((await f.accounts.bootstrap(f.account, input)).status, 'ready');
+    const ready = await f.accounts.bootstrap(f.account, input);
+    assert.equal(ready.status, 'ready');
+    assert.equal(ready.workQueued, false);
     assert.equal((await f.accounts.installation(f.account.id))!.entitlement_epoch, policyEpoch(f.account.period_id));
     assert.equal(f.projected.length, 1, 'ready bootstrap does not repeatedly project policy');
     // Unlimited compute must not bypass suspension.

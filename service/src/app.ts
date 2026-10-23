@@ -216,8 +216,8 @@ export function application(s: Services) {
     if (method === 'POST' && action === 'bootstrap') {
       if (!s.cfg.admissionEnabled) throw new ServiceError('admission_closed', 503);
       const input = await jsonBody(request);
-      const installation = await timed('bootstrap', () => s.accounts.bootstrap(a, input));
-      if (installation.status !== 'ready') await timed('job_wake', async () => { await s.wake?.(); });
+      const { workQueued, ...installation } = await timed('bootstrap', () => s.accounts.bootstrap(a, input));
+      if (workQueued || installation.status !== 'ready') await timed('job_wake', async () => { await s.wake?.(); });
       return Response.json({ ...installation, cliVersion: s.accounts.release.cliVersion });
     }
     if (method === 'GET' && action === 'installation') {
