@@ -6,13 +6,21 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { checkpoint, hostedIntegration, privateCommand } from './release.mjs';
+import { checkpoint, hostedIntegration, privateCommand, assertGeneration } from './release.mjs';
 import { findPrepared, preparedRuns, completeArtifacts } from './prepared-release.mjs';
 import { targets, verifyArtifacts } from './release-artifacts.mjs';
 import { canaryPolicy, qualifyInstance } from './release-canary.mjs';
 import { nodeDistribution } from './node-distribution.mjs';
 const execute = promisify(execFile);
 const sha = 'a'.repeat(40), runtimeId = 'rt_' + 'b'.repeat(64), repository = 'stepandel/juiced';
+
+test('an obsolete receipt cannot resume rollout after a newer release or rollback', () => {
+  assertGeneration(2, 0);
+  assertGeneration(2, 2);
+  assert.throws(() => assertGeneration(2, 3), /superseded/);
+  for (const active of [-1, NaN, '2', Number.MAX_SAFE_INTEGER + 1])
+    assert.throws(() => assertGeneration(2, active), /Invalid/);
+});
 
 test('cached Node distributions are checked against fresh official sums and corrupt caches are replaced', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'juiced-node-cache-'));

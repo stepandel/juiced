@@ -22,6 +22,12 @@ export const releaseSteps = [
   'qualify-runtime', 'deploy-service', 'resume-rollout', 'promote', 'verify-live',
 ];
 
+export function assertGeneration(generation, active) {
+  assert.ok(Number.isSafeInteger(generation) && generation > 0 &&
+    Number.isSafeInteger(active) && active >= 0, 'Invalid release generation');
+  assert.ok(active <= generation, 'Release superseded; refusing to resume an older production rollout');
+}
+
 /** Only completed stages are checkpointed. An interrupted external operation must be observed on retry. */
 export async function checkpoint(state, name, work, save, report = console.log) {
   if (state.completed[name]) { report(`${name}: reused`); return; }
@@ -195,6 +201,12 @@ export async function release(mode, options = {}, env = process.env) {
       if (!runs.length || runs.every(r => r.status === 'completed')) throw new Error('Main service CI must pass before publication');
       console.log('Waiting for main service CI…');
     }, { interval: 15_000 });
+    const checkActive = async () => {
+      const result = await fetch(new URL('/api/release', origin), { redirect: 'error', signal: AbortSignal.timeout(20_000) });
+      assert.equal(result.status, 200, 'Deploy the release control endpoint before using ship');
+      assertGeneration(state.generation, (await result.json()).generation);
+    };
+    await checkActive();
     await step('publish-cli', async () => {
       if (!remoteTag) {
         const local = await run('local-tags', 'git', ['tag', '--list', tag]);
@@ -219,6 +231,7 @@ export async function release(mode, options = {}, env = process.env) {
       await run('publish-cli', 'gh', ['release', 'edit', tag, '--repo', repository, '--draft=false', version.includes('-') ? '--latest=false' : '--latest']);
     });
     // CLI deployment currently publishes AND rolls live instances. Public CLI assets must exist first.
+    await checkActive();
     await step('deploy-runtime', async () => {
       const resume = options['resume-package'];
       if (resume) assert.match(resume, /^pkg_[a-f0-9]{32}$/);
@@ -251,15 +264,18 @@ export async function release(mode, options = {}, env = process.env) {
       assert.ok(!state.completed['deploy-service'], 'The original promotion token is required to resume');
       token = randomBytes(32).toString('hex'); await writeFile(tokenPath, token, { mode: 0o600 });
     }
+    await checkActive();
     await step('deploy-service', async () => {
       const values = { CANTELOP_APP_CONFIG: JSON.stringify(hostDocument), CANTELOP_API_PROFILE: 'api', CANTELOP_WORKER_PROFILE: 'worker',
         JUICED_CLI_VERSION: version, JUICED_MINIMUM_CLI: version, JUICED_RELEASE_GENERATION: String(state.generation), JUICED_RELEASE_TOKEN: token };
       for (const [name, value] of Object.entries(values)) await run(`env-${name}`, 'vercel', ['env', 'add', name, 'production', '--sensitive', '--force', '--yes', '--project', project, '--scope', scope], { input: value });
       await run('deploy-service', 'vercel', ['deploy', '--prod', '--yes', '--scope', scope]);
     });
+    await checkActive();
     await step('resume-rollout', async () => {
       await run('resume-rollout', cantelop, [...deployArgs, '--resume-package', state.packageId], { env: fleetEnv });
     });
+    await checkActive();
     await step('promote', async () => {
       const result = await fetch(new URL('/api/release', origin), { method: 'POST', headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(120_000) });
       assert.equal(result.status, 202, 'Promotion failed; retry to recover a committed intent or failed wake-up');

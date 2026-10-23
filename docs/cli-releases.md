@@ -66,6 +66,8 @@ runs that archive with Node and npm absent from PATH.
 Use the committed version bump after it reaches `main`. The release command
 requires successful main service CI as well as the native archive qualification.
 It never creates a version bump or merges source for you.
+Deploy this service update and its additive migration once before the first use
+of `ship`; the new read-only `GET /api/release` status endpoint must be available.
 
 ```sh
 # One-time operator setup: gh auth login, vercel login, and juiced login.
@@ -135,6 +137,10 @@ process may leave a `lock` file; remove it only after confirming that process
 has stopped. Run only one production release operator at a time: the local
 lock coordinates a state directory, not separate machines. Keep the original
 state and promotion-token file when resuming a deployed release.
+Before each production mutation the command checks the canonical generation
+through `GET /api/release`. An older receipt cannot resume over a newer release
+or rollback. This endpoint exposes only a nonsecret generation number; promotion
+still requires the private token. Unavailable status fails closed.
 
 Promotion records a monotonically increasing generation and the exact
 package/runtime pair in Postgres. New workers and bootstrap requests check this
