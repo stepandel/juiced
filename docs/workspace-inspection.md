@@ -236,14 +236,41 @@ against `7f9cc2c` recorded these local median capture times:
 | 256 files, 64 MiB total | 91 → 50 ms | 98 → 62 ms |
 | 1,024 files in 64 directories | 121 → 73 ms | 122 → 73 ms |
 
-The candidate reduced the local Node medians by 37–45%. The earlier hosted 701 ms
-fresh capture has not been remeasured with this source; these results must not
-be applied proportionally to that sample.
+The candidate reduced the local Node medians by 37–45%. These local fixtures do
+not predict hosted fresh-sandbox latency; the production comparison below did
+not reproduce a cold Git capture improvement.
 
 A [local Bun 1.3.10 cross-check](../diagnostics/peek-snapshot-process-reduction-bun-2026-10-23.json)
 also preserved every paired snapshot and source index, with 26–43% lower median
 capture times. Bun did not expose the child-process instrumentation used by this
 benchmark, so that report marks command counts and timelines unavailable.
+
+The [0.3.3 hosted rollout and measurements](../diagnostics/peek-latency-2026-10-23-release-033.json)
+deployed PRs #45 and #46 together from `93d589c`. The published CLI, Fleet package,
+service, and live instance were verified against the qualified runtime identity.
+Health checks, the isolated runtime canary, public installation, and the managed
+CLI version smoke test passed.
+
+| Hosted metric | 0.3.2 | 0.3.3 |
+| --- | ---: | ---: |
+| Fresh-sandbox peek median, three samples, excluding launcher | 2,797 ms | 2,137 ms |
+| Fresh inventory request median | 1,941 ms | 1,498 ms |
+| Fresh Git capture median | 687 ms | 692 ms |
+| Warm installed CLI, two samples including launcher | 1,773–1,823 ms | 1,291–1,362 ms |
+
+The fresh-sandbox command median improved by 660 ms (23.6%), while cold Git
+capture remained around 0.7 seconds. Cached Fleet connection spans fell to
+0–0.1 ms. A separate post-idle read observed a 146.1 ms connection fill on
+workspace inspection and a cache hit on inventory; its complete instrumented
+command took 3,218 ms, including a 354 ms sign-in refresh. The sub-two-second
+cold-read goal remains unmet.
+
+Trace timelines verified new Sandbox allocation during each fresh request.
+Host storage, Edge, and service caches were not reset, and release qualification
+can warm some of them. These small samples do not establish latency percentiles.
+Git capture is inside the inventory request, so those durations must not be
+added. Per-command timings inside a fresh hosted Sandbox are still needed to
+separate process startup, filesystem operations, hashing, and temporary objects.
 
 The native runtime test checks the actual handler, session activity, output
 acknowledgments, and successful inspection while database access is rejected and
