@@ -40,7 +40,9 @@
     "check:package": "npm run build && node scripts/smoke-install.mjs",
     "build:service": "npm run build --workspace @juiced/service",
     "dev:service": "npm run dev --workspace @juiced/service",
-    "build:service:client": "node scripts/build-service-client.mjs"
+    "build:service:client": "node scripts/build-service-client.mjs",
+    "release": "node scripts/release.mjs",
+    "test:release": "node --test scripts/release.test.mjs"
   },
   "dependencies": {
     "@cantelop/sdk": "1.6.0",

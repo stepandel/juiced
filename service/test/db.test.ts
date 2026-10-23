@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import { transaction } from '../src/db';
+import { transaction, database } from '../src/db';
 
 for (const queryAfterFailure of [false, true]) {
   test(`transaction handles an idle client error${queryAfterFailure ? ' before another query' : ''}`, async () => {
@@ -44,3 +44,14 @@ for (const queryAfterFailure of [false, true]) {
     assert.equal(tx.listenerCount('error'), 0);
   });
 }
+
+test('database connections declare their release generation while preserving provider options', async () => {
+  const pool = database('postgresql://test@db.example/test?options=endpoint%3Dep-example', 42);
+  try {
+    const url = new URL(pool.options.connectionString!);
+    assert.equal(url.searchParams.get('options'), 'endpoint=ep-example -c juiced.release_generation=42');
+    assert.equal(url.searchParams.get('sslmode'), 'verify-full');
+    for (const generation of [-1, NaN, 1.5, Number.MAX_SAFE_INTEGER + 1])
+      assert.throws(() => database('postgresql://localhost/test', generation), /RELEASE_GENERATION/);
+  } finally { await pool.end(); }
+});

@@ -14,9 +14,11 @@ export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'wo
   const minimumCli = env.JUICED_MINIMUM_CLI ?? '0.2.0';
   if (!isCliVersion(cliVersion) || !cliVersionAtLeast(cliVersion, minimumCli))
     throw new Error('JUICED_CLI_VERSION must be a valid release at or above JUICED_MINIMUM_CLI');
+  const generation = Number(env.JUICED_RELEASE_GENERATION ?? 0);
   const cfg = config(env),
     pool = database(
       role === 'worker' ? (env.JUICED_WORKER_DATABASE_URL ?? cfg.databaseUrl) : cfg.databaseUrl,
+      generation,
     );
   const deployment = configuredFleet(env, role);
   const accounts = new Accounts(pool, {
@@ -24,6 +26,7 @@ export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'wo
     runtimeId: deployment.runtimeId,
     minimumCli,
     cliVersion,
+    generation,
   });
   const platform = new Platform(deployment.fleet);
 

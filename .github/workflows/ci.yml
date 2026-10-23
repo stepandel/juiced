@@ -21,10 +21,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm run check:service
       - run: npm test
+      - run: npm run test:release
       - run: npm run build:runtime
       - run: npm run test:installer
       - run: npm run test:service

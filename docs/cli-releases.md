@@ -11,6 +11,7 @@ No npm publication is needed; npm is used only to build the archives.
 ```sh
 npm ci --ignore-scripts
 npm run build
+npm run build:runtime
 npm run build:release
 npm run test:installer -- dist/releases/juiced-darwin-arm64.tar.gz
 ```
@@ -36,11 +37,16 @@ runs that archive with Node and npm absent from PATH.
 
 1. Set the CLI version in `package.json`, `package-lock.json` and the source
    default in `src/version.ts`. Commit the source and qualify its managed runtime.
-2. Push a matching `v<version>` tag. `.github/workflows/release.yml` checks and
-   packages Linux x64/arm64 and macOS Intel/Apple Silicon on native runners.
+2. Every push to `main` prepares immutable archives in `.github/workflows/release.yml`.
+   Push a matching `v<version>` tag to publish them. The tag reuses a successful
+   main run only for the exact source commit, with all four unexpired archives
+   and its qualification receipt. Otherwise it builds fresh artifacts.
+   The workflow checks and packages Linux x64/arm64 and macOS Intel/Apple Silicon on native runners.
    A manual workflow run builds artifacts without creating a release.
-   Intel macOS runs the same CLI suite with test files executed serially to
-   avoid contention between compiler and native filesystem fixtures.
+   Packaging runs independently of tests. Intel macOS runs the same complete CLI
+   suite in four native shards, serially within each shard, to avoid contention
+   between compiler and filesystem fixtures. Every platform still installs its
+   actual archive without Node/npm on PATH. Dependency downloads use npm caches.
 3. All four jobs must pass, including installation of their actual archives.
    The workflow creates a **draft** GitHub Release with the four archives,
    `SHA256SUMS` and a copy of `install.sh`. Review and publish the draft when
@@ -49,6 +55,103 @@ runs that archive with Node and npm absent from PATH.
 4. Deploy the website from the committed source so Vercel serves
    `service/public/install.sh` at `/install.sh`. Then check the public installation from
    a clean user directory before advertising it on the homepage.
+
+## Resumable production release
+
+Use the committed version bump after it reaches `main`. The release command
+requires successful main service CI as well as the native archive qualification.
+It never creates a version bump or merges source for you.
+
+```sh
+# One-time operator setup: gh auth login, vercel login, and juiced login.
+export CANTELOP_BIN=/path/to/cantelop  # Fleet-aware CLI >=0.17.1
+export CANTELOP_INTEGRATION_CONFIG=/secure/juiced-integration.json
+# Supply CANTELOP_FLEET_TOKEN from your secret manager: short-lived deployment
+# principal with packages:write and installations:read/write, for this Fleet.
+chmod 600 "$CANTELOP_INTEGRATION_CONFIG"
+
+npm run release -- plan     # Read-only stage list; no credentials required.
+npm run release -- prepare  # Download qualified CLI archives + runtime dry-run concurrently.
+npm run release -- ship     # Prepare if needed, then publish and promote.
+```
+
+The private integration file must include matching `api` and `worker` Fleet
+bindings with distinct unexpired service principals. The deployment principal
+stays in the process environment. The command does not obtain owner credentials
+or create a long-lived deployment principal. Revoke the short-lived principal
+through the secret manager after shipping. Optional overrides:
+`JUICED_RELEASE_REPOSITORY`, `VERCEL_PROJECT`, `VERCEL_SCOPE`, `JUICED_SERVICE_URL`.
+
+Preparation waits for the exact main commit's background archive build and runs
+`cantelop deploy --dry-run` concurrently. Archives include commit and runtime
+identity in `release.json`; every checksum, version, platform and runtime must
+match before promotion. Cached archives expire after seven days. Failed native
+tests never produce reusable qualification, and pull-request/fork artifacts
+cannot satisfy preparation. A tag can rebuild expired artifacts normally.
+The automated command requires a successful main preparation run; if all of
+that commit's artifacts have expired, use a fresh main commit or the manual
+tag-and-qualify path above.
+
+Shipping publishes the matching CLI assets first, deploys the Fleet package,
+qualifies an isolated canary with production resource limits, exports separate
+API/worker bindings to Vercel, deploys production, resumes the CLI-owned instance
+rollout, and calls the new deployment's authenticated `/api/release` endpoint.
+It then verifies health, installs the public CLI into an isolated directory,
+runs remote `claude --version` through the signed-in account, and deletes that
+test workspace. It never sends a model prompt. Use a dedicated signed-in canary
+account/configuration for unattended operators.
+
+The Fleet CLI currently publishes the package and upgrades existing instances
+in the same command. Its dry-run prepares/caches local build work; it does not
+prepublish an inactive Fleet package. Provider runtime preparation therefore
+remains on the shipping path. CLI assets must be public before that command,
+and the service binding must follow it promptly. Full preparation followed by
+an atomic Fleet promotion needs a separate platform/CLI capability.
+
+Each completed stage records its duration and completion in
+`dist/release/<version>-<commit>/state.json`. Rerun the same command from the same
+source commit to resume; completed deployments and canaries are not repeated.
+All preparation branches settle before releasing the process lock. A failed
+stage stays incomplete. Private integration exports, promotion tokens, command
+logs and receipts have restricted permissions. `--state /private/path` chooses
+another directory outside the source checkout. Docker and Vercel exclude the
+default state directory. Remove this private state after retaining a sanitized
+release receipt; never upload it as an artifact.
+
+If Cantelop failed after publishing a package, inspect the private deployment
+log and resume that immutable package explicitly:
+
+```sh
+npm run release -- ship --state /private/previous-release --resume-package pkg_...
+```
+
+Never recreate or overwrite an existing immutable version. An interrupted
+process may leave a `lock` file; remove it only after confirming that process
+has stopped. Run only one production release operator at a time: the local
+lock coordinates a state directory, not separate machines. Keep the original
+state and promotion-token file when resuming a deployed release.
+
+Promotion records a monotonically increasing generation and the exact
+package/runtime pair in Postgres. New workers and bootstrap requests check this
+fence; superseded deployments stop claiming provisioning work or perpetuating
+queue wake-ups. Promotion resets pending observation delays and queues every
+existing active installation immediately, without waiting for a user's next
+command. Running leases, deletion retries, entitlement and policy fences remain
+intact. Repeating the endpoint is idempotent and recovers a failed queue publish;
+an older generation cannot reactivate itself. A rollback uses a newer generation
+with the selected older package/runtime, rather than reusing an old promotion.
+
+The additive migration leaves generation checking inactive until the first
+promotion. Runtime database connections declare their generation; row policies
+on jobs and installations prevent restricted roles in pre-fence deployments
+from claiming or overwriting current rollout work, even without application
+guards. Use the restricted API/worker database roles, never an owner/bypass-RLS
+connection, in production. Manual service deployments must also set the matching
+`JUICED_RELEASE_GENERATION` and call `/api/release` with their private
+`JUICED_RELEASE_TOKEN`; a deployment does not silently promote itself at startup.
+Those values are set automatically by the release command. Queue callbacks from
+old Vercel deployments can still arrive, but guarded deployments acknowledge
+them without scheduling more work.
 
 ### Release candidates
 

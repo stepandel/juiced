@@ -1,42 +1,78 @@
 name: Release Juiced CLI
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  package:
+  prepared:
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.lookup.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - id: lookup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/prepared-release.mjs
+
+  # Intel retains serial execution inside each shard to avoid fixture contention.
+  native-tests:
+    needs: prepared
+    if: needs.prepared.outputs.run_id == ''
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-22.04
-            target: linux-x64
-          - runner: ubuntu-22.04-arm
-            target: linux-arm64
-          - runner: macos-15-intel
-            target: darwin-x64
-          - runner: macos-14
-            target: darwin-arm64
+          - { runner: ubuntu-22.04, shard: '1/1', concurrency: 4 }
+          - { runner: ubuntu-22.04-arm, shard: '1/1', concurrency: 4 }
+          - { runner: macos-14, shard: '1/1', concurrency: 4 }
+          - { runner: macos-15-intel, shard: '1/4', concurrency: 1 }
+          - { runner: macos-15-intel, shard: '2/4', concurrency: 1 }
+          - { runner: macos-15-intel, shard: '3/4', concurrency: 1 }
+          - { runner: macos-15-intel, shard: '4/4', concurrency: 1 }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+          cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run check
-      - name: CLI tests
-        # Compiler/native filesystem fixtures contend heavily on Intel macOS.
-        run: |
-          if [ "${{ matrix.target }}" = darwin-x64 ]; then
-            npm run test:serial
-          else
-            npm test
-          fi
+      - name: Native CLI tests
+        run: node --import tsx --test --test-concurrency=${{ matrix.concurrency }} --test-shard=${{ matrix.shard }} test/*.test.ts
+      - name: Release tooling tests
+        if: matrix.runner == 'ubuntu-22.04'
+        run: npm run test:release
+
+  package:
+    needs: prepared
+    if: needs.prepared.outputs.run_id == ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, target: linux-x64 }
+          - { runner: ubuntu-22.04-arm, target: linux-arm64 }
+          - { runner: macos-15-intel, target: darwin-x64 }
+          - { runner: macos-14, target: darwin-arm64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run build
       - run: npm run build:runtime
       - run: npm run build:release
@@ -45,29 +81,67 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: juiced-${{ matrix.target }}
+          retention-days: 7
           path: |
             dist/releases/*.tar.gz
             dist/releases/*.sha256
           if-no-files-found: error
 
+  qualified:
+    needs: [prepared, native-tests, package]
+    if: ${{ !cancelled() && needs.prepared.result == 'success' && (needs.prepared.outputs.run_id != '' || (needs.native-tests.result == 'success' && needs.package.result == 'success')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: juiced-*
+          path: dist/releases
+          merge-multiple: true
+          run-id: ${{ needs.prepared.outputs.run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify archive checksums, commits, versions and runtime identities
+        run: node scripts/release-artifacts.mjs > dist/releases/qualified.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-qualified
+          retention-days: 7
+          path: dist/releases/qualified.json
+      - name: Summarize preparation
+        env:
+          PREPARED_RUN: ${{ needs.prepared.outputs.run_id }}
+        run: |
+          echo "Qualified commit $GITHUB_SHA; reused run: ${PREPARED_RUN:-fresh build}" >> "$GITHUB_STEP_SUMMARY"
+
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: package
+    needs: [prepared, qualified]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
       - uses: actions/download-artifact@v4
         with:
+          pattern: juiced-*
           path: dist/releases
           merge-multiple: true
-      - name: Assemble checksums and create a draft release
+          run-id: ${{ needs.prepared.outputs.run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - run: node scripts/release-artifacts.mjs
+      - name: Create a draft release from qualified archives
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          cat dist/releases/*.sha256 > dist/releases/SHA256SUMS
+          node -e 'if (process.env.RELEASE_TAG !== "v" + require("./package.json").version) process.exit(1)'
           release_flags=(--draft)
           if [[ "$RELEASE_TAG" == *-* ]]; then release_flags+=(--prerelease); fi
           gh release create "$RELEASE_TAG" --verify-tag --generate-notes "${release_flags[@]}" \

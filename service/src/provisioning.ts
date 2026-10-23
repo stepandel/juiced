@@ -5,6 +5,7 @@ import type { Billing } from './billing';
 import { transaction } from './db';
 import { ServiceError } from './config';
 import { logError } from './log';
+import { currentRelease } from './release';
 
 /** Deletion retries must converge once the platform no longer has the installation. */
 async function unlessMissing<T>(work: Promise<T>) {
@@ -24,6 +25,7 @@ export class Provisioner {
     private billing?: Pick<Billing, 'cancel'>,
   ) {}
   async runOnce(): Promise<boolean> {
+    if (!await currentRelease(this.pool, this.accounts.release)) return false;
     const row = (
       await this.pool
         .query(`UPDATE jobs SET status='running',lease_until=now()+interval '60 seconds',fence=fence+1,projection_fence=nextval('projection_fence'),attempts=attempts+1
@@ -35,6 +37,10 @@ export class Provisioner {
       // Hold the claimed row and account lock across projection. A replacement
       // worker cannot claim this job or race a billing/suspension transition.
       await transaction(this.pool, async (tx) => {
+        if (!await currentRelease(tx, this.accounts.release, true)) {
+          await tx.query("UPDATE jobs SET status='pending',lease_until=NULL WHERE id=$1 AND fence=$2", [row.id, row.fence]);
+          return;
+        }
         if (
           !(
             await tx.query(

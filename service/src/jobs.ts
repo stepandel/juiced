@@ -6,6 +6,7 @@ import type { services } from './services';
 import type { Billing } from './billing';
 import { wakeJobs } from './queue';
 import { logError } from './log';
+import { currentRelease } from './release';
 
 /** Bounded work on the existing durable records. Duplicate queue deliveries
  * use the same SQL locks, idempotency keys and projection fences as before. */
@@ -13,6 +14,7 @@ type JobServices = Pick<ReturnType<typeof services>, 'pool' | 'accounts' | 'plat
   billing?: Pick<Billing, 'runOnce' | 'cancel'> | undefined;
 };
 export async function reconcile(s: JobServices, wake = wakeJobs) {
+  if (!await currentRelease(s.pool, s.accounts.release)) return;
   await transaction(s.pool, async (tx) => {
     const expired = await tx.query(
       `UPDATE accounts SET entitlement='inactive' WHERE entitlement='active' AND period_end<=now() RETURNING id,period_id`,
@@ -37,6 +39,7 @@ export async function reconcile(s: JobServices, wake = wakeJobs) {
   const deadline = Date.now() + 20_000;
   let more = false;
   for (let round = 0; round < 25 && Date.now() < deadline; round++) {
+    if (!await currentRelease(s.pool, s.accounts.release)) return;
     const results = await Promise.allSettled(workers.map((worker) => worker?.run() ?? false));
     for (const [index, result] of results.entries()) {
       if (result.status !== 'rejected') continue;
@@ -74,5 +77,5 @@ export async function reconcile(s: JobServices, wake = wakeJobs) {
   // after publishing would also redeliver the current message and multiply
   // retries. A failed publish still throws so queue redelivery/cron can recover.
   if (retry) delay = Math.min(delay, 10);
-  if (Number.isFinite(delay)) await wake(delay);
+  if (Number.isFinite(delay) && await currentRelease(s.pool, s.accounts.release)) await wake(delay);
 }

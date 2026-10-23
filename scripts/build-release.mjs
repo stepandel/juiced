@@ -12,6 +12,9 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const output = resolve(process.argv[2] ?? join(root, 'dist/releases'));
 const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const lock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
+const runtimeId = JSON.parse(await readFile(join(root, 'dist/cantelop/backend/cantelop-client.json'), 'utf8'))
+  .apps.find(app => app.name === 'juiced').session_runtime_id;
+assert.match(runtimeId, /^rt_[a-f0-9]{64}$/, 'Run npm run build:runtime before packaging');
 assert.match(manifest.dependencies['@cantelop/sdk'], /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, 'Publish Juiced only after replacing the draft SDK Git pin with its released npm version');
 const { platform, arch } = process;
 assert.ok(['darwin', 'linux'].includes(platform) && ['arm64', 'x64'].includes(arch));
@@ -76,6 +79,9 @@ try {
   await chmod(join(bundle, 'bin/juiced'), 0o755);
   await writeFile(join(bundle, 'release.json'), JSON.stringify({
     version: manifest.version, nodeVersion, platform, arch,
+    commit: (await execute('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim(),
+    sourceClean: !(await execute('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: root })).stdout.trim(),
+    runtimeId,
   }) + '\n');
 
   const env = { ...process.env, JUICED_CONFIG_HOME: join(temporary, 'config') };

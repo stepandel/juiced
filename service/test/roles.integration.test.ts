@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { testDatabase, user } from './database';
 import { Accounts } from '../src/accounts';
+import { currentRelease } from '../src/release';
 
 test(
   'deployment roles allow API lifecycle intents but reserve allowance and job projections for the worker',
@@ -30,6 +31,8 @@ test(
       await tx.query('BEGIN');
       await tx.query(grants);
       await tx.query('SET LOCAL ROLE ' + api);
+      assert.equal(await currentRelease(tx, accounts.release, true), true,
+        'API may check the release fence without UPDATE privileges');
       await tx.query("UPDATE accounts SET status='suspended' WHERE id=$1", [account.id]);
       await tx.query(
         "INSERT INTO jobs(id,account_id,kind,idempotency_key) VALUES('role-job',$1,'suspend','role-intent')",
@@ -42,6 +45,7 @@ test(
       for (const sql of [
         'UPDATE accounts SET included_credits=999',
         'UPDATE jobs SET projection_fence=999',
+        'UPDATE juiced_release SET generation=999',
         "INSERT INTO entitlement_grants(id,account_id,credits,expires_at) VALUES('grant',$1,999,now())",
       ]) {
         await tx.query('SAVEPOINT denied');
@@ -61,6 +65,15 @@ test(
         ),
         '99',
       );
+      await tx.query('RESET ROLE');
+      await tx.query("INSERT INTO juiced_release(generation,package_id,runtime_id) VALUES(2,'pkg_new','runtime-new')");
+      await tx.query('SET LOCAL ROLE ' + worker);
+      // Simulate immutable old code, which has no application-level release guard.
+      assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 0);
+      await tx.query("SELECT set_config('juiced.release_generation','1',true)");
+      assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 0);
+      await tx.query("SELECT set_config('juiced.release_generation','2',true)");
+      assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 1);
     } finally {
       await tx.query('ROLLBACK');
       tx.release();

@@ -1,11 +1,17 @@
+# Deployment credentials and receipts are local operator state, never build input.
+dist/
+.cantelop/
+service/.cantelop/
+node_modules/
+service/node_modules/
+service/.next/
 .env*
 **/.env*
-.cantelop/
-node_modules/
 .next/
-service/.next/
-dist/
 diagnostics/
 test/
 service/test/
 *.tgz
+.claude/
+.codex/
+.agents/
