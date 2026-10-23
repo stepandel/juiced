@@ -236,82 +236,14 @@ against `7f9cc2c` recorded these local median capture times:
 | 256 files, 64 MiB total | 91 → 50 ms | 98 → 62 ms |
 | 1,024 files in 64 directories | 121 → 73 ms | 122 → 73 ms |
 
-The candidate reduced the local Node medians by 37–45%. These local fixtures do
-not predict hosted fresh-sandbox latency; the production comparison below did
-not reproduce a cold Git capture improvement.
+The candidate reduced the local Node medians by 37–45%. The earlier hosted 701 ms
+fresh capture has not been remeasured with this source; these results must not
+be applied proportionally to that sample.
 
 A [local Bun 1.3.10 cross-check](../diagnostics/peek-snapshot-process-reduction-bun-2026-10-23.json)
 also preserved every paired snapshot and source index, with 26–43% lower median
 capture times. Bun did not expose the child-process instrumentation used by this
 benchmark, so that report marks command counts and timelines unavailable.
-
-The [0.3.3 hosted rollout and measurements](../diagnostics/peek-latency-2026-10-23-release-033.json)
-deployed PRs #45 and #46 together from `93d589c`. The published CLI, Fleet package,
-service, and live instance were verified against the qualified runtime identity.
-Health checks, the isolated runtime canary, public installation, and the managed
-CLI version smoke test passed.
-
-| Hosted metric | 0.3.2 | 0.3.3 |
-| --- | ---: | ---: |
-| Fresh-sandbox peek median, three samples, excluding launcher | 2,797 ms | 2,137 ms |
-| Fresh inventory request median | 1,941 ms | 1,498 ms |
-| Fresh Git capture median | 687 ms | 692 ms |
-| Warm installed CLI, two samples including launcher | 1,773–1,823 ms | 1,291–1,362 ms |
-
-These are fresh-sandbox sample-set medians, not cold-first-use baselines. The
-first 0.3.2 sample took **5,367 ms**, including 278 ms of token refresh and
-**2,519 ms of `workspace.inspect`**. That complete observation remains the
-historical first-read reference; the median does not remove those phases.
-
-The fresh-sandbox sample-set median differed by 660 ms (23.6%), while cold Git
-capture remained around 0.7 seconds. Cached Fleet connection spans fell to
-0–0.1 ms. A separate post-idle read observed a 146.1 ms connection fill on
-workspace inspection and a cache hit on inventory; its complete instrumented
-command took 3,218 ms, including a 354 ms sign-in refresh. The sub-two-second
-cold-read goal remains unmet.
-
-Trace timelines verified new Sandbox allocation during each fresh request.
-Host storage, Edge, and service caches were not reset, and release qualification
-can warm some of them. These small samples do not establish latency percentiles.
-Git capture is inside the inventory request, so those durations must not be
-added. Per-command timings inside a fresh hosted Sandbox are still needed to
-separate process startup, filesystem operations, hashing, and temporary objects.
-
-A [follow-up cold-baseline measurement](../diagnostics/peek-cold-baseline-2026-10-23.json)
-checks the current release under a repeatable cold-execution policy. Every run
-starts a new CLI process, includes token refresh, waits beyond the 30-second
-Fleet connection TTL, and creates a new Edge WorkerLoader key through a
-configuration revision. Before each reset, the App has no running Sandboxes.
-`CLAUDE_PATH` is briefly set to its declared default and then unset; the effective
-environment and the original override listing are restored. The measured read
-starts at least 45 seconds after that restoration, with no intervening App
-invocations in the trace history. Exact inventory traces verify a new Sandbox
-allocation during each read. Post-read checks confirm the restored configuration
-revision is applied.
-
-| Cold observation | Elapsed | Timing boundary |
-| --- | ---: | --- |
-| Historical 0.3.2 first read | 5,367 ms | Excludes launcher and Node startup |
-| 0.3.3 independent reset 1 | 2,866 ms | Same instrumented boundary |
-| 0.3.3 independent reset 2 | 3,113 ms | Same instrumented boundary |
-| 0.3.3 independent reset 3 | 2,844 ms | Same instrumented boundary |
-| 0.3.3 installed command after another reset | 3,421 ms | Includes launcher and Node startup |
-
-All five totals include token refresh. The three instrumented current-release
-reads have a median of 2,866 ms, with `workspace.inspect` taking 682–958 ms and
-inventory taking 1,519–1,602 ms. Git capture occupies 700–728 ms inside inventory.
-The separate installed-command measurement executes the normal launcher and CLI
-without request interception; its trace also verifies a new Sandbox. Its stable
-inspection session expires through the normal 120-second idle keep-alive.
-
-This cold scope covers the client process, Fleet transport, Edge worker key,
-and VM. Shared package/compiled-code caches, storage caches, databases and
-provider infrastructure are not flushed. A Vercel function cold start is not
-forced; the historical run likewise recorded no `service_init` span. The
-historical run's complete Edge cache state was not captured, and the releases
-were not measured in a randomized A/B experiment. The follow-up establishes a
-repeatable current result and retains the 5,367 ms reference without claiming a
-causal improvement percentage. The sub-two-second first-read goal remains unmet.
 
 The native runtime test checks the actual handler, session activity, output
 acknowledgments, and successful inspection while database access is rejected and
