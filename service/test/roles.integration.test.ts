@@ -20,6 +20,8 @@ test(
           minimumCli: '0.2.0',
         }),
         account = await accounts.ensure(owner);
+      await tx.query(`INSERT INTO installations(id,account_id,external_key,package_id,runtime_id,status)
+        VALUES('role-install',$1,'role-external','pkg_roles','runtime','ready')`, [account.id]);
       const schema = String((await tx.query('SELECT current_schema() AS s')).rows[0]!.s);
       const suffix = crypto.randomUUID().replaceAll('-', ''),
         api = 'api_' + suffix,
@@ -31,6 +33,7 @@ test(
       await tx.query('BEGIN');
       await tx.query(grants);
       await tx.query('SET LOCAL ROLE ' + api);
+      assert.equal((await tx.query("SELECT row_security_active('jobs') AND row_security_active('installations') AS enforced")).rows[0]!.enforced, true);
       assert.equal(await currentRelease(tx, accounts.release, true), true,
         'API may check the release fence without UPDATE privileges');
       await tx.query("UPDATE accounts SET status='suspended' WHERE id=$1", [account.id]);
@@ -70,10 +73,12 @@ test(
       await tx.query('SET LOCAL ROLE ' + worker);
       // Simulate immutable old code, which has no application-level release guard.
       assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 0);
+      assert.equal((await tx.query("UPDATE installations SET runtime_id='stale' RETURNING id")).rowCount, 0);
       await tx.query("SELECT set_config('juiced.release_generation','1',true)");
       assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 0);
       await tx.query("SELECT set_config('juiced.release_generation','2',true)");
       assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 1);
+      assert.equal((await tx.query("UPDATE installations SET runtime_id='current' RETURNING id")).rowCount, 1);
     } finally {
       await tx.query('ROLLBACK');
       tx.release();
