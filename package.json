@@ -39,10 +39,11 @@
     "start:service": "npm run start --workspace @juiced/service",
     "check:package": "npm run build && node scripts/smoke-install.mjs",
     "build:service": "npm run build --workspace @juiced/service",
-    "dev:service": "npm run dev --workspace @juiced/service"
+    "dev:service": "npm run dev --workspace @juiced/service",
+    "build:service:client": "node scripts/build-service-client.mjs"
   },
   "dependencies": {
-    "@cantelop/sdk": "1.5.1",
+    "@cantelop/sdk": "github:stepandel/cantelop-sdk#b65bf304527111f5a2d2d787d21d3e86ca1266b1",
     "ink": "^8.0.0",
     "react": "^19.3.1",
     "string-width": "^8.3.0"

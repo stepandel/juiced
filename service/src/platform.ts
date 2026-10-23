@@ -1,5 +1,14 @@
-import type { AppConnection } from '@cantelop/sdk';
-import { ServiceError, origin } from './config';
+import {
+  FleetError,
+  FleetConfigurationError,
+  type FleetInstanceStatus,
+  type FleetPolicyUpdate,
+  type AppConnection,
+} from '@cantelop/sdk';
+import type { fleet } from '../.cantelop/client/client.mjs';
+import { ServiceError } from './config';
+
+export type JuicedFleet = typeof fleet;
 export interface PlatformInstallation {
   id: string;
   app_id: string;
@@ -9,101 +18,75 @@ export interface PlatformInstallation {
   policy_revision: number;
   enforced_revision: number;
 }
-export interface RuntimeCredential {
-  appId: string;
-  edgeUrl: string;
-  accessToken: string;
-  runtimeId: string;
-}
+const installation = (value: FleetInstanceStatus): PlatformInstallation => ({
+  id: value.id,
+  app_id: value.appId,
+  package_id: value.packageId,
+  runtime_id: value.runtimeId,
+  status: value.state,
+  policy_revision: value.policyRevision,
+  enforced_revision: value.enforcedRevision,
+});
+export interface InstancePin { appId: string | null; runtimeId: string }
+
+/** Translate SDK failures into Juiced's public errors; transport and credentials stay in the SDK. */
 export class Platform {
-  private origin: string;
-  constructor(
-    url: string,
-    private fleet: string,
-    private token: string,
-    private fetcher: typeof fetch = fetch,
-    development = false,
-  ) {
-    this.origin = origin(url, development);
-    if (!/^flt_[a-f0-9]{32}$/.test(fleet) || !/^fsp_[a-f0-9]{32}\.[a-f0-9]{64}$/.test(token))
-      throw new Error('Invalid Fleet credentials');
-  }
-  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const response = await this.fetcher(`${this.origin}/v1/fleets/${this.fleet}/${path}`, {
-      method,
-      redirect: 'error',
-      headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(30000),
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const text = await response.text();
-    if (Buffer.byteLength(text) > 1024 * 1024)
-      throw new ServiceError('platform_response_invalid', 502);
-    let value: unknown;
-    try {
-      value = text === '' && response.ok ? undefined : JSON.parse(text);
-    } catch {
-      throw new ServiceError('platform_response_invalid', 502);
-    }
-    if (!response.ok)
-      throw new ServiceError(
-        response.status === 404 ? 'platform_not_found' : 'platform_unavailable',
-        response.status === 404 ? 404 : 503,
-      );
-    return value as T;
-  }
-  install(key: string, packageId: string) {
-    return this.request<PlatformInstallation>('PUT', `installations/${encodeURIComponent(key)}`, {
-      packageId,
-    });
-  }
-  remove(key: string) {
-    return this.request('DELETE', `installations?externalKey=${encodeURIComponent(key)}`);
-  }
-  async find(key: string) {
-    try {
-      return await this.request<PlatformInstallation>(
-        'GET',
-        `installations?externalKey=${encodeURIComponent(key)}`,
-      );
-    } catch (error) {
-      if (error instanceof ServiceError && error.code === 'platform_not_found') return;
+  constructor(readonly fleet: JuicedFleet) {}
+
+  private async operation<T>(work: () => Promise<T>): Promise<T> {
+    try { return await work(); }
+    catch (error) {
+      if (error instanceof FleetError) {
+        if (error.code === 'not_found' && error.status === 404)
+          throw new ServiceError('platform_not_found', 404);
+        if (error.code === 'session_runtime_mismatch')
+          throw new ServiceError('installation_changed', 409);
+        if (error.code === 'invalid_fleet_response')
+          throw new ServiceError('platform_response_invalid', 502);
+        throw new ServiceError('platform_unavailable', 503);
+      }
+      if (error instanceof FleetConfigurationError)
+        throw new ServiceError('platform_unavailable', 503);
       throw error;
     }
   }
+
+  install(key: string) {
+    return this.operation(async () => installation(await this.fleet.instance({ externalKey: key }).create()));
+  }
+  remove(key: string) {
+    return this.operation(() => this.fleet.instance({ externalKey: key }).delete());
+  }
+  removeById(id: string) {
+    return this.operation(() => this.fleet.instance({ id }).delete());
+  }
+  find(key: string) {
+    return this.operation(async () => {
+      const result = await this.fleet.instance({ externalKey: key }).status();
+      return result && installation(result);
+    });
+  }
   installation(id: string) {
-    return this.request<PlatformInstallation>('GET', `installations/${encodeURIComponent(id)}`);
+    return this.operation(async () => {
+      const result = await this.fleet.instance({ id }).status();
+      if (!result) throw new ServiceError('platform_not_found', 404);
+      return installation(result);
+    });
   }
-  credentials(id: string) {
-    return this.request<RuntimeCredential>(
-      'GET',
-      `installations/${encodeURIComponent(id)}/credentials`,
-    );
+  setPolicy(id: string, update: FleetPolicyUpdate) {
+    return this.operation(() => this.fleet.instance({ id }).setPolicy(update));
   }
-  connection(credential: RuntimeCredential): AppConnection {
-    const edge = origin(credential.edgeUrl, this.origin.startsWith('http:'));
-    return {
-      fetch: async (request: Request) => {
-        const source = new URL(request.url),
-          headers = new Headers();
-        for (const key of ['content-type', 'accept', 'x-cantelop-session-runtime']) {
-          const value = request.headers.get(key);
-          if (value !== null) headers.set(key, value);
-        }
-        headers.set('Authorization', `Bearer ${credential.accessToken}`);
-        headers.set('X-Cantelop-Session-Runtime', credential.runtimeId);
-        return this.fetcher(
-          new Request(new URL(source.pathname + source.search, edge), {
-            method: request.method,
-            headers,
-            redirect: 'manual',
-            signal: request.signal,
-            ...(request.body === null
-              ? {}
-              : ({ body: request.body, duplex: 'half' } as RequestInit)),
-          }),
-        );
-      },
-    };
+
+  private async pinned(id: string, expected: InstancePin) {
+    const result = await this.installation(id);
+    if (result.app_id !== expected.appId || result.runtime_id !== expected.runtimeId)
+      throw new ServiceError('installation_changed', 409);
+    return this.fleet.instance({ id });
+  }
+  connection(id: string, expected: InstancePin): Promise<AppConnection> {
+    return this.operation(async () => (await this.pinned(id, expected)).connection());
+  }
+  app(id: string, expected: InstancePin) {
+    return this.operation(async () => (await this.pinned(id, expected)).app());
   }
 }

@@ -1,4 +1,4 @@
-import { app as compiledApp } from './cantelop.js';
+import { app as compiledApp } from './app.js';
 import { parseInvocation } from './account/invocation.js';
 import { AccountClient, ManagedError } from './account/client.js';
 import { VERSION } from './version.js';

@@ -100,11 +100,7 @@ export function application(s: Services) {
       const user = session.user.id,
         account = await s.accounts.ensure(user);
       const installation = await s.accounts.installation(account.id);
-      const [used, devices, providers] = await Promise.all([
-        s.pool.query(
-          `SELECT coalesce(sum(credits),0)::text AS used FROM usage_events WHERE account_id=$1 AND payload->>'epoch'=$2`,
-          [account.id, account.period_id],
-        ),
+      const [devices, providers] = await Promise.all([
         s.pool.query(
           'SELECT id,label,created_at,expires_at FROM devices WHERE user_id=$1 AND revoked_at IS NULL AND expires_at>now() ORDER BY created_at DESC',
           [user],
@@ -118,7 +114,6 @@ export function application(s: Services) {
           status: installation.desired_package_id ? 'upgrading' : installation.status,
           error: installation.error_code,
         },
-        used: used.rows[0]!.used,
         devices: devices.rows,
         providers: providers.rows.map((r) => r.provider),
       });
@@ -200,8 +195,9 @@ export function application(s: Services) {
         used,
         periodEnd: a.period_end,
         entitlement: a.entitlement,
-        rateCard: 'allocated-compute-v1',
-        pending: true,
+        rateCard: null,
+        pending: false,
+        metering: 'retired',
       });
     }
     if (method === 'DELETE' && action === '') {

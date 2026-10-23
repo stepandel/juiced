@@ -143,3 +143,5 @@ publishing.
 ## License
 
 [MIT](LICENSE)
+
+The Fleet SDK migration uses `cantelop.fleet()` and CLI-managed instance rollout. See [migration and release prerequisites](docs/fleet-sdk-migration.md) before deploying this branch.

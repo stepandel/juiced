@@ -71,7 +71,7 @@ export class Provisioner {
         else if (row.kind === 'delete' || a.status === 'deleting') {
           await this.billing?.cancel(a, tx);
           if (i?.platform_id) {
-            await unlessMissing(this.platform.request('DELETE', `installations/${i.platform_id}`));
+            await unlessMissing(this.platform.removeById(i.platform_id));
             const remote = await unlessMissing(this.platform.installation(i.platform_id));
             done = !remote || remote.status === 'deleted';
           } else done = true;
@@ -121,23 +121,19 @@ export class Provisioner {
           else if (!i.platform_id) done = true;
           else {
             const remote = await this.platform.installation(i.platform_id);
-            const result = await this.platform.request<{ revision: number }>(
-              'PUT',
-              `installations/${i.platform_id}/policy`,
-              {
-                expectedRevision: remote.policy_revision,
-                sourceFence: String(row.projection_fence),
-                policy: {
-                  active: false,
-                  expiresAt: new Date().toISOString(),
-                  maxSandboxes: 0,
-                  maxVcpus: 0,
-                  maxMemoryMib: 0,
-                  maxWorkspaces: 0,
-                  maxStorageBytes: 0,
-                },
+            const result = await this.platform.setPolicy(i.platform_id, {
+              expectedRevision: remote.policy_revision,
+              sourceFence: String(row.projection_fence),
+              policy: {
+                active: false,
+                expiresAt: new Date().toISOString(),
+                maxSandboxes: 0,
+                maxVcpus: 0,
+                maxMemoryMib: 0,
+                maxWorkspaces: 0,
+                maxStorageBytes: 0,
               },
-            );
+            });
             await tx.query(
               'UPDATE installations SET policy_revision=$2,entitlement_epoch=NULL WHERE id=$1',
               [i.id, result.revision],
@@ -145,62 +141,39 @@ export class Provisioner {
             done = true;
           }
         } else {
-          if (i.desired_package_id && i.platform_id) {
-            await this.platform.request('POST', `installations/${i.platform_id}/releases`, {
-              packageId: i.desired_package_id,
-              expectedPackageId: i.package_id,
-            });
-            const upgraded = await this.platform.installation(i.platform_id);
-            if (upgraded.status !== 'ready' || upgraded.package_id !== i.desired_package_id) {
-              await tx.query(
-                `UPDATE jobs SET status='pending',lease_until=NULL,available_at=now()+interval '5 seconds' WHERE id=$1 AND fence=$2`,
-                [row.id, row.fence],
-              );
-              return;
-            }
-            if (upgraded.runtime_id !== i.desired_runtime_id)
-              throw new Error('package_runtime_mismatch');
-            await tx.query(
-              'UPDATE installations SET package_id=$2,runtime_id=$3,desired_package_id=NULL,desired_runtime_id=NULL WHERE id=$1',
-              [i.id, i.desired_package_id, i.desired_runtime_id],
-            );
-            i.package_id = i.desired_package_id;
-            i.runtime_id = i.desired_runtime_id!;
-            i.desired_package_id = null;
-            i.desired_runtime_id = null;
-          }
           const remote = i.platform_id
             ? await this.platform.installation(i.platform_id)
-            : await this.platform.install(i.external_key, i.package_id);
-          if (remote.runtime_id !== i.runtime_id) throw new Error('package_runtime_mismatch');
+            : (await this.platform.find(i.external_key)) ?? await this.platform.install(i.external_key);
+          // CLI rollout owns package changes. Wait for its selected package, then adopt its verified identity.
+          if (remote.package_id !== this.accounts.release.packageId || remote.runtime_id !== this.accounts.release.runtimeId) {
+            await tx.query("UPDATE installations SET status='provisioning',error_code='installation_upgrading' WHERE id=$1", [i.id]);
+            await tx.query("UPDATE jobs SET status='pending',lease_until=NULL,available_at=now()+interval '5 seconds' WHERE id=$1 AND fence=$2", [row.id, row.fence]);
+            return;
+          }
+          await tx.query('UPDATE installations SET package_id=$2,runtime_id=$3,desired_package_id=NULL,desired_runtime_id=NULL WHERE id=$1', [i.id, remote.package_id, remote.runtime_id]);
+          i.package_id = remote.package_id;
+          i.runtime_id = remote.runtime_id;
+          i.desired_package_id = null;
+          i.desired_runtime_id = null;
           await tx.query(
             `UPDATE installations SET platform_id=$2,app_id=$3,status='provisioning',error_code=NULL,updated_at=now() WHERE id=$1`,
             [i.id, remote.id, remote.app_id],
           );
-          await this.platform.request('PUT', `installations/${remote.id}/budget`, {
-            epoch: a.period_id,
-            included: Number(a.included_credits),
-            expiresAt: a.period_end!.toISOString(),
-          });
           let revision = i.policy_revision;
           if (i.entitlement_epoch !== a.period_id) {
-            const result = await this.platform.request<{ revision: number }>(
-              'PUT',
-              `installations/${remote.id}/policy`,
-              {
-                expectedRevision: remote.policy_revision,
-                sourceFence: String(row.projection_fence),
-                policy: {
-                  active: true,
-                  expiresAt: a.period_end!.toISOString(),
-                  maxSandboxes: 2,
-                  maxVcpus: 8,
-                  maxMemoryMib: 9216,
-                  maxWorkspaces: 8,
-                  maxStorageBytes: 10 * 1024 ** 3,
-                },
+            const result = await this.platform.setPolicy(remote.id, {
+              expectedRevision: remote.policy_revision,
+              sourceFence: String(row.projection_fence),
+              policy: {
+                active: true,
+                expiresAt: a.period_end!.toISOString(),
+                maxSandboxes: 2,
+                maxVcpus: 8,
+                maxMemoryMib: 9216,
+                maxWorkspaces: 8,
+                maxStorageBytes: 10 * 1024 ** 3,
               },
-            );
+            });
             revision = result.revision;
             await tx.query(
               'UPDATE installations SET policy_revision=$2,entitlement_epoch=$3 WHERE id=$1',

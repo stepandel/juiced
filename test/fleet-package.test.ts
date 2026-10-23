@@ -4,13 +4,19 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import test from 'node:test';
-import { buildAppArtifacts } from '@cantelop/sdk/build';
+import { buildAppArtifacts, buildEdgeApi } from '@cantelop/sdk/build';
 
 test('the compiled Juice package uses isolated Fleet runtime capabilities and rejects missing ones', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'juiced-fleet-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const { apps, backend } = await buildAppArtifacts({ definition: resolve('src/cantelop.ts'), outdir: directory });
   const { edge, runtime } = apps[0]!;
+  const standalone = await buildEdgeApi({definition:resolve('src/self-managed.ts'),outdir:join(directory,'standalone')});
+  assert.equal(standalone.manifest.definition_kind, undefined);
+  assert.equal(standalone.manifest.session_runtime_id, edge.manifest.session_runtime_id, 'self-managed App and managed Fleet must share the same compiled contract');
+  assert.equal(edge.manifest.definition_kind, 'fleet');
+  assert.equal(runtime.manifest.definition_kind, 'fleet');
+  assert.equal(edge.manifest.cli_build_protocol_version, 7);
   assert.equal(edge.manifest.fleet_execution_protocol_version, 1);
   assert.ok(edge.manifest.optional_bindings.includes('CANTELOP_FLEET_EXECUTION_VERSION'));
   assert.equal(edge.manifest.session_runtime_id, runtime.manifest.session_runtime_id);

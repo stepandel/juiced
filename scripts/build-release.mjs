@@ -12,6 +12,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const output = resolve(process.argv[2] ?? join(root, 'dist/releases'));
 const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const lock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
+assert.match(manifest.dependencies['@cantelop/sdk'], /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, 'Publish Juiced only after replacing the draft SDK Git pin with its released npm version');
 const { platform, arch } = process;
 assert.ok(['darwin', 'linux'].includes(platform) && ['arm64', 'x64'].includes(arch));
 assert.ok(/^\d+\.\d+\.\d+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$/.test(manifest.version));

@@ -18,7 +18,7 @@ let cleaned = false;
 const report = { date: new Date().toISOString(), checks: [] };
 const passed = message => { console.log(`PASS: ${message}`); report.checks.push(message); };
 try {
-  await build({ stdin: { contents: "export { app } from './src/cantelop.ts'; export { RemoteAgent } from './src/remote-agent.ts'; export { GitWorkspaceClient, createGitSession } from './src/git-workspace.ts'; export { selectProject } from './src/project.ts'; export { discoverRepository, git, gitText } from './src/git.ts';", resolveDir: root, sourcefile: 'git-live.ts', loader: 'ts' }, bundle: true, platform: 'node', target: 'node22', format: 'esm', packages: 'external', plugins: [createCantelopCompilerPlugin({ definition: join(root, 'src/cantelop.ts') })], outfile: join(buildDirectory, 'app.mjs') });
+  await build({ stdin: { contents: "export { app } from './src/app.ts'; export { RemoteAgent } from './src/remote-agent.ts'; export { GitWorkspaceClient, createGitSession } from './src/git-workspace.ts'; export { selectProject } from './src/project.ts'; export { discoverRepository, git, gitText } from './src/git.ts';", resolveDir: root, sourcefile: 'git-live.ts', loader: 'ts' }, bundle: true, platform: 'node', target: 'node22', format: 'esm', packages: 'external', plugins: [createCantelopCompilerPlugin({ definition: join(root, 'src/cantelop.ts') })], outfile: join(buildDirectory, 'app.mjs') });
   const { app, RemoteAgent, GitWorkspaceClient, createGitSession, selectProject, discoverRepository, git, gitText } = await import(pathToFileURL(join(buildDirectory, 'app.mjs')).href);
   await git(local, ['init', '-b', 'main']);
   await git(local, ['config', 'user.name', 'Juiced live test']); await git(local, ['config', 'user.email', 'juiced-live@localhost']);

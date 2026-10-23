@@ -36,14 +36,11 @@ test(
       let available = false;
       const calls: string[] = [];
       const platform = {
-        async credentials(installation: string) {
-          return { appId: installation, runtimeId: 'runtime-fixture', installation };
-        },
-        connection(credential: { installation: string }) {
+        async connection(installation: string) {
           return {
             async fetch(request: Request) {
-              calls.push(credential.installation);
-              if (credential.installation === 'first' && !available)
+              calls.push(installation);
+              if (installation === 'first' && !available)
                 throw new Error('host unavailable');
               const body = (await request.json()) as { command: { auth: { terminalId: string } } };
               return Response.json({

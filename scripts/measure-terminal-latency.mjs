@@ -51,7 +51,7 @@ async function until(check, timeoutMs = 15_000) {
 }
 try {
   await build({
-    stdin: { contents: `export { app } from ${JSON.stringify(join(root, 'src/cantelop.ts'))};`, resolveDir: root, sourcefile: 'latency-entry.ts', loader: 'ts' },
+    stdin: { contents: `export { app } from ${JSON.stringify(join(root, 'src/app.ts'))};`, resolveDir: root, sourcefile: 'latency-entry.ts', loader: 'ts' },
     bundle: true, platform: 'node', target: 'node22', format: 'esm', packages: 'external',
     plugins: [createCantelopCompilerPlugin({ definition: join(root, 'src/cantelop.ts') })], outfile: join(temporary, 'app.mjs'),
   });

@@ -34,7 +34,7 @@ async function waitUntil(label, check) {
 }
 let app, failure, requestedProvision = false, initialAbsent = false;
 try {
-  await build({ stdin: { contents: "export { app } from './src/cantelop.ts';", resolveDir: root, sourcefile: 'delete-live.ts', loader: 'ts' },
+  await build({ stdin: { contents: "export { app } from './src/app.ts';", resolveDir: root, sourcefile: 'delete-live.ts', loader: 'ts' },
     bundle: true, platform: 'node', target: 'node22', format: 'esm', packages: 'external',
     plugins: [createCantelopCompilerPlugin({ definition: join(root, 'src/cantelop.ts') })], outfile: join(buildDirectory, 'app.mjs') });
   ({ app } = await import(pathToFileURL(join(buildDirectory, 'app.mjs')).href));
