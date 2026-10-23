@@ -264,6 +264,16 @@ test('unchanged commits send no bundle and patch-only uploads preserve staged an
   await client.close();
 });
 
+test('runtimes without part support receive a full bundle for an unchanged HEAD', async t => {
+  const f = await fixture(t), repository = (await discoverRepository(f.local))!;
+  const legacy = await createUpload(repository, false, repository.head), parts = await createUpload(repository, false, repository.head, undefined, true);
+  t.after(() => Promise.all([legacy.close(), parts.close()]));
+  assert.equal(legacy.manifest.base, undefined);
+  assert.deepEqual(legacy.manifest.files.map(file => file.name), ['bundle']);
+  assert.equal(parts.manifest.base, repository.head);
+  assert.deepEqual(parts.manifest.files, []);
+});
+
 test('Git uploads pipeline a bounded window and accept reversed part arrival with a retried receipt', { timeout: 30_000 }, async t => {
   let holding = true;
   const waiting: Array<() => void> = [];
@@ -310,7 +320,7 @@ test('immutable upload parts survive replacement and reject missing or conflicti
   assert.deepEqual(await readFile(join(f.target, 'large.bin')), await readFile(join(f.local, 'large.bin')));
 });
 
-test('a service device quota rejection waits for the next window with the same delivery identity', { timeout: 5000 }, async t => {
+test('a service device quota rejection waits for the next quota minute with the same delivery identity', { timeout: 5000 }, async t => {
   const f = await fixture(t), repository = (await discoverRepository(f.local))!;
   let resume!: () => void;
   const waits: number[] = [];
@@ -333,7 +343,8 @@ test('a service device quota rejection waits for the next window with the same d
   }) } as unknown as ConstructorParameters<typeof GitWorkspaceClient>[0], f.project, repository, f.lifetime.signal);
   const pending = client.status();
   await new Promise<void>(resolve => setImmediate(resolve));
-  assert.deepEqual(waits, [60_000]);
+  assert.equal(waits.length, 1);
+  assert.ok(waits[0]! > 1000 && waits[0]! <= 61_000, 'The wait ends just after the current quota minute');
   assert.equal(ids.length, 1);
   resume();
   assert.deepEqual(await pending, { initialized: false });

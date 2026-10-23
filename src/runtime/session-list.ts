@@ -9,16 +9,16 @@ export const sessionKey = (id: string) => createHash('sha256').update(id).digest
 
 type Inventory = { identity: string; expires: number; keys: string[] };
 const inventories = new Map<string, Inventory>();
-const MAX_CACHED_KEYS = 100_000;
+const MAX_CACHED_KEYS = 100_000, RACY_NS = 3_000_000_000n;
 
 /** Directory metadata changes when sessions are added, removed or replaced. */
-async function sessionKeys(root: string, identity: string) {
+async function sessionKeys(root: string, identity: string, cacheable: boolean) {
   const cached = inventories.get(root);
   if (cached?.identity === identity && cached.expires > Date.now()) return cached.keys;
   inventories.delete(root);
   const entries = await readdir(root, { withFileTypes: true });
   const keys = entries.filter(entry => entry.isDirectory() && validSessionKey(entry.name)).map(entry => entry.name).sort();
-  if (keys.length <= MAX_CACHED_KEYS) {
+  if (cacheable && keys.length <= MAX_CACHED_KEYS) {
     let count = keys.length;
     for (const inventory of inventories.values()) count += inventory.keys.length;
     for (const [path, inventory] of inventories) {
@@ -93,13 +93,16 @@ export async function listRemoteSessions(command: SessionListCommand, signal: Ab
   const root = join(workspace, '.juiced', 'sessions');
   let keys: string[];
   try {
-    let identity = '';
+    let identity = '', modified = 0n;
     for (const path of [join(workspace, '.juiced'), root]) {
       const info = await lstat(path, { bigint: true });
       if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('The session history directory is unsafe.');
       identity += `${info.dev}:${info.ino}:${info.mtimeNs}:${info.ctimeNs}/`;
+      if (info.mtimeNs > modified) modified = info.mtimeNs;
     }
-    keys = await sessionKeys(root, identity);
+    // Like Git's racy-clean check: a directory changed within the last few
+    // seconds may change again without a new timestamp on coarse filesystems.
+    keys = await sessionKeys(root, identity, BigInt(Date.now()) * 1_000_000n - modified > RACY_NS);
   } catch (error) {
     if (isENOENT(error)) return { items: [], unreadable: 0 };
     throw error;

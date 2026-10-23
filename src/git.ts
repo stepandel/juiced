@@ -96,18 +96,19 @@ export async function ancestor(root: string, before: string, after: string): Pro
   catch (error) { if (error instanceof GitError && error.code === 1) return false; throw error; }
 }
 
-export async function createUpload(repository: Repository, includeUncommitted: boolean, base?: string, signal?: AbortSignal) {
+/** `uploadParts`: the receiving runtime accepts out-of-order parts, `finish` and patch-only manifests. */
+export async function createUpload(repository: Repository, includeUncommitted: boolean, base?: string, signal?: AbortSignal, uploadParts = false) {
   const directory = await mkdtemp(join(tmpdir(), 'juiced-git-'));
   const id = randomUUID(); const ref = `refs/juiced/transfers/${id}`;
   const run = (args: string[], options: Parameters<typeof git>[2] = {}) => git(repository.root, args, { ...options, ...(signal ? { signal } : {}) });
   try {
     if ((await run(['ls-files', '--unmerged'])).length) throw new Error('Resolve the local merge conflicts before transferring this repository.');
     if ((await run(['ls-files', '--stage'])).toString().split('\n').some(line => line.startsWith('160000 '))) throw new Error('Submodule contents are not supported by Git workspace transfer yet.');
-    const files: FileInfo[] = [];
-    if (base !== repository.head) {
+    const files: FileInfo[] = [], patchOnly = uploadParts && base === repository.head;
+    if (!patchOnly) {
       await run(['update-ref', ref, repository.head]);
       let exclusions: string[] = [];
-      if (base) {
+      if (base && base !== repository.head) {
         try { await run(['cat-file', '-e', `${base}^{commit}`]); exclusions = [`^${base}`]; } catch {}
       }
       await run(['bundle', 'create', join(directory, 'bundle'), ref, ...exclusions]);
@@ -136,8 +137,8 @@ export async function createUpload(repository: Repository, includeUncommitted: b
     }
     if (await gitText(repository.root, ['rev-parse', 'HEAD']) !== repository.head) throw new Error('Local HEAD changed during transfer preparation. Retry.');
     const manifest: UploadManifest = { version: 1, head: repository.head, branch: repository.branch, author: repository.author, objectFormat: repository.objectFormat, files,
-      ...(base === repository.head ? { base } : {}) };
-    return { id, directory, manifest, close: () => rm(directory, { recursive: true, force: true }) };
+      ...(patchOnly ? { base } : {}) };
+    return { id, directory, manifest, uploadParts, close: () => rm(directory, { recursive: true, force: true }) };
   } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
   finally { await git(repository.root, ['update-ref', '-d', ref]).catch(() => {}); }
 }

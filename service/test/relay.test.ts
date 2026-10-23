@@ -132,7 +132,7 @@ test('bounded upload rejects incremental oversize without buffering an unbounded
   await assert.rejects(reader.read(), { code: 'request_too_large' });
 });
 
-test('slow relay authorization never overlaps and its deadline cancels the stream', async t => {
+test('slow relay authorization never overlaps and a sustained stall cancels the stream', async t => {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
   let checks = 0, authorized = 0, cancelled = false;
   let release!: () => void;
@@ -149,6 +149,9 @@ test('slow relay authorization never overlaps and its deadline cancels the strea
   assert.equal(checks, 1);
   t.mock.timers.tick(5000);
   assert.equal(checks, 1, 'The next interval cannot start another check while the first is pending');
+  assert.equal(cancelled, false, 'A briefly slow check keeps the stream open');
+  t.mock.timers.tick(25000);
+  assert.equal(checks, 1);
   assert.equal(cancelled, true);
   release();
   await new Promise<void>(resolve => setImmediate(resolve));

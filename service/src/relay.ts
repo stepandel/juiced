@@ -161,15 +161,19 @@ export async function relay(
   outHeaders.set('X-Accel-Buffering', 'no');
   if (!upstream.body) return new Response(null, { status: upstream.status, headers: outHeaders });
   const reader = upstream.body.getReader();
-  let checking = false;
+  let checking = false, stalled = 0;
   const recheck = setInterval(
     () => {
-      if (checking || signal.aborted) return;
+      if (signal.aborted) return;
+      // Checks never overlap. A slow read is tolerated for 30 seconds so a brief
+      // database slowdown does not close every stream at once; a sustained
+      // stall still fails closed.
+      if (checking) {
+        if (++stalled >= 6) cancel.abort();
+        return;
+      }
       checking = true;
-      // A stalled authorization read closes this stream instead of starting an
-      // ever-growing queue of checks against an already overloaded database.
-      const deadline = setTimeout(() => cancel.abort(), 5000);
-      deadline.unref();
+      stalled = 0;
       void (async () => {
         if (!(await deviceActive(ctx.pool, ctx.identity))) throw new Error('revoked');
         signal.throwIfAborted();
@@ -186,7 +190,7 @@ export async function relay(
       })().catch(() => {
         cancel.abort();
         void reader.cancel().catch(() => {});
-      }).finally(() => { clearTimeout(deadline); checking = false; });
+      }).finally(() => { checking = false; });
     },
     5000,
   );

@@ -219,7 +219,7 @@ test('native runtime routes Git maintenance without starting Claude and returns 
     throw new Error('Git command timed out');
   };
   const base = { type: 'git' as const, directoryName: 'project', binding: 'a'.repeat(64) };
-  assert.deepEqual(await call({ ...base, action: 'status' }), { ok: true, git: { status: { initialized: false } } });
+  assert.deepEqual(await call({ ...base, action: 'status' }), { ok: true, git: { status: { initialized: false, uploadParts: true } } });
   assert.deepEqual(await call({ ...base, action: 'export', id: randomUUID(), known: 'b'.repeat(40) }), { ok: false, error: 'Initialize or recover this Git workspace before importing commits.' });
   assert.equal((await request('/__cantelop/v2/runtime')).activity, null);
 });

@@ -9,7 +9,7 @@ import { validProjectName } from '../project-name.js';
 import { acquireCheckout, reapCheckout } from './project-state.js';
 import { workingTree } from '../working-tree.js';
 import { prepareUploadCandidate, validateUploadManifest } from './git-upload.js';
-import { finishUpload, saveUploadPart } from './upload-chunks.js';
+import { finishUpload, prepareUploadParts, saveUploadPart } from './upload-chunks.js';
 import { isENOENT, writeFileAtomic } from '../fs-util.js';
 import { BASE64 } from '../protocol.js';
 
@@ -116,9 +116,9 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
         const lease = await acquireCheckout(await context.database(), project, context.session.id, 'session', () => {});
         try {
           const binding = await readBinding(paths.metadata);
-          if (!binding) return { status: { initialized: false } };
+          if (!binding) return { status: { initialized: false, uploadParts: true } };
           await checkGitDirectory();
-          return { status: { initialized: true, head: await gitText(paths.target, ['rev-parse', 'HEAD']), sourceBranch: binding.sourceBranch, dirty: !await cleanRepository(paths.target) } };
+          return { status: { initialized: true, head: await gitText(paths.target, ['rev-parse', 'HEAD']), sourceBranch: binding.sourceBranch, dirty: !await cleanRepository(paths.target), uploadParts: true } };
         } finally { await lease.release(); }
       }
       case 'reap':
@@ -133,6 +133,7 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
         if (await exists(manifestPath)) {
           if (await readFile(manifestPath, 'utf8') !== JSON.stringify(command.manifest)) throw new Error('Transfer identity was already used with a different manifest');
         } else await writeFile(manifestPath, JSON.stringify(command.manifest), { flag: 'wx', mode: 0o600 });
+        await prepareUploadParts(transfer!, command.manifest);
         return {};
       }
       case 'chunk': {
@@ -181,6 +182,11 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
           if (binding && binding.sourceBranch !== manifest.branch) throw new Error('The local branch changed. Select a fresh --workspace for that branch.');
           if (binding && !await cleanRepository(paths.target)) throw new Error('The remote checkout has uncommitted changes. Commit or resolve them before syncing to it.');
           if (binding && manifest.base === manifest.head && !manifest.files.length && await gitText(paths.target, ['rev-parse', 'HEAD']) === manifest.head) {
+            // Record the clean tree as a full application would, so later
+            // snapshots never diff from an earlier sync's uncommitted edits.
+            const tree = await workingTree(paths.target, signal);
+            await run(paths.target, ['update-ref', `refs/juiced/baselines/${tree}`, tree]);
+            await atomicJSON(join(paths.metadata, 'binding.json'), { ...binding, publishBase: { head: manifest.head, tree } });
             await atomicJSON(join(transfer!, 'result.json'), { applied: true });
             return {};
           }

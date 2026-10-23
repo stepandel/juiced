@@ -11,7 +11,8 @@ export type UploadManifest = {
   /** A patch-only upload requires this exact commit to exist in the receiver. */
   base?: string;
 };
-export type GitStatus = { initialized: boolean; head?: string; sourceBranch?: string | null; dirty?: boolean };
+/** `uploadParts` advertises runtime support for part chunks, `finish` and patch-only manifests. */
+export type GitStatus = { initialized: boolean; head?: string; sourceBranch?: string | null; dirty?: boolean; uploadParts?: boolean };
 export type SnapshotManifest = { baseHead: string; baseTree: string; tree: string; file: FileInfo };
 export type ExportManifest = { head: string; sourceBranch: string | null; file: FileInfo; snapshot?: SnapshotManifest };
 export type StaleLease = { session: string; token: string };

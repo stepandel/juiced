@@ -16,6 +16,22 @@ export function isTransient(error: unknown): boolean {
   return remote.name === 'AbortError' || typeof remote.message === 'string' && TRANSIENT.test(remote.message);
 }
 
+/**
+ * The SDK preserves a managed-service rejection as the cause of an
+ * unknown-outcome transport error. The service rejected it before delivery.
+ */
+export function isDeviceQuotaExceeded(error: unknown): boolean {
+  for (let depth = 0; error && typeof error === 'object' && depth < 8; depth++) {
+    const value = error as { status?: number; code?: string; cause?: unknown };
+    if (value.status === 429 && value.code === 'rate_limit_exceeded') return true;
+    error = value.cause;
+  }
+  return false;
+}
+
+/** The device quota counts calendar minutes; wait for the next one plus clock-skew margin. */
+export const quotaWindowMs = (now = Date.now()) => 60_000 - now % 60_000 + 1000;
+
 /** Exponential delay for a zero-based retry attempt. */
 export function backoffMs(attempt: number, { base = 250, max = 5000 }: { base?: number; max?: number } = {}): number {
   return Math.min(max, base * 2 ** Math.min(attempt, 30));
