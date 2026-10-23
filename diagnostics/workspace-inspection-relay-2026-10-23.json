@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-23T18:38:54.212Z",
+  "boundary": "Local Juiced Platform adapter and live Cantelop Edge; no hosted Juiced deployment",
+  "samples": [
+    {
+      "sample": 0,
+      "variant": "baseline",
+      "connectionMs": 239.45,
+      "inspectMs": 815.18,
+      "totalMs": 1054.64
+    },
+    {
+      "sample": 0,
+      "variant": "candidate",
+      "connectionMs": 206.86,
+      "inspectMs": 653.37,
+      "totalMs": 860.22
+    },
+    {
+      "sample": 1,
+      "variant": "candidate",
+      "connectionMs": 0.09,
+      "inspectMs": 282.58,
+      "totalMs": 282.68
+    },
+    {
+      "sample": 1,
+      "variant": "baseline",
+      "connectionMs": 239.27,
+      "inspectMs": 299.11,
+      "totalMs": 538.38
+    },
+    {
+      "sample": 2,
+      "variant": "baseline",
+      "connectionMs": 227.42,
+      "inspectMs": 287.63,
+      "totalMs": 515.04
+    },
+    {
+      "sample": 2,
+      "variant": "candidate",
+      "connectionMs": 0.09,
+      "inspectMs": 347.28,
+      "totalMs": 347.38
+    },
+    {
+      "sample": 3,
+      "variant": "candidate",
+      "connectionMs": 0.1,
+      "inspectMs": 412.76,
+      "totalMs": 412.87
+    },
+    {
+      "sample": 3,
+      "variant": "baseline",
+      "connectionMs": 257.04,
+      "inspectMs": 260.02,
+      "totalMs": 517.07
+    },
+    {
+      "sample": 4,
+      "variant": "baseline",
+      "connectionMs": 205.49,
+      "inspectMs": 272.52,
+      "totalMs": 478.01
+    },
+    {
+      "sample": 4,
+      "variant": "candidate",
+      "connectionMs": 0.07,
+      "inspectMs": 262.3,
+      "totalMs": 262.37
+    },
+    {
+      "sample": 5,
+      "variant": "candidate",
+      "connectionMs": 0.05,
+      "inspectMs": 241.82,
+      "totalMs": 241.88
+    },
+    {
+      "sample": 5,
+      "variant": "baseline",
+      "connectionMs": 217.82,
+      "inspectMs": 245.45,
+      "totalMs": 463.27
+    }
+  ],
+  "hostedRelayBaseline": {
+    "boundary": "Production Juiced relay from California; missing-workspace metadata inspection, no VM activation",
+    "samples": [
+      {
+        "totalMs": 885,
+        "fleetConnectionMs": 187.1,
+        "edgeMs": 561.3,
+        "serviceTotalMs": 759.2
+      },
+      {
+        "totalMs": 514,
+        "fleetConnectionMs": 119.2,
+        "edgeMs": 243.8,
+        "serviceTotalMs": 372.8
+      },
+      {
+        "totalMs": 440,
+        "fleetConnectionMs": 116.3,
+        "edgeMs": 201.1,
+        "serviceTotalMs": 327.8
+      },
+      {
+        "totalMs": 406,
+        "fleetConnectionMs": 106.0,
+        "edgeMs": 192.2,
+        "serviceTotalMs": 308.6
+      },
+      {
+        "totalMs": 441,
+        "fleetConnectionMs": 121.9,
+        "edgeMs": 192.9,
+        "serviceTotalMs": 325.2
+      }
+    ]
+  },
+  "hostLookup": {
+    "boundary": "Compute HTTP completion logs for the probes",
+    "samples": 24,
+    "medianMs": 0.189765,
+    "maxMs": 0.254197
+  },
+  "warmMedians": {
+    "baseline": {
+      "connectionMs": 227.42,
+      "inspectMs": 272.52,
+      "totalMs": 515.04
+    },
+    "candidate": {
+      "connectionMs": 0.09,
+      "inspectMs": 282.58,
+      "totalMs": 282.68
+    }
+  },
+  "limitations": [
+    "Candidate measurements run the actual Juiced Platform adapter locally against live Cantelop, not a deployed Juiced service.",
+    "First sample per variant is reported separately and excluded from warm medians. Five warm samples are diagnostic evidence, not a latency SLO.",
+    "Workspace production was absent in the measured App. These calls inspect metadata without creating a Workspace, starting a Sandbox, or inspecting files.",
+    "The cache only saves setup on the same service process within 30 seconds. First use and cold service processes still fetch status and credentials.",
+    "Every command still reaches Edge. Separate direct-Edge probes had 1.66-second and 3.30-second outliers while corresponding host lookups remained below 0.3 ms. This patch does not fix that latency.",
+    "Fleet principal changes are rechecked on the next transport acquisition, at most 30 seconds after a successful cache fill; existing SDK connections already retain their App credential. User/device authorization and Edge credential/runtime admission remain per request."
+  ]
+}

@@ -72,16 +72,20 @@ function context(platform: Platform) {
 test('relay pins server App credentials and streams without buffering or losing cancellation', async t => {
   let upstreamRequest: Request | undefined,
     cancelled = false;
+  let controlCalls = 0, edgeCalls = 0, authChecks = 0, authorized = true;
   let source!: ReadableStreamDefaultController<Uint8Array>;
   const previous = process.env.CANTELOP_APP_CONFIG;
   process.env.CANTELOP_APP_CONFIG = JSON.stringify({schemaVersion:1,activeProfile:'default',profiles:{default:{apps:[],fleets:[{name:'juiced',id:`flt_${'a'.repeat(32)}`,controlUrl:'https://platform.example',accessToken:`fsp_${'a'.repeat(32)}.${'b'.repeat(64)}`}]}}});
   t.after(() => { if (previous === undefined) delete process.env.CANTELOP_APP_CONFIG; else process.env.CANTELOP_APP_CONFIG = previous; });
   t.mock.method(globalThis,'fetch', async (r: Request) => {
     if (new URL(r.url).origin === 'https://platform.example') {
+      controlCalls++;
       if (r.url.endsWith('/credentials')) return Response.json({appId:installation.app_id!,runtimeId:'runtime-v1',edgeUrl:'https://tenant-a.example',accessToken:'server-app-token'});
       return Response.json({id:installation.platform_id,external_key:installation.external_key,app_id:installation.app_id,package_id:installation.package_id,runtime_id:'runtime-v1',status:'ready',version:'1.0.0',policy_revision:2,enforced_revision:2});
     }
+    edgeCalls++;
     upstreamRequest = r;
+    if (new URL(r.url).pathname.endsWith('/workspace.inspect')) return Response.json({ workspace: null });
     return new Response(new ReadableStream<Uint8Array>({start(c) {source=c;c.enqueue(new TextEncoder().encode('data: first\n\n'));},cancel(){cancelled=true;}}),{headers:{'Content-Type':'text/event-stream'}});
   });
   const platform = new Platform(new CantelopClient().fleet({name:'juiced',runtime:{receive(){},[Symbol.for('dev.cantelop.sdk.compiled-runtime.v1')]:'runtime-v1'}}) as JuicedFleet);
@@ -89,14 +93,18 @@ test('relay pins server App credentials and streams without buffering or losing 
   input.headers.set('Authorization', 'Bearer ' + 'x'.repeat(40));
   input.headers.set('X-Juiced-Timing', '1');
   const ctx = context(platform);
-  const response = await application({ ...ctx, auth: {} as Auth,
+  const handle = application({ ...ctx, auth: {} as Auth,
     pool: { async query(sql: string) {
-      if (sql.includes('"oauthAccessToken"')) return { rows: [{ user_id: 'user', device_id: 'dev_test', expires_at: new Date(Date.now() + 300000), scopes: ['juiced'], resources: [cfg.origin] }] };
+      if (sql.includes('"oauthAccessToken"')) {
+        authChecks++;
+        return { rows: authorized ? [{ user_id: 'user', device_id: 'dev_test', expires_at: new Date(Date.now() + 300000), scopes: ['juiced'], resources: [cfg.origin] }] : [] };
+      }
       if (sql.includes('api_limits')) return { rows: [{ count: 1 }] };
       assert.fail('Unexpected database operation');
     } } as unknown as Pool,
     accounts: { entitled: () => true, async authorize() { return account; }, async installation() { return installation; } } as unknown as Accounts,
-  })(new Request('http://127.0.0.1:3000/v1/accounts/' + account.id + '/runtime/commands/stream', input));
+  });
+  const response = await handle(new Request('http://127.0.0.1:3000/v1/accounts/' + account.id + '/runtime/commands/stream', input));
   const timing = response.headers.get('server-timing')!;
   for (const phase of ['auth', 'rate_limit', 'account', 'installation', 'fleet_connection', 'edge', 'service_total']) assert.match(timing, new RegExp(`${phase};dur=\\d+\\.\\d`));
   assert.doesNotMatch(timing, /Bearer|client-device-token|server-app-token|tenant-a|SELECT/);
@@ -108,6 +116,23 @@ test('relay pins server App credentials and streams without buffering or losing 
   assert.equal(new TextDecoder().decode((await reader.read()).value), 'data: later\n\n');
   await reader.cancel();
   assert.equal(cancelled, true);
+  const inspect = () => {
+    const input = request('/v1/accounts/' + account.id + '/runtime/commands/workspace.inspect', { ...envelope('workspace.inspect'), session: null });
+    input.headers.set('Authorization', 'Bearer ' + 'x'.repeat(40));
+    return handle(input);
+  };
+  const inspected = await inspect();
+  assert.equal(inspected.status, 200);
+  assert.deepEqual(await inspected.json(), { workspace: null });
+  assert.equal(controlCalls, 2, 'A second command reuses the SDK status and credentials lookup');
+  assert.equal(authChecks, 2, 'Every command still authenticates its device');
+  assert.equal(edgeCalls, 2, 'Workspace inspection still reaches the platform');
+  authorized = false;
+  const denied = await inspect();
+  assert.equal(denied.status, 401);
+  await denied.body?.cancel();
+  assert.equal(authChecks, 3);
+  assert.equal(edgeCalls, 2, 'A revoked device cannot use a cached transport');
 });
 test('relay rejects raw database, arbitrary paths, changed pins and protocol/path mismatches before upstream', async () => {
   let called = false;

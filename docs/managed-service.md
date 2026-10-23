@@ -128,6 +128,17 @@ revocation every five seconds. The relay preserves streaming and cancellation;
 its 300-second Vercel invocation limit uses the CLI's existing replay reconnect.
 Qualify these hosted flows before enabling admission.
 
+The relay reuses SDK Fleet connections for 30 seconds per service process,
+keyed by installation, App and runtime. Its cache holds at most 256 entries and
+shares concurrent connection setup. Requests still authenticate the user and
+read current account/installation state, and Edge enforces current App credentials
+and runtime admission. A 401, 403 or 409 response discards that connection for the
+next request; commands and streamed uploads are never automatically replayed.
+Fleet principal changes are rechecked on the next connection acquisition, up to
+30 seconds after a successful cache fill. Cold processes still acquire a connection.
+The [inspection measurements](../diagnostics/workspace-inspection-relay-2026-10-23.json)
+separate hosted baseline timings from local adapter tests against live Cantelop.
+
 For local development or a production build:
 
 ```sh
