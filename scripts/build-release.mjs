@@ -78,7 +78,7 @@ try {
     version: manifest.version, nodeVersion, platform, arch,
   }) + '\n');
 
-  const env = { ...process.env, JUICED_CONFIG_HOME: join(temporary, 'config'), JUICED_MODE: 'managed' };
+  const env = { ...process.env, JUICED_CONFIG_HOME: join(temporary, 'config') };
   const version = await execute(join(bundle, 'bin/juiced'), ['--version'], { env });
   assert.equal(version.stdout.trim(), `juiced ${manifest.version}`);
   const help = await execute(join(bundle, 'bin/juiced'), ['--help'], { env });

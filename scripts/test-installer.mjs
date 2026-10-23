@@ -54,7 +54,7 @@ if (url.endsWith('/latest')) {
     FIXTURE_ASSETS: assets, FIXTURE_REQUESTS: join(directory, 'requests'),
     FIXTURE_COMPLETIONS: join(directory, 'completions'), JUICED_TELEMETRY_DISABLED: '1',
     FIXTURE_OS: process.platform === 'darwin' ? 'Darwin' : 'Linux', FIXTURE_ARCH: process.arch === 'arm64' ? 'arm64' : 'x86_64',
-    JUICED_VERSION: 'latest', JUICED_CONFIG_HOME: join(directory, 'config'), JUICED_MODE: 'managed',
+    JUICED_VERSION: 'latest', JUICED_CONFIG_HOME: join(directory, 'config'),
   };
   const asset = `juiced-${process.platform}-${process.arch}.tar.gz`;
   async function archive(version = '0.2.0', source) {

@@ -170,7 +170,7 @@ Examples:
 
 Options before the command:
   --account ID      Select an authorized Juiced account
-  --service <https-url>       Select the Juiced account service\n  --self-managed    Use a separately deployed app and Cantelop integration profile
+  --service <https-url>       Select the Juiced account service
   --workspace SLUG  Override the workspace derived from the current directory
                    (JUICED_WORKSPACE also overrides automatic selection)
   -h, --help        Show this help
@@ -223,5 +223,5 @@ Juiced sign-in is shared across terminal windows on this computer. Running
 juiced login again reuses it. Use juiced logout to sign out on this computer,
 or juiced logout --all to sign out all CLI sessions. To switch accounts, sign out
 before running juiced login again.
-For an existing deployment use --self-managed or JUICED_MODE=self-managed.
+All runtime commands use your signed-in Juiced account.
 `;

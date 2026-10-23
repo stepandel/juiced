@@ -23,13 +23,12 @@ test('installation responses carry prerelease minimums through the shared CLI/se
 
 test('managed invocation defaults explicitly and separates account selectors from Claude prompts', () => {
   assert.deepEqual(parseInvocation(['claude', '--', 'login'], {}), {
-    mode: 'managed',
     args: ['claude', '--', 'login'],
   });
-  assert.equal(parseInvocation(['--self-managed', 'claude'], {}).mode, 'self-managed');
+  assert.throws(() => parseInvocation(['--self-managed', 'claude'], {}), /no longer supported/);
   assert.equal(parseInvocation(['login', '--no-browser'], {}).command, 'login');
   assert.equal(parseInvocation(['update'], {}).command, 'update');
-  assert.equal(parseInvocation(['--self-managed', 'update'], {}).command, 'update');
+  assert.throws(() => parseInvocation(['--self-managed', 'update'], {}), /no longer supported/);
   assert.throws(() => parseInvocation(['update', '--all'], {}), /Usage: juiced update/);
   assert.throws(() =>
     parseInvocation(['--self-managed', '--account', 'acc_' + 'a'.repeat(32), 'claude'], {}),

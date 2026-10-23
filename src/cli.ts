@@ -1,4 +1,4 @@
-import { app as compiledApp } from './app.js';
+import { fleet } from './cantelop.js';
 import { parseInvocation } from './account/invocation.js';
 import { AccountClient, ManagedError } from './account/client.js';
 import { VERSION } from './version.js';
@@ -25,7 +25,6 @@ import { ADMISSION_MESSAGE, isAdmissionTimeout } from './transport.js';
 import { CliTelemetry } from './telemetry.js';
 
 const controller = new AbortController();
-let managedMode = true;
 let commandStarted = false;
 let updater = new CliUpdater();
 let telemetry: CliTelemetry | undefined;
@@ -54,10 +53,8 @@ async function main() {
     return;
   }
   const invocation = parseInvocation(process.argv.slice(2));
-  managedMode = invocation.mode === 'managed';
   const accountEnv = {
     ...process.env,
-    JUICED_MODE: invocation.mode,
     ...(invocation.service ? { JUICED_SERVICE_URL: invocation.service } : {}),
   };
   telemetry = new CliTelemetry(accountEnv);
@@ -71,14 +68,14 @@ async function main() {
   const offline = parsed?.command === 'help' || parsed?.command === 'version' || invocation.command === 'logout';
   const introspectionOnly = parsed?.command === 'claude' && parsed.action === 'run' &&
     parsed.argv.length === 1 && ['--help', '-h', '--version', '-v'].includes(parsed.argv[0]!);
-  if (managedMode && !offline && !introspectionOnly && invocation.command !== 'update') telemetry.firstRun(accountClient().origin);
-  if (managedMode && !offline)
+  if (!offline && !introspectionOnly && invocation.command !== 'update') telemetry.firstRun(accountClient().origin);
+  if (!offline)
     updater = new CliUpdater({ serviceOrigin: accountClient().origin });
   if (invocation.command === 'update') {
     await updater.check(controller.signal, 'manual');
     return;
   }
-  if (managedMode && !offline) {
+  if (!offline) {
     const command = await updater.check(controller.signal);
     if (command) {
       process.exitCode = await updater.restart(command, controller.signal);
@@ -109,28 +106,27 @@ async function main() {
     }
   } else {
     const args = parsed!;
-    const managed =
-      managedMode && !['help', 'version'].includes(args.command)
-        ? await accountClient().prepare(
-            VERSION,
-            compiledApp.runtimeId,
-            invocation.account,
-            controller.signal,
-            (args.command === 'claude' && args.action === 'delete') ||
-              (args.command === 'env' && args.action === 'unset'),
-          )
-        : undefined;
+    if (args.command === 'help') {
+      process.stdout.write(args.argv[0] === 'github-configure' ? GITHUB_CONFIGURE_HELP : HELP);
+      return;
+    }
+    if (args.command === 'version') { process.stdout.write(`juiced ${VERSION}\n`); return; }
+    const managed = await accountClient().prepare(
+      VERSION,
+      fleet.runtimeId,
+      invocation.account,
+      controller.signal,
+      (args.command === 'claude' && args.action === 'delete') ||
+        (args.command === 'env' && args.action === 'unset'),
+    );
     commandStarted = true;
-    const claudeApp = managed ? compiledApp.connect(managed.connection) : compiledApp;
+    const claudeApp = fleet.connect(managed.connection);
     const selectProject = async (directory: string, workspace?: string) => {
       const project = await selectProjectBase(directory, workspace);
-      if (managed) project.scope = managed.scope;
+      project.scope = managed.scope;
       return project;
     };
-    if (args.command === 'help')
-      process.stdout.write(args.argv[0] === 'github-configure' ? GITHUB_CONFIGURE_HELP : HELP);
-    else if (args.command === 'version') process.stdout.write(`juiced ${VERSION}\n`);
-    else if (args.command === 'env') {
+    if (args.command === 'env') {
       await updateEnvironment(
         claudeApp.environment(),
         args.action,
@@ -161,7 +157,7 @@ async function main() {
       if (process.stderr.isTTY)
         process.stderr.write(`Connecting to Cantelop workspace ${project.workspace}…\n`);
       const resolved = await claudeApp.workspace({ slug: project.workspace }).resolve();
-      if (managed) project.scope = `${managed.scope}:${resolved.id}`;
+      project.scope = `${managed.scope}:${resolved.id}`;
       const workspace = claudeApp.workspace({ id: resolved.id });
       const introspection =
         args.action === 'run' &&
@@ -254,11 +250,8 @@ async function main() {
           const session = repository
             ? createGitSession(
                 workspace,
-                project,
+                (session) => managed.stop(session, resolved.id, project.directoryName),
                 id,
-                managed
-                  ? (session) => managed.stop(session, resolved.id, project.directoryName)
-                  : undefined,
               )
             : workspace.session({ keepAliveSeconds: 120, ...(id ? { id } : {}) });
           const directoryName = introspection ? undefined : project.directoryName;
@@ -267,7 +260,7 @@ async function main() {
             : undefined;
           const publisher =
             repository && localTui ? new LocalPublisher(workspace, project, repository) : undefined;
-          const usage = managed && !introspection ? accountClient() : undefined;
+          const usage = !introspection ? accountClient() : undefined;
           const properties = { session_mode: localTui ? 'interactive' as const : 'terminal' as const };
           let connected = false, lastActivity = -Infinity;
           const onConnected = () => {
@@ -353,7 +346,7 @@ async function reportError(error: unknown) {
       code === 'app_not_configured'
     ) {
       process.stderr.write(
-        'juiced: Cantelop app credentials are missing or invalid. Configure the SDK integration profile or set CANTELOP_APP_SLUG, CANTELOP_INTEGRATION_TOKEN, and optionally CANTELOP_EDGE_URL. See docs/self-managed.md for deployment setup.\n',
+        'juiced: Unable to connect to your Juiced instance. Run juiced login and retry.\n',
       );
     } else if (isAdmissionTimeout(error)) {
       process.stderr.write(
@@ -362,21 +355,17 @@ async function reportError(error: unknown) {
     } else if (code === 'managed_admission_closed') {
       process.stderr.write(`juiced: ${new ManagedError(code).message}\n`);
     } else if (needsCliUpdate(error)) {
-      if (managedMode) {
-        process.stderr.write('juiced: This CLI and the service runtime are incompatible. Checking for a required update…\n');
-        try {
-          const command = await updater.check(controller.signal, 'mismatch');
-          if (command && !commandStarted) {
-            process.exitCode = await updater.restart(command, controller.signal);
-            return;
-          }
-          process.stderr.write('juiced: Updated successfully. Run your command again to reconnect.\n');
-        } catch (updateError) {
-          if (!interrupted)
-            process.stderr.write(`juiced: ${updateError instanceof Error ? updateError.message : 'Run juiced update, then retry.'}\n`);
+      process.stderr.write('juiced: This CLI and the service runtime are incompatible. Checking for a required update…\n');
+      try {
+        const command = await updater.check(controller.signal, 'mismatch');
+        if (command && !commandStarted) {
+          process.exitCode = await updater.restart(command, controller.signal);
+          return;
         }
-      } else {
-        process.stderr.write('juiced: The CLI and deployed runtime differ. Run npm run build and cantelop deploy from the same source, then retry your command.\n');
+        process.stderr.write('juiced: Updated successfully. Run your command again to reconnect.\n');
+      } catch (updateError) {
+        if (!interrupted)
+          process.stderr.write(`juiced: ${updateError instanceof Error ? updateError.message : 'Run juiced update, then retry.'}\n`);
       }
     } else
       process.stderr.write(

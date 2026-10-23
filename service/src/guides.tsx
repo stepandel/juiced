@@ -31,7 +31,7 @@ export const guides: {
         </ul>
         <p>
           See <a href="/pricing">pricing</a> for managed access. For building
-          the CLI from source or configuring a self-managed deployment, follow
+          the CLI from source, follow
           the{' '}
           <a href="https://github.com/stepandel/juiced#readme">
             repository setup guide
@@ -372,14 +372,6 @@ export const guides: {
           services you configure.
         </p>
         <p>
-          Juiced also supports a self-managed Cantelop deployment. That setup
-          requires your own infrastructure configuration; see the{' '}
-          <a href="https://github.com/stepandel/juiced#readme">
-            repository guide
-          </a>
-          .
-        </p>
-        <p>
           Review <a href="/pricing">Juiced pricing</a> and the{' '}
           <a href="/docs/getting-started">getting started guide</a>.
         </p>
@@ -405,7 +397,7 @@ export const guides: {
         <Shell>{'juiced telemetry status\njuiced telemetry disable\n# To enable again:\njuiced telemetry enable'}</Shell>
         <p>The preference is stored on this computer and survives upgrades. Set
           {' '}<code>JUICED_TELEMETRY_DISABLED=1</code> or <code>DO_NOT_TRACK=1</code> to
-          override it. CI and self-managed mode disable product telemetry.</p>
+          override it. CI disables product telemetry.</p>
         <Shell>{'curl -fsSL https://juiced.codes/install.sh | JUICED_TELEMETRY_DISABLED=1 sh'}</Shell>
         <p>For future CLI runs, also set the environment variable in your shell or run
           {' '}<code>juiced telemetry disable</code> after installing. Telemetry settings

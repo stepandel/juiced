@@ -18,8 +18,8 @@ let cleaned = false;
 const report = { date: new Date().toISOString(), checks: [] };
 const passed = message => { console.log(`PASS: ${message}`); report.checks.push(message); };
 try {
-  await build({ stdin: { contents: "export { app } from './src/app.ts'; export { RemoteAgent } from './src/remote-agent.ts'; export { GitWorkspaceClient, createGitSession } from './src/git-workspace.ts'; export { selectProject } from './src/project.ts'; export { discoverRepository, git, gitText } from './src/git.ts';", resolveDir: root, sourcefile: 'git-live.ts', loader: 'ts' }, bundle: true, platform: 'node', target: 'node22', format: 'esm', packages: 'external', plugins: [createCantelopCompilerPlugin({ definition: join(root, 'src/cantelop.ts') })], outfile: join(buildDirectory, 'app.mjs') });
-  const { app, RemoteAgent, GitWorkspaceClient, createGitSession, selectProject, discoverRepository, git, gitText } = await import(pathToFileURL(join(buildDirectory, 'app.mjs')).href);
+  await build({ stdin: { contents: "export { app, target } from './src/app.ts'; export { RemoteAgent } from './src/remote-agent.ts'; export { GitWorkspaceClient, createGitSession } from './src/git-workspace.ts'; export { selectProject } from './src/project.ts'; export { discoverRepository, git, gitText } from './src/git.ts';", resolveDir: root, sourcefile: 'git-live.ts', loader: 'ts' }, bundle: true, platform: 'node', target: 'node22', format: 'esm', packages: 'external', plugins: [createCantelopCompilerPlugin({ definition: join(root, 'src/cantelop.ts') })], outfile: join(buildDirectory, 'app.mjs') });
+  const { app, target, RemoteAgent, GitWorkspaceClient, createGitSession, selectProject, discoverRepository, git, gitText } = await import(pathToFileURL(join(buildDirectory, 'app.mjs')).href);
   await git(local, ['init', '-b', 'main']);
   await git(local, ['config', 'user.name', 'Juiced live test']); await git(local, ['config', 'user.email', 'juiced-live@localhost']);
   await writeFile(join(local, 'README.md'), 'base\n'); await git(local, ['add', '.']); await git(local, ['commit', '-m', 'local unpublished base']);
@@ -30,7 +30,8 @@ try {
   console.log(`Disposable Git project: ${project.remoteDirectory} (workspace ${project.workspace})`);
   cleanupCommand = `cd /workspace && rm -rf -- '${project.directoryName}' '.juiced/${project.directoryName}'`;
   const repository = await discoverRepository(local);
-  const workspace = app.workspace({ slug: project.workspace });
+  const resolved = await app.workspace({ slug: project.workspace }).resolve();
+  const workspace = app.workspace({ id: resolved.id });
   client = new GitWorkspaceClient(workspace, project, repository, AbortSignal.timeout(10 * 60_000));
   const started = Date.now(); await client.send(true);
   report.initialTransferMs = Date.now() - started;
@@ -38,8 +39,8 @@ try {
   assert.deepEqual(await readFile(join(local, '.git', 'index')), indexBefore);
   passed('unpublished HEAD and staged snapshot transferred without changing the local index');
   const options = { directoryName: project.directoryName, git: { binding: repository.binding, relativeDirectory: repository.relativeDirectory } };
-  first = new RemoteAgent(createGitSession(workspace, project), options);
-  second = new RemoteAgent(createGitSession(workspace, project), options);
+  first = new RemoteAgent(createGitSession(workspace, session => target.stop(session, resolved.id, project.directoryName)), options);
+  second = new RemoteAgent(createGitSession(workspace, session => target.stop(session, resolved.id, project.directoryName)), options);
   const approved = new Map();
   const approvals = agent => agent.on('approvals', () => {
     for (const approval of agent.approvals.values()) void agent.answer(approval.id, approval.tool === 'Bash' && approval.input.command === approved.get(agent)).catch(error => { console.error(error.message); });
@@ -84,7 +85,7 @@ try {
   client = new GitWorkspaceClient(workspace, project, await discoverRepository(local), AbortSignal.timeout(5 * 60_000));
   await client.send(false);
   passed('closing both sessions released checkout ownership for a subsequent outbound sync');
-  first = new RemoteAgent(createGitSession(workspace, project), options); approvals(first);
+  first = new RemoteAgent(createGitSession(workspace, session => target.stop(session, resolved.id, project.directoryName)), options); approvals(first);
   await first.start(['--tools', 'Bash']);
   await runTurn(first, cleanupCommand); cleaned = true;
   passed('disposable remote checkout and transfer artifacts removed');

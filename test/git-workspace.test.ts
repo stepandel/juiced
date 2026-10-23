@@ -282,40 +282,6 @@ test('detached HEAD workspaces import commits and require a source branch for fa
   await client.close();
 });
 
-test('client session stop clears exact checkout registrations after sandbox termination', async t => {
-  const f = await fixture(t);
-  const stopped: string[] = [];
-  const session = createGitSession({
-    session() { return { id: 'owned-session', async stop() {
-      assert.equal((await f.db.execute('SELECT * FROM juiced_checkout_leases')).rows.length, 1);
-      stopped.push('stopped');
-    } } as ReturnType<Parameters<typeof createGitSession>[0]['session']>; },
-    async database() { return f.db as WorkspaceDatabase; },
-  }, f.project);
-  const lease = await acquireCheckout(f.db, f.project.directoryName, session.id, 'session', () => {});
-  await session.stop(); await session.stop();
-  assert.deepEqual(stopped, ['stopped']);
-  assert.equal((await f.db.execute('SELECT * FROM juiced_checkout_leases')).rows.length, 0);
-  assert.throws(() => session.request({ type: 'heartbeat' }), /has stopped/);
-  await lease.release();
-});
-
-test('stopping an old attachment preserves a reopened session checkout token', async t => {
-  const f = await fixture(t);
-  let replacement: Awaited<ReturnType<typeof acquireCheckout>> | undefined;
-  const session = createGitSession({
-    session() { return { id: 'reopened-session', async stop() {
-      replacement = await acquireCheckout(f.db, f.project.directoryName, 'reopened-session', 'session', () => {});
-    } } as ReturnType<Parameters<typeof createGitSession>[0]['session']>; },
-    async database() { return f.db as WorkspaceDatabase; },
-  }, f.project, 'reopened-session');
-  const original = await acquireCheckout(f.db, f.project.directoryName, session.id, 'session', () => {});
-  await session.stop();
-  const rows = (await f.db.execute('SELECT token FROM juiced_checkout_leases')).rows;
-  assert.deepEqual(rows.map(row => row.token), [replacement!.token]);
-  await original.release(); await replacement!.release();
-});
-
 test('remote metadata initializes and refreshes existing workspaces without changing files, index or HEAD', { timeout: 30_000 }, async t => {
   const f = await fixture(t);
   await git(f.local, ['remote', 'add', 'origin', 'git@github.com:owner/repo.git']);
@@ -353,10 +319,14 @@ test('credentialed remote URLs fail before transfer without disclosing the token
   assert.equal(f.commands.some(command => command.action === 'begin'), false);
 });
 
-test('managed Git stop uses the typed service operation and never requests database credentials',async()=>{
- let stops=0;
- const session=createGitSession({session(){return {id:'ses_'+'a'.repeat(32)} as ReturnType<Parameters<typeof createGitSession>[0]['session']>;},async database(){throw new Error('Managed CLI must not receive a database token');}}, {directoryName:'project'},undefined,async()=>{stops++;});
- await Promise.all([session.stop(),session.stop()]);assert.equal(stops,1);assert.throws(()=>session.request({type:'heartbeat'}),/has stopped/);
+test('Git stop delegates once to the service and blocks subsequent mutations', async () => {
+  let stops = 0;
+  const session = createGitSession({ session() { return { id: 'ses_' + 'a'.repeat(32) } as ReturnType<Parameters<typeof createGitSession>[0]['session']>; } }, async id => {
+    assert.equal(id, 'ses_' + 'a'.repeat(32)); stops++;
+  });
+  await Promise.all([session.stop(), session.stop()]);
+  assert.equal(stops, 1);
+  assert.throws(() => session.request({ type: 'heartbeat' }), /has stopped/);
 });
 
 test('an unborn HEAD is reported as a repository without commits', async t => {

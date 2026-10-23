@@ -1,3 +1,4 @@
+import { accountFixtureEnv, handleAccountFixture } from '../scripts/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
@@ -71,6 +72,7 @@ test('explicit file sync and CLI watch transfer both ways, preserve conflicts an
   await mkdir(join(projectRoot, '.cantelop'), { recursive: true });
   const buildDirectory = await mkdtemp(join(projectRoot, '.cantelop', 'file-sync-'));
   const server = createServer(async (request, response) => {
+    if (await handleAccountFixture(request, response, 'fixture-token')) return;
     try {
       assert.equal(request.headers.authorization, 'Bearer fixture-token');
       const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(chunk);
@@ -83,9 +85,10 @@ test('explicit file sync and CLI watch transfer both ways, preserve conflicts an
     plugins: [createCantelopCompilerPlugin({ definition: join(projectRoot, 'src/cantelop.ts') })], outfile: join(buildDirectory, 'cli.mjs') });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address(); assert.ok(address && typeof address !== 'string');
+  const accountEnv = await accountFixtureEnv(root, `http://127.0.0.1:${address.port}`);
   const cli = (watch: boolean) => {
     const child = spawn(process.execPath, [join(buildDirectory, 'cli.mjs'), 'claude', 'sync', '--files', ...(watch ? ['--watch'] : [])], {
-      cwd: directory, env: { ...process.env, HOME: root, JUICED_WORKSPACE: project.workspace, CANTELOP_APP_SLUG: 'juiced', CANTELOP_EDGE_URL: `http://127.0.0.1:${address.port}`, CANTELOP_INTEGRATION_TOKEN: 'fixture-token' }, stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: directory, env: { ...process.env, ...accountEnv, HOME: root, JUICED_WORKSPACE: project.workspace, CANTELOP_APP_SLUG: 'juiced', CANTELOP_EDGE_URL: `http://127.0.0.1:${address.port}`, CANTELOP_INTEGRATION_TOKEN: 'fixture-token' }, stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stderr = ''; child.stderr.on('data', bytes => { stderr += bytes; }); child.stdout.resume(); child.stdin.end();
     const timeout = setTimeout(() => child.kill('SIGKILL'), 10_000);

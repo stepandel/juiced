@@ -2,9 +2,8 @@
 
 The CLI defaults to Juiced accounts. Juiced owns the Cantelop Fleet, provisioning
 and billing; customers sign in with GitHub or Google and bring their Claude login.
-Each personal account gets one isolated Cantelop App. Projects are Workspaces,
-and conversations remain Sessions. `--self-managed` selects the existing direct
-Cantelop workflow explicitly.
+Each personal account gets one isolated Fleet instance. Projects are Workspaces,
+and conversations remain Sessions. All clients use the authenticated service.
 
 ## Install and sign in
 

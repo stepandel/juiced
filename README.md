@@ -38,8 +38,7 @@ and pick up where you left off.
 - macOS 13.5+ or Linux with glibc 2.28+, on Apple Silicon, x64, or Linux arm64
 - Git, for working with Git repositories
 - A Claude account with Claude Code access (Juiced does not include model usage)
-- A [Juiced account](https://juiced.codes/pricing), or your own
-  [self-managed deployment](docs/self-managed.md)
+- A [Juiced account](https://juiced.codes/pricing)
 
 ## Install
 
@@ -132,7 +131,7 @@ juiced claude fast-forward             # apply them to your branch
 - [Git workspaces](docs/git-workspaces.md) and
   [local publication](docs/local-publication.md)
 - [Session recovery](docs/session-recovery.md)
-- [Self-managed deployment](docs/self-managed.md)
+- [Fleet deployment](docs/fleet-sdk-migration.md)
 
 ## Contributing
 

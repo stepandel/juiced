@@ -1,3 +1,4 @@
+import { accountFixtureEnv } from '../scripts/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -12,7 +13,7 @@ import { sessionKey } from '../src/runtime/session-list.js';
 
 const execute = promisify(execFile);
 
-test('built sessions command works in a pipe, uses the requested workspace, and never authenticates or starts Claude', { timeout: 60_000 }, async t => {
+test('built sessions command works in a pipe, uses the requested workspace, and never authenticates with or starts Claude', { timeout: 60_000 }, async t => {
   const root = await mkdtemp(join(tmpdir(), 'juiced-sessions-cli-'));
   const projectRoot = fileURLToPath(new URL('../', import.meta.url));
   await mkdir(join(projectRoot, '.cantelop'), { recursive: true });
@@ -27,7 +28,9 @@ test('built sessions command works in a pipe, uses the requested workspace, and 
     const calls = [];
     process.on('exit', () => process.stderr.write(JSON.stringify(calls)));
     globalThis.fetch = async (input, init) => {
-      const body = await new Request(input, init).json();
+      const request = new Request(input, init);
+      const body = await request.json();
+      if (new URL(request.url).pathname.endsWith('/bootstrap')) return Response.json({ id: 'jin_' + 'a'.repeat(32), status: 'ready', runtimeId: body.runtimeId, minimumCli: '0.2.0', error: null, operationId: 'fixture' });
       calls.push(body.command.type);
       if (body.command.type === 'workspace.inspect') {
         assert.deepEqual(body.workspace, { slug: 'chosen' });
@@ -46,7 +49,7 @@ test('built sessions command works in a pipe, uses the requested workspace, and 
     };
     await import('./cli.mjs');
   `);
-  const env = { ...process.env, CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-token', CANTELOP_EDGE_URL: 'https://fixture.invalid' };
+  const env = { ...process.env, ...await accountFixtureEnv(root, 'https://fixture.invalid'), CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-token', CANTELOP_EDGE_URL: 'https://fixture.invalid' };
   const listed = await execute(process.execPath, [bootstrap, '--workspace', 'chosen', 'claude', 'sessions'], { cwd: root, env, timeout: 10_000 });
   assert.match(listed.stdout, /Sessions in chosen/); assert.ok(listed.stdout.includes(id));
   assert.match(listed.stdout, /juiced --workspace chosen claude --session ID/);

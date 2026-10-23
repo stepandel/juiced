@@ -81,8 +81,7 @@ and [native runner architectures](https://docs.github.com/en/actions/reference/r
 
 Installer-owned releases check for updates before managed commands, install the
 service's recommended CLI automatically, then restart with the original arguments
-and stdin. Help, version and logout skip this check; self-managed commands and
-source/package-manager installations keep their existing installation method.
+and stdin. Help, version and logout skip this check; source/package-manager installations keep their existing installation method.
 `juiced update` checks explicitly without signing in. Checks time out after five
 seconds; an unavailable update check warns and lets a compatible CLI continue.
 Downloads retain checksum verification and atomic activation, and concurrent

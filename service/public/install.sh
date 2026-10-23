@@ -77,7 +77,7 @@ main() {
   fi
   [ "$actual" = "$expected" ] || fail 'Release checksum did not match; installation stopped.'
   tar -xzf "$staging/$asset" -C "$staging"
-  installed_version=$(JUICED_CONFIG_HOME="$staging/config" JUICED_MODE=managed \
+  installed_version=$(JUICED_CONFIG_HOME="$staging/config" \
     "$staging/juiced/bin/juiced" --version) ||
     fail 'This release cannot run on this system. Linux requires glibc 2.28+; macOS requires 13.5+.'
   [ "$installed_version" = "juiced $version" ] || fail 'The downloaded CLI version does not match the requested release.'

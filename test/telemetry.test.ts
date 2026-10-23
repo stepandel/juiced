@@ -13,7 +13,7 @@ async function fixture(t: TestContext) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const requests: { url: string; headers: Headers; body: unknown }[] = [];
   let output = '';
-  const env = { JUICED_CONFIG_HOME: root, JUICED_MODE: 'managed', JUICED_SERVICE_URL: 'https://juiced.example' };
+  const env = { JUICED_CONFIG_HOME: root, JUICED_SERVICE_URL: 'https://juiced.example' };
   const fetcher: typeof fetch = async (url, init) => {
     requests.push({ url: String(url), headers: new Headers(init?.headers), body: JSON.parse(String(init?.body ?? '{}')) });
     return new Response(null, { status: 202 });
@@ -60,9 +60,9 @@ test('disabled collection is not acknowledged as a recorded first run', async t 
   assert.equal(f.requests.length, 1);
 });
 
-test('environment opt-outs, CI and self-managed mode perform no telemetry IO', async t => {
+test('environment opt-outs and CI perform no telemetry IO', async t => {
   const f = await fixture(t);
-  for (const override of [{ JUICED_TELEMETRY_DISABLED: '1' }, { DO_NOT_TRACK: '1' }, { CI: 'true' }, { JUICED_MODE: 'self-managed' }]) {
+  for (const override of [{ JUICED_TELEMETRY_DISABLED: '1' }, { DO_NOT_TRACK: '1' }, { CI: 'true' }]) {
     const client = new CliTelemetry({ ...f.env, ...override }, f.fetcher, { write: () => { throw new Error('Unexpected notice'); } });
     assert.deepEqual(await client.headers(), {});
     await client.capture(f.env.JUICED_SERVICE_URL, 'cli_installed', { install_kind: 'fresh' });

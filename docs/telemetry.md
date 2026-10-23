@@ -31,8 +31,7 @@ curl -fsSL https://juiced.codes/install.sh | JUICED_TELEMETRY_DISABLED=1 sh
 ```
 
 Set the variable in your shell environment as well to opt out of future CLI runs,
-or run `juiced telemetry disable` after installation. CI environments and
-`--self-managed` / `JUICED_MODE=self-managed` always disable product telemetry.
+or run `juiced telemetry disable` after installation. CI environments always disable product telemetry.
 The first eligible invocation prints a notice before creating analytics metadata.
 Help, version, telemetry settings, and installer version checks do not count as
 first use. Logout rotates the anonymous identity while preserving the installation

@@ -18,20 +18,9 @@ helper build prerequisites when building the SDK from source.
 ## Definition and clients
 
 `src/cantelop.ts` exports the typed `fleet = cantelop.fleet(...)` definition.
-`src/app.ts` binds that compiled contract to the existing self-managed App
-profile with `fleet.connect()`. Managed CLI commands replace its transport with
-the authenticated Juiced relay; end users never receive Fleet principals.
-
-For standalone deployment, select `cantelop.self-managed.json` explicitly:
-
-```sh
-cantelop deploy --config cantelop.self-managed.json --create-app
-```
-
-Its App definition shares the same handlers, auth, image and environment
-requirements; a build test verifies its compiled runtime identity equals the
-Fleet's identity. `cantelop dev` can still expose the runtime through a local App
-profile for self-managed testing.
+CLI commands bind the compiled contract directly to the authenticated Juiced relay.
+End users never receive Fleet principals. There is one account-backed execution
+path. Development probes in `src/app.ts` authenticate through that same service.
 
 The service uses a generated backend under `service/.cantelop/client`.
 `npm run build:service:client` generates it without importing runtime-only code.

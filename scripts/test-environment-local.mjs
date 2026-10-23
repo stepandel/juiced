@@ -1,3 +1,4 @@
+import { accountFixtureEnv, handleAccountFixture } from './account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -11,6 +12,7 @@ const directory = await mkdtemp(join(tmpdir(), 'juiced-env-cli-'));
 const calls = [];
 let polls = 0;
 const server = createServer(async (request, response) => {
+  if (await handleAccountFixture(request, response, 'fixture-app-token')) return;
   try {
     assert.equal(request.headers.authorization, 'Bearer fixture-app-token');
     const chunks = []; for await (const bytes of request) chunks.push(bytes);
@@ -25,7 +27,7 @@ const server = createServer(async (request, response) => {
 try {
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/cli.mjs', import.meta.url)), 'env', 'set', 'GH_TOKEN', '--stdin'], {
-    cwd: directory, env: { PATH: '', HOME: directory, CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-app-token', CANTELOP_EDGE_URL: `http://127.0.0.1:${server.address().port}` }, stdio: ['pipe', 'pipe', 'pipe'],
+    cwd: directory, env: { ...await accountFixtureEnv(directory, `http://127.0.0.1:${server.address().port}`), PATH: '', HOME: directory, CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-app-token', CANTELOP_EDGE_URL: `http://127.0.0.1:${server.address().port}` }, stdio: ['pipe', 'pipe', 'pipe'],
   });
   let output = ''; for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { output += bytes; });
   child.stdin.end('fixture-gh-token\n');
@@ -34,7 +36,7 @@ try {
   assert.equal(code, 0, output);
   assert.deepEqual(calls[0], { type: 'app.environment.set', name: 'GH_TOKEN', value: 'fixture-gh-token', secret: true });
   assert.equal(calls.length, 3); assert.match(output, /Set GH_TOKEN/); assert.doesNotMatch(output, /fixture-gh-token/);
-  console.log('PASS: installed CLI sets a secret through the SDK, waits for propagation, and works with an empty PATH and no Cantelop CLI or login.');
+  console.log('PASS: installed CLI sets a secret through the SDK, waits for propagation, and works with an empty PATH and fixture account credentials and no Cantelop CLI.');
 } finally {
   server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
   await rm(directory, { recursive: true, force: true });
