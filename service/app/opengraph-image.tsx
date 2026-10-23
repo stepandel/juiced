@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { ImageResponse } from 'next/og';
 import { site } from '../src/site';
 import { LogoMark } from './site-components';
@@ -6,7 +8,13 @@ export const alt = site.title;
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
-export default function OpenGraphImage() {
+const font = (file: string) => readFile(join(process.cwd(), 'assets/fonts', file));
+// Custom fonts replace ImageResponse's default, so bring that default (Geist) along.
+const sans = font('Geist-Regular.ttf');
+// An ASCII subset of JetBrains Mono, so the install command reads as a shell line.
+const mono = font('JetBrainsMono-Regular.ttf');
+
+export default async function OpenGraphImage() {
   return new ImageResponse(
     (
       <div
@@ -50,15 +58,23 @@ export default function OpenGraphImage() {
           </span>
           <span
             style={{
-              marginTop: 32,
-              fontSize: 30,
+              display: 'flex',
+              alignSelf: 'flex-start',
+              gap: 16,
+              marginTop: 40,
+              padding: '16px 24px',
+              border: '1px solid #232b25',
+              borderRadius: 12,
+              background: '#121713',
+              fontFamily: 'JetBrains Mono',
+              fontSize: 26,
               lineHeight: 1.3,
               letterSpacing: 0,
               fontWeight: 400,
-              color: '#8b948a',
             }}
           >
-            Your terminal. A persistent cloud workspace.
+            <span style={{ color: '#bff04d' }}>$</span>
+            curl -fsSL https://juiced.codes/install.sh | sh
           </span>
         </div>
         {/* X draws the page title over the bottom-left corner, so keep it empty. */}
@@ -76,6 +92,13 @@ export default function OpenGraphImage() {
         </div>
       </div>
     ),
-    size,
+    {
+      ...size,
+      // The first font is the fallback for text without a matching fontFamily.
+      fonts: [
+        { name: 'Geist', data: await sans, weight: 400, style: 'normal' },
+        { name: 'JetBrains Mono', data: await mono, weight: 400, style: 'normal' },
+      ],
+    },
   );
 }
