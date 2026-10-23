@@ -38,7 +38,7 @@ export class ClaudeDecoder {
 }
 
 /** `suggestions` are Claude's own "don't ask again" permission updates for this request. */
-export type Approval = { id: string; tool: string; input: ClaudeFrame; description: string; local?: boolean; upload?: boolean; suggestions?: ClaudeFrame[] };
+export type Approval = { id: string; tool: string; input: ClaudeFrame; description: string; local?: boolean; upload?: boolean; localFiles?: 'list' | 'pull'; suggestions?: ClaudeFrame[] };
 /** Optional parts of an answer: a remembered grant, or what Claude should do instead. */
 export type ApprovalOptions = { suggestions?: ClaudeFrame[]; message?: string };
 export type SlashCommand = { name: string; description: string; argumentHint: string };

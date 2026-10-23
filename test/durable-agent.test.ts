@@ -16,6 +16,7 @@ import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/proto
 import { prepareAgentSession } from '../src/session-state.js';
 import { commandMenu } from '../src/tui/command-menus.js';
 import type { Publication, UploadRequest } from '../src/publish-protocol.js';
+import type { LocalFilesRequest } from '../src/local-files-protocol.js';
 import { until } from './fixtures/wait.js';
 
 async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 'test', agentOptions: ConstructorParameters<typeof RemoteAgent>[1] = {}) {
@@ -159,6 +160,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
   t.after(async () => { await agent.close(false); lifetime.abort(); await activity; await Promise.allSettled(replayWork); await service.dispose(); await rm(root, { recursive: true, force: true }); });
   return { root, agent, session, service, frame, raw, prompts, promptModes, launches, requests, requestIds, replays, stored, received, views,
     async upload(request: UploadRequest) { publications.set(request.id, undefined); await currentOutput.send({ type: 'local-upload', request }); },
+    async files(request: LocalFilesRequest, active = true) { if (active) publications.set(request.id, undefined); await currentOutput.send({ type: 'local-files', request }); },
     async publish(publication: Publication, active = true) { if (active) publications.set(publication.id, undefined); await currentOutput.send({ type: 'local-publish', publication }); },
     onReplay(hook: typeof replayHook) { replayHook = hook; },
     onOutput(hook: typeof outputHook) { outputHook = hook; },
@@ -260,6 +262,29 @@ test('reattachment restores a live publication offer and ignores historical or e
     assert.equal(reattached.approvals.size, 0);
     assert.equal(writes, 0);
   } finally { await reattached.close(false); }
+});
+
+test('selective file requests survive reconnect, recapture for approval, and ignore old journal offers', async t => {
+  let captures = 0, sends = 0, discarded = 0;
+  const options = { localPublish: { head: 'a'.repeat(40), async apply() { throw new Error('Not a publication'); }, files: {
+    async prepare() { captures++; return { files: 1, paths: ['.env'] }; },
+    async send() { sends++; return { status: 'applied' as const, message: 'Pulled selected files' }; },
+    async discard() { discarded++; },
+  } } };
+  const f = await fixture(t, 60_000, 'files-resume', options); await f.agent.start();
+  const request: LocalFilesRequest = { id: randomUUID(), kind: 'files', action: 'pull', summary: 'Use local configuration', expiresAt: Date.now() + 60_000, paths: ['.env'], destination: '.' };
+  await f.files(request); await until(() => f.agent.approvals.has(request.id));
+  assert.equal(captures, 1); assert.equal(sends, 0);
+  assert.equal(f.agent.approvals.get(request.id)!.localFiles, 'pull');
+  await f.agent.close(false); assert.ok(discarded > 0);
+  const resumed = new RemoteAgent(f.session, options); t.after(() => resumed.close(false));
+  await resumed.start(); await until(() => resumed.approvals.has(request.id));
+  assert.equal(captures, 2); await resumed.answer(request.id, true); assert.equal(sends, 1);
+  f.expireStream(); await until(() => f.replays.length > 1);
+  await f.files({ ...request, id: randomUUID() }, false);
+  await f.files({ ...request, id: randomUUID(), expiresAt: Date.now() - 1 });
+  await delay(50);
+  assert.equal(resumed.approvals.size, 0); assert.equal(captures, 2); assert.equal(sends, 1);
 });
 
 test('slow output acknowledgments use a bounded pipeline without skipping journal entries or replaying', async t => {

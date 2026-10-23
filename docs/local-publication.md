@@ -1,13 +1,69 @@
-# Local publication from Claude
+# Local transfers from Claude
 
-Interactive `juiced claude` Git sessions expose three tools through the built-in
+Interactive `juiced claude` Git sessions expose five tools through the built-in
 `juiced-local` MCP server. A standalone Claude plugin is not required. Juiced
 injects the server at native process startup through `--mcp-config`; it does not
 edit the project's `.mcp.json` or install a user-wide server.
 
 `publish_commits` and `publish_snapshot` transfer remote work to the laptop.
-`pull_local_changes` transfers laptop work into the remote checkout. All three
-require a separate local approval, even if Claude's tool permissions allow them.
+`pull_local_changes` transfers laptop work into the remote checkout.
+`list_local_files` and `pull_local_files` provide selective access to the paired
+laptop project. All five require a separate local approval, even if Claude's
+tool permissions allow them.
+
+## Select laptop files, including hidden and ignored files
+
+Ask Claude: **Use my local `.env` and the fixtures in `test/data`.** Claude can
+request those paths with `pull_local_files` without synchronizing Git history.
+For discovery, ask **List my local project files, including hidden files.**
+
+`list_local_files` takes a `summary`, optional `path` (default `.`),
+`include_hidden` (default `false`), and `offset` (default `0`). After local
+approval it returns up to 100 immediate entries with project-relative paths,
+types and sizes. `nextOffset`, when present, selects the next page. Ignored files
+are included; dotfiles require `include_hidden=true`. The listing shares no file
+contents and never includes `.git`.
+
+`pull_local_files` takes a `summary`, a nonempty `paths` array, and optional
+`destination` (default `.`). Paths are relative to the paired repository root,
+even if Claude starts in a subdirectory. Each path is preserved under the
+destination: `paths=["test/data", ".env"]`, `destination="incoming"` creates
+`incoming/test/data/...` and `incoming/.env`. Explicitly requested directories
+include their hidden and ignored files recursively. Empty directories are not
+copied. Selecting the entire project root is unsupported; use the Git upload
+tool for repository transfers.
+
+Before approval, the laptop pins the bytes in memory and shows the requested paths,
+destination, file count, names and byte count. Later laptop edits are excluded.
+Denial sends no listing or file bytes. Approved pulls upload in bounded chunks
+over the existing attached session, verify file sizes and SHA-256 digests, and
+apply only after the complete transfer validates. No extra cloud session, local
+port, or GitHub credential is required.
+
+Pulls leave local files and both Git indexes and HEADs unchanged. They work with
+unrelated remote edits and divergent Git history. Existing remote files are
+accepted only when their contents and executable status already match. Differing
+files, directories, symlink paths, `.git`, paths outside the project, and nested
+repositories are refused. Choose another destination to bring in an alternative
+copy for reconciliation. Files and directories use the runtime's umask, retaining
+each file's executable status. Other Claude sessions must close before application;
+the requesting session remains open. Do not run concurrent tools or background
+jobs writing to the destination. All destinations are checked before files are
+installed, but installation of multiple files is not a filesystem transaction.
+After a process or filesystem failure, inspect the destination before retrying.
+
+A pull is limited to 64 requested paths, 256 regular files, 16 MiB per file and
+64 MiB total. Directory walks are bounded to 4,096 visited paths and 32 nested
+levels; listings support directories with up to 4,096 matching entries. Symlinks
+can appear as listing entries but cannot be followed or pulled. Access outside
+the paired project and transfers between separate cloud workspaces are not
+implemented.
+
+The laptop must be connected and approve the request within five minutes.
+Reconnecting to a pending request captures a new snapshot for fresh approval;
+completed and cancelled journal offers cannot authorize another transfer. Restart
+existing native Claude processes after installing the matching CLI and runtime
+to discover the new tools.
 
 ## Pull laptop work into the remote checkout
 
@@ -173,8 +229,8 @@ npm run build:runtime
 `test/local-publish.test.ts` launches the actual stdio MCP program, transfers its
 artifacts through a real SDK adapter into disposable Git repositories, and checks
 commits, successive dirty snapshots, staging and binary preservation, conflicts,
-corruption and exclusive claims. Durable-agent and TUI tests cover replay,
-reattachment, local approval, denial and paste handling. Socket-based tests need
+corruption, selective files, dotfiles, listings and exclusive claims. Durable-agent
+and TUI tests cover replay, reattachment, local approval, denial and paste handling. Socket-based tests need
 permission to create private local sockets; no hosted deployment or model call is
 required. Both builds must be deployed from matching sources before hosted use.
 

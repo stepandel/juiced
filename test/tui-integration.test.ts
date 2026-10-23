@@ -240,7 +240,9 @@ test('permission UI preselects Yes, ignores early and pasted keys, offers rememb
     const offset = output.length;
     agent.approvals.set(id, { id, tool: 'Bash', input: { command: 'printf OK' }, description: '', ...extra });
     agent.emit('approvals');
-    await wait(() => stripVTControlCharacters(output.slice(offset)).includes(extra.upload ? 'from your laptop to the remote workspace?' : extra.local ? 'in your local checkout?' : 'Bash command'));
+    const expected = extra.localFiles === 'list' ? 'Share a local directory listing' : extra.localFiles === 'pull' ? 'Send selected local files'
+      : extra.upload ? 'from your laptop to the remote workspace?' : extra.local ? 'in your local checkout?' : 'Bash command';
+    await wait(() => stripVTControlCharacters(output.slice(offset)).includes(expected));
     return offset;
   };
   try {
@@ -280,6 +282,14 @@ test('permission UI preselects Yes, ignores early and pasted keys, offers rememb
     await delay(320);
     stdin.write('\r'); await wait(() => agent.answers.length === 5);
     assert.deepEqual(agent.answers[4], { allow: false }, 'Sending laptop files also defaults to No');
+    await ask('selected-files', { local: true, localFiles: 'pull', tool: 'Pull local files', input: { paths: ['.env'], destination: '.' } });
+    await wait(() => output.includes('Send selected local files'));
+    await delay(320); stdin.write('\r'); await wait(() => agent.answers.length === 6);
+    assert.deepEqual(agent.answers[5], { allow: false }, 'Selected file transfers default to No');
+    await ask('list-files', { local: true, localFiles: 'list', tool: 'List local files', input: { path: '.', includeHidden: true } });
+    await wait(() => output.includes('Share a local directory listing'));
+    await delay(320); stdin.write('\r'); await wait(() => agent.answers.length === 7);
+    assert.deepEqual(agent.answers[6], { allow: false }, 'Local listings require deliberate approval');
   } finally { lifetime.abort(); await running; }
   assert.equal(stdin.isRaw, false);
 });

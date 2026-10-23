@@ -69,6 +69,13 @@ must be closed, and remote work must be clean and able to fast-forward to the
 captured local commit. See [local publication](local-publication.md). The CLI
 upload commands above continue to require all sessions to be closed.
 
+For specific files, ask Claude to **pull my local `.env` and `test/data`**.
+`pull_local_files` includes explicitly selected hidden and ignored files after
+laptop approval, without moving Git HEAD or the index. `list_local_files` can
+first list a local directory, with optional dotfiles. Selective pulls accept
+unrelated remote edits and divergent history, but refuse to overwrite differing
+files. See [selective laptop access](local-publication.md#select-laptop-files-including-hidden-and-ignored-files).
+
 Use the snapshot command before the first launch to initialize a workspace with
 uncommitted work. Existing remote checkouts must be clean, with history that can
 advance to the local commit. Commit or reconcile remote work before sending

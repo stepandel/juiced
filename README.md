@@ -104,6 +104,11 @@ juiced claude sync --from-workspace    # import Claude's commits
 juiced claude fast-forward             # apply them to your branch
 ```
 
+During an interactive Git session, you can also ask Claude to **use my local
+`.env` and the fixtures in `test/data`**. Juiced previews and requests approval
+for those files on your laptop, including hidden and ignored files. See
+[selective local file access](docs/local-publication.md#select-laptop-files-including-hidden-and-ignored-files).
+
 ## Common commands
 
 | Command | What it does |

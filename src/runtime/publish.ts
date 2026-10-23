@@ -11,8 +11,11 @@ import type { TerminalEvent } from '../protocol.js';
 import { atomicJSON, createGitRuntime, projectPaths, readBinding } from './git.js';
 import { applyLocalUpload } from './local-upload.js';
 import { publishMcpConfiguration } from './publish-mcp.js';
+import { validateLocalFilesRequest, type LocalFilesRequest } from '../local-files-protocol.js';
+import { LocalFileReceiver } from './local-files.js';
 
-type Pending = { publication: LocalTransfer; controller: AbortController; owner?: string; completion?: { fingerprint: string; work: Promise<PublishResult> }; resolve(result: PublishResult): void };
+type Pending = { publication: LocalTransfer; controller: AbortController; receiver?: LocalFileReceiver; owner?: string; completion?: { fingerprint: string; work: Promise<PublishResult> }; resolve(result: PublishResult): void };
+type BridgeRequest = { name: string; summary: string; head?: string; includeUncommitted?: boolean; path?: string; includeHidden?: boolean; offset?: number; paths?: string[]; destination?: string };
 
 /** Remote stdio tools use a private Unix socket; only authenticated SDK clients can claim/apply. */
 export async function createPublishBridge(context: SessionHarnessContext, options: {
@@ -34,10 +37,11 @@ export async function createPublishBridge(context: SessionHarnessContext, option
   let closed = false, preparing = false;
   const release = async (id: string) => { await db.execute({ sql: 'DELETE FROM juiced_publication_leases WHERE project = ? AND id = ?', args: [options.directoryName, id] }); };
 
-  async function publish(request: { name: string; summary: string; head?: string; includeUncommitted?: boolean }, connection: Socket): Promise<PublishResult> {
+  async function publish(request: BridgeRequest, connection: Socket): Promise<PublishResult> {
     if (closed || preparing || pending.size) throw new Error('Another local publication is still pending.');
-    if (!request || !['publish_commits', 'publish_snapshot', 'pull_local_changes'].includes(request.name) || typeof request.summary !== 'string' || !request.summary.trim() || request.summary.length > 2000 ||
-        Object.keys(request).some(key => !['name', 'summary', 'head', 'includeUncommitted'].includes(key)) || request.head !== undefined && (request.name !== 'publish_commits' || !validOid(request.head)) || request.includeUncommitted !== undefined && (request.name !== 'pull_local_changes' || typeof request.includeUncommitted !== 'boolean')) throw new Error('Invalid publication request.');
+    const fields: Record<string, string[]> = { publish_commits: ['head'], publish_snapshot: [], pull_local_changes: ['includeUncommitted'], list_local_files: ['path', 'includeHidden', 'offset'], pull_local_files: ['paths', 'destination'] };
+    if (!request || !Object.hasOwn(fields, request.name) || typeof request.summary !== 'string' || !request.summary.trim() || request.summary.length > 2000 ||
+        Object.keys(request).some(key => !['name', 'summary', ...fields[request.name]!].includes(key)) || request.head !== undefined && !validOid(request.head) || request.includeUncommitted !== undefined && typeof request.includeUncommitted !== 'boolean') throw new Error('Invalid publication request.');
     preparing = true;
     const id = randomUUID(), expiresAt = Date.now() + PUBLISH_TIMEOUT_MS;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -47,7 +51,15 @@ export async function createPublishBridge(context: SessionHarnessContext, option
       if (!lease.rows.length) throw new Error('Another session is publishing this project. Wait for it to finish.');
       acquired = true;
       let publication: LocalTransfer;
-      if (request.name === 'pull_local_changes') {
+      if (request.name === 'list_local_files' || request.name === 'pull_local_files') {
+        const binding = await readBinding(paths.metadata);
+        if (binding?.binding !== options.binding) throw new Error('The workspace binding changed.');
+        const files = { id, kind: 'files', summary: request.summary, expiresAt,
+          ...(request.name === 'list_local_files' ? { action: 'list', path: request.path, includeHidden: request.includeHidden, offset: request.offset }
+            : { action: 'pull', paths: request.paths, destination: request.destination }) } as LocalFilesRequest;
+        validateLocalFilesRequest(files);
+        publication = files;
+      } else if (request.name === 'pull_local_changes') {
         const binding = await readBinding(paths.metadata);
         if (!binding || binding.binding !== options.binding) throw new Error('The workspace binding changed.');
         const upload: UploadRequest = { id, kind: 'upload', summary: request.summary, expiresAt,
@@ -70,18 +82,28 @@ export async function createPublishBridge(context: SessionHarnessContext, option
         const controller = new AbortController();
         const cancel = () => finish({ status: 'failed', message: 'Transfer cancelled or disconnected. Check the destination checkout before retrying.' });
         const finish = (result: PublishResult) => { controller.abort(); connection.off('close', cancel); resolve(result); };
-        pending.set(id, { publication, controller, resolve: finish });
+        pending.set(id, { publication, controller, resolve: finish,
+          ...(publication.kind === 'files' && publication.action === 'pull' ? { receiver: new LocalFileReceiver(context, options, publication, AbortSignal.any([signal, controller.signal])) } : {}) });
         connection.once('close', cancel);
         timer = setTimeout(() => finish({ status: 'failed', message: 'No local application was confirmed before the publication deadline. Reconnect Juiced and check the local checkout before retrying.' }), Math.max(1, expiresAt - Date.now()));
-        void options.send(publication.kind === 'upload' ? { type: 'local-upload', request: publication } : { type: 'local-publish', publication }).catch(reject);
+        void options.send(publication.kind === 'files' ? { type: 'local-files', request: publication } : publication.kind === 'upload' ? { type: 'local-upload', request: publication } : { type: 'local-publish', publication }).catch(reject);
       });
     } finally {
       if (timer) clearTimeout(timer);
-      pending.delete(id); preparing = false;
-      if (acquired) await release(id);
-      // Failed artifacts are retained remotely for diagnosis/review. Local
-      // imports retain immutable refs and downloaded patches independently.
-      await options.send({ type: 'local-publish-done', id }).catch(() => {});
+      const item = pending.get(id);
+      item?.controller.abort();
+      try {
+        await item?.completion?.work.catch(() => {});
+        await item?.receiver?.close();
+      } finally {
+        pending.delete(id); preparing = false;
+        try { if (acquired) await release(id); }
+        finally {
+          // Git artifacts and imported refs are retained for review; selective
+          // file staging is private and removed when its request finishes.
+          await options.send({ type: 'local-publish-done', id }).catch(() => {});
+        }
+      }
     }
   }
 
@@ -93,7 +115,7 @@ export async function createPublishBridge(context: SessionHarnessContext, option
     connection.on('data', data => {
       if (accepted) return;
       input += data;
-      if (Buffer.byteLength(input) > 8000) { connection.destroy(); return; }
+      if (Buffer.byteLength(input) > 16000) { connection.destroy(); return; }
       if (!input.includes('\n')) return;
       accepted = true;
       const task = (async () => {
@@ -127,18 +149,36 @@ export async function createPublishBridge(context: SessionHarnessContext, option
       if (item.owner && item.owner !== command.client) throw new Error('Another local client has claimed this publication.');
       if (command.type === 'publish-claim') { item.owner = command.client; return; }
       if (item.owner !== command.client) throw new Error('Claim the publication before returning its result.');
+      if (command.type === 'publish-files') {
+        if (!item.receiver || item.completion) throw new Error('This request cannot receive local file chunks.');
+        await item.receiver.input(command);
+        return;
+      }
       validatePublishResult(command.result);
       if (command.result.uploadId !== undefined && item.publication.kind !== 'upload') throw new Error('Unexpected local upload result.');
+      if (command.result.listing !== undefined && (item.publication.kind !== 'files' || item.publication.action !== 'list')) throw new Error('Unexpected local listing result.');
       const fingerprint = JSON.stringify(command.result);
       if (item.completion && item.completion.fingerprint !== fingerprint) throw new Error('Conflicting publication result retry.');
       item.completion ??= { fingerprint, work: (async () => {
         let result = command.result;
-        if (item.publication.kind === 'upload' && publishSucceeded(result)) {
+        if (item.publication.kind === 'files' && publishSucceeded(result)) {
+          try {
+            if (item.publication.action === 'pull') result = await item.receiver!.apply();
+            else {
+              const listing = result.listing;
+              const request = item.publication;
+              if (!listing || listing.path !== request.path || listing.entries.some(entry => {
+                const child = request.path === '.' ? entry.path : entry.path.startsWith(request.path + '/') ? entry.path.slice(request.path.length + 1) : '';
+                return !child || child.includes('/') || !request.includeHidden && child.startsWith('.');
+              })) throw new Error('The local client returned an invalid listing for this request.');
+            }
+          } catch (error) { result = { status: 'conflict', message: error instanceof Error ? error.message : 'Local file application failed. Inspect the workspace before retrying.' }; }
+        } else if (item.publication.kind === 'upload' && publishSucceeded(result)) {
           try {
             if (!result.uploadId) throw new Error('The local client did not prepare an upload. Rebuild the CLI.');
             result = await applyLocalUpload(context, options, item.publication, result.uploadId, AbortSignal.any([signal, item.controller.signal, AbortSignal.timeout(Math.max(1, item.publication.expiresAt - Date.now()))]));
           } catch (error) { result = { status: 'conflict', message: error instanceof Error ? error.message : 'Remote application failed. Inspect the workspace before retrying.' }; }
-        } else if (item.publication.kind !== 'upload' && publishSucceeded(command.result)) {
+        } else if ((item.publication.kind === 'commits' || item.publication.kind === 'snapshot') && publishSucceeded(command.result)) {
           // Fence the short acknowledgment transaction against another session
           // acquiring an expired project lease while metadata is being written.
           const now = Date.now();
