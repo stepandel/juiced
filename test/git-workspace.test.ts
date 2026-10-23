@@ -5,6 +5,8 @@ import { chmod, cp, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, symli
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import timers from 'node:timers/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { createClient } from '@libsql/client';
 import { CantelopClient, RemoteAppError, type AppCommandEnvelope, type SessionEvent } from '@cantelop/sdk';
 import type { WorkspaceDatabase } from '@cantelop/sdk/session';
@@ -15,10 +17,11 @@ import { createGitRuntime } from '../src/runtime/git.js';
 import { acquireCheckout, CheckoutBusy } from '../src/runtime/project-state.js';
 import { createTerminal } from '../src/runtime/terminal.js';
 import { transferFailure } from '../src/agent/publications.js';
-import type { GitCommand } from '../src/git-protocol.js';
+import { UPLOAD_CHUNK_BYTES, type GitCommand } from '../src/git-protocol.js';
+import { until } from './fixtures/wait.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from '../src/protocol.js';
 
-async function fixture(t: test.TestContext) {
+async function fixture(t: test.TestContext, beforeChunk?: () => Promise<void>) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'juiced-git-test-')));
   const local = join(root, 'local'); const remote = join(root, 'remote');
   await mkdir(local); await mkdir(remote);
@@ -49,6 +52,7 @@ async function fixture(t: test.TestContext) {
           const command = operation.message;
           assert.equal(command.type, 'git'); if (command.type !== 'git') throw new Error('Expected Git command');
           commands.push(command);
+          if (command.action === 'chunk') await beforeChunk?.();
           let runtime = runtimes.get(id);
           if (!runtime) { runtime = createGitRuntime(context(id), remote); runtimes.set(id, runtime); }
           let reply: TerminalReply;
@@ -233,6 +237,119 @@ test('simultaneous first launches converge on one checkout', { timeout: 30_000 }
   await Promise.all([first.send(false, true), second.send(false, true)]);
   assert.equal(await gitText(f.target, ['rev-parse', 'HEAD']), await gitText(f.local, ['rev-parse', 'HEAD']));
   await first.close(); await second.close();
+});
+
+test('unchanged commits send no bundle and patch-only uploads preserve staged and unstaged edits', async t => {
+  const f = await fixture(t), client = await f.client();
+  await client.send(false);
+  const before = await lstat(join(f.target, 'README.md'));
+  f.commands.length = 0;
+  await client.send(false);
+  const begin = f.commands.find(command => command.action === 'begin');
+  assert.ok(begin?.action === 'begin');
+  assert.equal(begin.manifest.base, begin.manifest.head);
+  assert.deepEqual(begin.manifest.files, []);
+  assert.ok(!f.commands.some(command => command.action === 'chunk'));
+  assert.equal((await lstat(join(f.target, 'README.md'))).ino, before.ino, 'A no-op sync keeps the checkout in place');
+  await writeFile(join(f.local, 'README.md'), 'staged\n');
+  await git(f.local, ['add', 'README.md']);
+  await writeFile(join(f.local, 'README.md'), 'unstaged\n');
+  f.commands.length = 0;
+  await client.send(true);
+  const patch = f.commands.find(command => command.action === 'begin');
+  assert.ok(patch?.action === 'begin');
+  assert.ok(patch.manifest.files.every(file => file.name !== 'bundle'));
+  assert.equal(await gitText(f.target, ['show', ':README.md']), 'staged');
+  assert.equal(await readFile(join(f.target, 'README.md'), 'utf8'), 'unstaged\n');
+  await client.close();
+});
+
+test('runtimes without part support receive a full bundle for an unchanged HEAD', async t => {
+  const f = await fixture(t), repository = (await discoverRepository(f.local))!;
+  const legacy = await createUpload(repository, false, repository.head), parts = await createUpload(repository, false, repository.head, undefined, true);
+  t.after(() => Promise.all([legacy.close(), parts.close()]));
+  assert.equal(legacy.manifest.base, undefined);
+  assert.deepEqual(legacy.manifest.files.map(file => file.name), ['bundle']);
+  assert.equal(parts.manifest.base, repository.head);
+  assert.deepEqual(parts.manifest.files, []);
+});
+
+test('Git uploads pipeline a bounded window and accept reversed part arrival with a retried receipt', { timeout: 30_000 }, async t => {
+  let holding = true;
+  const waiting: Array<() => void> = [];
+  const f = await fixture(t, async () => { if (holding) await new Promise<void>(resolve => waiting.push(resolve)); });
+  await writeFile(join(f.local, 'large.bin'), randomBytes(2 * 1024 * 1024));
+  await git(f.local, ['add', '.']); await git(f.local, ['commit', '-m', 'large upload']);
+  const client = await f.client();
+  f.failNextChunk();
+  const sending = client.send(false);
+  try {
+    await until(() => waiting.length === 8);
+    assert.equal(f.commands.filter(command => command.action === 'chunk').length, 8);
+    assert.ok(!f.commands.some(command => command.action === 'finish'));
+  } finally {
+    holding = false;
+    waiting.reverse().forEach(resolve => resolve());
+    await sending;
+  }
+  assert.deepEqual(await readFile(join(f.target, 'large.bin')), await readFile(join(f.local, 'large.bin')));
+  assert.equal(f.commands.filter(command => command.action === 'finish').length, 1);
+  await client.close();
+});
+
+test('immutable upload parts survive replacement and reject missing or conflicting bytes before application', async t => {
+  const f = await fixture(t);
+  await writeFile(join(f.local, 'large.bin'), randomBytes(UPLOAD_CHUNK_BYTES * 2));
+  await git(f.local, ['add', '.']); await git(f.local, ['commit', '-m', 'parts']);
+  const repository = (await discoverRepository(f.local))!, upload = await createUpload(repository, false);
+  t.after(() => upload.close());
+  let runtime = createGitRuntime(f.context('parts'), f.remote);
+  const base = { type: 'git' as const, directoryName: f.project.directoryName, binding: repository.binding, id: upload.id };
+  await runtime.handle({ ...base, action: 'begin', manifest: upload.manifest });
+  const bytes = await readFile(join(upload.directory, 'bundle'));
+  const parts = Array.from({ length: Math.ceil(bytes.length / UPLOAD_CHUNK_BYTES) }, (_, i) => ({ ...base, action: 'chunk' as const, part: true, file: 'bundle' as const, offset: i * UPLOAD_CHUNK_BYTES, data: bytes.subarray(i * UPLOAD_CHUNK_BYTES, (i + 1) * UPLOAD_CHUNK_BYTES).toString('base64') }));
+  await Promise.all(parts.slice(1).reverse().map(part => runtime.handle(part)));
+  await assert.rejects(runtime.handle({ ...base, action: 'finish' }), /Incomplete or corrupt/);
+  await assert.rejects(lstat(f.target), /ENOENT/);
+  runtime = createGitRuntime(f.context('parts'), f.remote);
+  await Promise.all([runtime.handle(parts[0]!), runtime.handle(parts[0]!)]);
+  await assert.rejects(runtime.handle({ ...parts[0]!, data: Buffer.alloc(UPLOAD_CHUNK_BYTES).toString('base64') }), /Conflicting transfer retry/);
+  await runtime.handle({ ...base, action: 'finish' });
+  await runtime.handle({ ...base, action: 'finish' });
+  await runtime.handle({ ...base, action: 'apply', initializeOnly: false });
+  assert.deepEqual(await readFile(join(f.target, 'large.bin')), await readFile(join(f.local, 'large.bin')));
+});
+
+test('a service device quota rejection waits for the next quota minute with the same delivery identity', { timeout: 5000 }, async t => {
+  const f = await fixture(t), repository = (await discoverRepository(f.local))!;
+  let resume!: () => void;
+  const waits: number[] = [];
+  const timer = t.mock.method(timers, 'setTimeout', ((ms: number) => {
+    waits.push(ms);
+    return new Promise<void>(resolve => { resume = resolve; });
+  }) as typeof timers.setTimeout);
+  syncBuiltinESMExports();
+  t.after(() => { timer.mock.restore(); syncBuiltinESMExports(); });
+  const ids: string[] = [];
+  const client = new GitWorkspaceClient({ session: () => ({
+    id: 'quota-test',
+    async request(_command: TerminalCommand, options: { id: string }) {
+      ids.push(options.id);
+      if (ids.length === 1) throw new RemoteAppError('command_outcome_unknown', 0, undefined, {
+        cause: Object.assign(new Error('device quota'), { code: 'rate_limit_exceeded', status: 429 }),
+      });
+      return { ok: true as const, git: { status: { initialized: false } } };
+    },
+  }) } as unknown as ConstructorParameters<typeof GitWorkspaceClient>[0], f.project, repository, f.lifetime.signal);
+  const pending = client.status();
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(waits.length, 1);
+  assert.ok(waits[0]! > 1000 && waits[0]! <= 61_000, 'The wait ends just after the current quota minute');
+  assert.equal(ids.length, 1);
+  resume();
+  assert.deepEqual(await pending, { initialized: false });
+  assert.equal(ids.length, 2);
+  assert.equal(ids[0], ids[1]);
 });
 
 test('corrupt and conflicting upload chunks fail before checkout publication', async t => {

@@ -66,6 +66,19 @@ test('prepare bootstraps known accounts directly and discovers accounts only whe
   }
 });
 
+test('valid shared credentials do not acquire the refresh lock', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'juiced-token-read-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AccountClient({ JUICED_CONFIG_HOME: root, JUICED_SERVICE_URL: 'https://service.example' }, async () => { throw new Error('Unexpected refresh'); });
+  await client.store.write({ origin: client.origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000 });
+  t.mock.method(client.store, 'locked', () => { throw new Error('Unexpected refresh lock'); });
+  const tokens = await Promise.all(Array.from({ length: 16 }, () => client.token(new AbortController().signal)));
+  assert.deepEqual(new Set(tokens), new Set(['a'.repeat(40)]));
+  await assert.rejects(client.token(AbortSignal.abort()), /abort/i);
+  await client.store.clear();
+  await assert.rejects(client.token(new AbortController().signal), /Sign in/);
+});
+
 test('credentials are private, origin scoped and serialize refresh across concurrent calls', async () => {
   const root = await mkdtemp(join(tmpdir(), 'juiced-credentials-'));
   try {

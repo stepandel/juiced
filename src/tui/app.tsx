@@ -134,8 +134,13 @@ function Juiced({ agent, argv, workspace, rows, columns, reflow, quit }: { agent
   // Reattaching skips the intro so saved turns print right away.
   if (intro && (conversation.history.length || conversation.live.length || approvals.length)) setIntro(false);
   const live = useMemo(() => liveEntries(conversation), [conversation.live, conversation.printed]);
-  const entries = useMemo(() => [...conversation.history.flatMap(item => item.entries), ...conversation.live], [conversation.history, conversation.live]);
-  const history = useMemo(() => entries.filter(entry => entry.kind === 'user').map(entry => entry.text), [entries]);
+  const completed = useMemo(() => conversation.history.flatMap(item => item.entries), [conversation.history]);
+  const prompts = useMemo(() => completed.filter(entry => entry.kind === 'user').map(entry => entry.text), [completed]);
+  const livePrompt = conversation.live.find(entry => entry.kind === 'user')?.text;
+  const history = useMemo(() => livePrompt === undefined ? prompts : [...prompts, livePrompt], [prompts, livePrompt]);
+  // The full transcript is needed only while Ctrl+O is open. Streaming text
+  // otherwise leaves completed entries and prompt navigation untouched.
+  const entries = useMemo(() => transcript ? [...completed, ...conversation.live] : [], [transcript, completed, conversation.live]);
   const scrollback = useMemo(() => [{ id: 'header', entries: [] as Entry[] }, ...conversation.history.map(turn => ({ id: String(turn.id), entries: turn.entries }))], [conversation.history]);
   const tokens = turnTokens(conversation);
   const spinner = closing ? 'Disconnecting' : status === 'connecting' ? 'Connecting to Claude' : status === 'configuring' ? 'Updating Claude' : status === 'interrupting' ? 'Interrupting' : status === 'working' ? turn.current?.verb : undefined;
