@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-23T16:57:56.594Z",
+  "baselineCommit": "86c15e4ee5a4c1f4cf03396fc45ae31168b0dc92",
+  "candidateSourceSha256": "6eb4f7c1d5af1964a2d36ec6d628edcef5ee57540640635bb4651dc070923e01",
+  "platform": "darwin",
+  "nodeVersion": "v26.8.1",
+  "fixture": {
+    "fileCount": 256,
+    "bytesPerFile": 262144,
+    "totalBytes": 67108864
+  },
+  "scenarios": [
+    {
+      "scenario": "clean",
+      "measurementsMs": {
+        "baseline": [
+          338,
+          345,
+          321
+        ],
+        "candidate": [
+          128,
+          136,
+          132
+        ]
+      },
+      "medianMs": {
+        "baseline": 338,
+        "candidate": 132
+      }
+    },
+    {
+      "scenario": "one dirty file",
+      "measurementsMs": {
+        "baseline": [
+          359,
+          349,
+          348
+        ],
+        "candidate": [
+          161,
+          147,
+          144
+        ]
+      },
+      "medianMs": {
+        "baseline": 349,
+        "candidate": 147
+      }
+    }
+  ],
+  "verification": "Every candidate snapshot equaled its baseline; the real index remained byte-for-byte unchanged.",
+  "limitations": [
+    "Local disposable filesystem fixture, not production end-to-end latency.",
+    "Three alternating pairs per scenario; no latency percentiles or cold-storage guarantee."
+  ]
+}

@@ -87,9 +87,15 @@ retains the CLI's status 130.
 
 ## Git snapshots and ignored files
 
-Git supplies the comparison model. For `peek`, each side seeds a private index from its
-existing index entries, stages current contents into a temporary object
-directory, and writes a temporary tree. This captures tracked edits, deletions,
+Git supplies the comparison model. For `peek`, each side copies its existing
+index into a private directory, stages current contents into a temporary object
+directory, and writes a temporary tree. Valid Git stat entries avoid rereading
+unchanged ordinary files. Inspection clears assume-unchanged, skip-worktree,
+fsmonitor and untracked-cache flags in the copy, forces ctime checks, verifies
+file readability, and preserves Git's protection against racy timestamps.
+Files needing clean filters, attributes-based conversions, or automatic line
+ending conversion use a rebuilt index with fresh hashes instead. No computed
+snapshot or file hash is cached across commands. This captures tracked edits, deletions,
 staged additions, and non-ignored untracked files. The real index, Git object
 store, refs, and working files are unchanged. No temporary commit is created.
 `ls` uses local repository metadata to resolve the existing workspace pairing and
@@ -155,6 +161,12 @@ The client first uses SDK `workspace.inspect()` on the selected slug. Missing
 workspaces stop there. Existing workspaces are addressed by their inspected
 canonical ID for subsequent requests, preventing a replacement slug from
 redirecting the operation.
+
+For managed inspection commands, bootstrap checks runtime compatibility and
+supplies the recommended CLI release. The client applies any required update
+before inspection without a separate public config request. Older services that
+omit this field retain the config fallback. An already-ready installation does
+not publish an unnecessary provisioning wake-up during bootstrap.
 
 The Juiced runtime handles a dedicated `inspect` message through a session
 activity queue. A stable inspection session is selected by the canonical workspace

@@ -64,7 +64,7 @@ export async function createPublishBridge(context: SessionHarnessContext, option
         if (!binding || binding.binding !== options.binding) throw new Error('The workspace binding changed.');
         const upload: UploadRequest = { id, kind: 'upload', summary: request.summary, expiresAt,
           head: await gitText(paths.target, ['rev-parse', 'HEAD']), sourceBranch: binding.sourceBranch,
-          includeUncommitted: request.includeUncommitted ?? true };
+          includeUncommitted: request.includeUncommitted ?? true, uploadParts: true };
         publication = upload;
       } else {
         const kind = request.name === 'publish_commits' ? 'commits' : 'snapshot';

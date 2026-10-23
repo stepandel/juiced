@@ -7,6 +7,8 @@ import { CantelopClient } from '@cantelop/sdk';
 import type { JuicedFleet } from '../src/platform';
 import { Accounts, type Account, type Installation } from '../src/accounts';
 import { config } from '../src/config';
+import { application } from '../src/app';
+import type { Auth } from '../src/auth';
 const cfg = config({
   NODE_ENV: 'test',
   JUICED_SERVICE_URL: 'http://127.0.0.1:3000',
@@ -84,7 +86,20 @@ test('relay pins server App credentials and streams without buffering or losing 
   });
   const platform = new Platform(new CantelopClient().fleet({name:'juiced',runtime:{receive(){},[Symbol.for('dev.cantelop.sdk.compiled-runtime.v1')]:'runtime-v1'}}) as JuicedFleet);
   const input = request('/commands/stream', envelope('stream'));
-  const response = await relay(input, '/commands/stream', context(platform));
+  input.headers.set('Authorization', 'Bearer ' + 'x'.repeat(40));
+  input.headers.set('X-Juiced-Timing', '1');
+  const ctx = context(platform);
+  const response = await application({ ...ctx, auth: {} as Auth,
+    pool: { async query(sql: string) {
+      if (sql.includes('"oauthAccessToken"')) return { rows: [{ user_id: 'user', device_id: 'dev_test', expires_at: new Date(Date.now() + 300000), scopes: ['juiced'], resources: [cfg.origin] }] };
+      if (sql.includes('api_limits')) return { rows: [{ count: 1 }] };
+      assert.fail('Unexpected database operation');
+    } } as unknown as Pool,
+    accounts: { entitled: () => true, async authorize() { return account; }, async installation() { return installation; } } as unknown as Accounts,
+  })(new Request('http://127.0.0.1:3000/v1/accounts/' + account.id + '/runtime/commands/stream', input));
+  const timing = response.headers.get('server-timing')!;
+  for (const phase of ['auth', 'rate_limit', 'account', 'installation', 'fleet_connection', 'edge', 'service_total']) assert.match(timing, new RegExp(`${phase};dur=\\d+\\.\\d`));
+  assert.doesNotMatch(timing, /Bearer|client-device-token|server-app-token|tenant-a|SELECT/);
   assert.equal(upstreamRequest!.headers.get('authorization'), 'Bearer server-app-token');
   assert.equal(new URL(upstreamRequest!.url).origin, 'https://tenant-a.example');
   const reader = response.body!.getReader();
@@ -130,4 +145,59 @@ test('bounded upload rejects incremental oversize without buffering an unbounded
   const reader = boundedBody(input, 10)!.getReader();
   assert.equal((await reader.read()).value!.length, 8);
   await assert.rejects(reader.read(), { code: 'request_too_large' });
+});
+
+test('slow relay authorization never overlaps and a sustained stall cancels the stream', async t => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  let checks = 0, authorized = 0, cancelled = false;
+  let release!: () => void;
+  const waiting = new Promise<void>(resolve => { release = resolve; });
+  t.after(release);
+  const platform = { async connection() { return { async fetch() {
+    return new Response(new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } }));
+  } }; } } as unknown as Platform;
+  const ctx = context(platform);
+  ctx.pool = { async query() { checks++; await waiting; return { rowCount: 1 }; } } as unknown as Pool;
+  ctx.accounts = { async authorize() { authorized++; return account; }, async installation() { return installation; } } as unknown as Accounts;
+  const response = await relay(request('/commands/stream', envelope('stream')), '/commands/stream', ctx);
+  t.mock.timers.tick(5000);
+  assert.equal(checks, 1);
+  t.mock.timers.tick(5000);
+  assert.equal(checks, 1, 'The next interval cannot start another check while the first is pending');
+  assert.equal(cancelled, false, 'A briefly slow check keeps the stream open');
+  t.mock.timers.tick(25000);
+  assert.equal(checks, 1);
+  assert.equal(cancelled, true);
+  release();
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(authorized, 0, 'A timed-out check stops before its next database query');
+  t.mock.timers.tick(15000);
+  assert.equal(checks, 1);
+  await response.body!.cancel();
+});
+
+test('healthy relay checks continue and a revoked device stops later checks', async t => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  let checks = 0, installations = 0, active = true, cancelled = false;
+  const platform = { async connection() { return { async fetch() {
+    return new Response(new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } }));
+  } }; } } as unknown as Platform;
+  const ctx = context(platform);
+  ctx.pool = { async query() { checks++; return { rowCount: active ? 1 : 0 }; } } as unknown as Pool;
+  ctx.accounts = { async authorize() { return account; }, async installation() { installations++; return installation; } } as unknown as Accounts;
+  const response = await relay(request('/commands/stream', envelope('stream')), '/commands/stream', ctx);
+  t.mock.timers.tick(5000);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(installations, 1);
+  t.mock.timers.tick(5000);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(installations, 2);
+  active = false;
+  t.mock.timers.tick(5000);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(cancelled, true);
+  t.mock.timers.tick(15000);
+  assert.equal(checks, 3);
+  assert.equal(installations, 2);
+  await response.body!.cancel();
 });

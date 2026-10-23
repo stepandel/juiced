@@ -190,3 +190,11 @@ test('managed updates use the service-approved CLI instead of a newer unqualifie
   const updater = new CliUpdater({ ...options, fetcher: async () => Response.json({ cliVersion: '0.2.2' }) });
   assert.equal(await updater.check(signal(), 'mismatch'), f.command);
 });
+
+test('bootstrap recommendations avoid the extra release request and still install before work', async t => {
+  const f = await fixture(t);
+  const options = { ...f.options, fetcher: async () => { assert.fail('Bootstrap already supplied the approved release'); } };
+  assert.equal(await new CliUpdater(options).check(signal(), 'startup', '0.2.1'), undefined);
+  assert.equal(await new CliUpdater(options).check(signal(), 'startup', '0.2.2'), f.command);
+  await assert.rejects(new CliUpdater(options).check(signal(), 'manual', 'invalid'), /invalid CLI release/);
+});

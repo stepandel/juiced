@@ -13,6 +13,7 @@ import { ServiceError, type Config } from './config';
 import { runtimeJSON } from './terminals';
 import type { ProtocolEnvelope } from '@cantelop/sdk/protocol';
 import type { Platform } from './platform';
+import { timed } from './timing';
 
 export async function relay(
   request: Request,
@@ -95,19 +96,19 @@ export async function relay(
     request.headers.get('x-cantelop-session-runtime') !== i.runtime_id
   )
     throw new ServiceError('cli_upgrade_required', 409);
-  const connection = await ctx.platform.connection(i.platform_id, { appId: i.app_id, runtimeId: i.runtime_id });
+  const connection = await timed('fleet_connection', () => ctx.platform.connection(i.platform_id!, { appId: i.app_id, runtimeId: i.runtime_id }));
   const headers = new Headers();
   if (contentType) headers.set('Content-Type', contentType);
   headers.set('X-Cantelop-Session-Runtime', i.runtime_id);
   if (type === 'stream') headers.set('Accept', 'text/event-stream');
-  const upstream = await connection.fetch(
+  const upstream = await timed('edge', () => connection.fetch(
     new Request(url, {
       method: request.method,
       headers,
       signal,
       ...(body === undefined ? {} : ({ body, duplex: 'half' } as RequestInit)),
     }),
-  );
+  ));
   if (
     type === 'auth' &&
     envelope?.command.type === 'auth' &&
@@ -161,12 +162,25 @@ export async function relay(
   outHeaders.set('X-Accel-Buffering', 'no');
   if (!upstream.body) return new Response(null, { status: upstream.status, headers: outHeaders });
   const reader = upstream.body.getReader();
+  let checking = false, stalled = 0;
   const recheck = setInterval(
-    () =>
+    () => {
+      if (signal.aborted) return;
+      // Checks never overlap. A slow read is tolerated for 30 seconds so a brief
+      // database slowdown does not close every stream at once; a sustained
+      // stall still fails closed.
+      if (checking) {
+        if (++stalled >= 6) cancel.abort();
+        return;
+      }
+      checking = true;
+      stalled = 0;
       void (async () => {
         if (!(await deviceActive(ctx.pool, ctx.identity))) throw new Error('revoked');
-        const a = await ctx.accounts.authorize(ctx.identity, ctx.account.id),
-          live = await ctx.accounts.installation(a.id);
+        signal.throwIfAborted();
+        const a = await ctx.accounts.authorize(ctx.identity, ctx.account.id);
+        signal.throwIfAborted();
+        const live = await ctx.accounts.installation(a.id);
         if (
           a.status !== 'active' ||
           !live ||
@@ -177,14 +191,17 @@ export async function relay(
       })().catch(() => {
         cancel.abort();
         void reader.cancel().catch(() => {});
-      }),
+      }).finally(() => { checking = false; });
+    },
     5000,
   );
   recheck.unref();
   const abort = () => {
+    clearInterval(recheck);
     void reader.cancel().catch(() => {});
   };
   signal.addEventListener('abort', abort, { once: true });
+  if (signal.aborted) abort();
   const close = () => {
     clearInterval(recheck);
     signal.removeEventListener('abort', abort);

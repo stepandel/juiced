@@ -4,6 +4,7 @@ import { serviceLoader } from './services';
 import { page } from './pages';
 import { wakeJobs } from './queue';
 import { logError } from './log';
+import { timed, withRequestTiming } from './timing';
 
 /** Only Vercel ingress may supply the authentication rate-limit identity. */
 export function vercelRequest(request: Request, env: Record<string, string | undefined>) {
@@ -17,7 +18,7 @@ export function vercelRequest(request: Request, env: Record<string, string | und
 export function requestHandler(env: NodeJS.ProcessEnv = process.env) {
   const load = serviceLoader('api', env);
   let handle: ReturnType<typeof application> | undefined;
-  return async (request: Request): Promise<Response> => {
+  return (request: Request): Promise<Response> => withRequestTiming(request, async () => {
     const url = new URL(request.url);
     if (['GET', 'HEAD'].includes(request.method) && url.pathname === '/health')
       return new Response(request.method === 'HEAD' ? null : JSON.stringify({ status: 'ok' }), {
@@ -30,7 +31,7 @@ export function requestHandler(env: NodeJS.ProcessEnv = process.env) {
     )
       return new Response('Not found', { status: 404 });
     try {
-      handle ??= application({ ...(await load()), wake: wakeJobs });
+      handle ??= application({ ...(await timed('service_init', load)), wake: wakeJobs });
       return await handle(vercelRequest(request, env));
     } catch (error) {
       logError('service_unavailable', error, { method: request.method, path: url.pathname });
@@ -47,6 +48,6 @@ export function requestHandler(env: NodeJS.ProcessEnv = process.env) {
       }
       return Response.json({ error: 'service_unavailable' }, { status: 503, headers });
     }
-  };
+  });
 }
 export const handleRequest = requestHandler();

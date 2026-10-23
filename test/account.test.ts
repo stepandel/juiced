@@ -17,6 +17,8 @@ test('installation responses carry prerelease minimums through the shared CLI/se
   };
   assert.deepEqual(readInstallation(installation), installation);
   assert.equal(readInstallation({ ...installation, minimumCli: '0.2.0' }).minimumCli, '0.2.0');
+  assert.equal(readInstallation({ ...installation, cliVersion: '0.3.2' }).cliVersion, '0.3.2');
+  assert.throws(() => readInstallation({ ...installation, cliVersion: 'invalid' }), /Invalid Juiced installation/);
   for (const minimumCli of ['0.2.0-rc.01', '0.2.0\n', 'not-a-version', '0.2.0-' + 'a'.repeat(128)])
     assert.throws(() => readInstallation({ ...installation, minimumCli }), /Invalid Juiced installation/);
 });
@@ -62,6 +64,19 @@ test('prepare bootstraps known accounts directly and discovers accounts only whe
     // A denied account is checked against membership only after the 404.
     assert.equal(calls.length, selected === 'discover' || selected === 'denied' ? 2 : 1);
   }
+});
+
+test('valid shared credentials do not acquire the refresh lock', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'juiced-token-read-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const client = new AccountClient({ JUICED_CONFIG_HOME: root, JUICED_SERVICE_URL: 'https://service.example' }, async () => { throw new Error('Unexpected refresh'); });
+  await client.store.write({ origin: client.origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000 });
+  t.mock.method(client.store, 'locked', () => { throw new Error('Unexpected refresh lock'); });
+  const tokens = await Promise.all(Array.from({ length: 16 }, () => client.token(new AbortController().signal)));
+  assert.deepEqual(new Set(tokens), new Set(['a'.repeat(40)]));
+  await assert.rejects(client.token(AbortSignal.abort()), /abort/i);
+  await client.store.clear();
+  await assert.rejects(client.token(new AbortController().signal), /Sign in/);
 });
 
 test('credentials are private, origin scoped and serialize refresh across concurrent calls', async () => {

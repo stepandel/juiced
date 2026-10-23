@@ -133,6 +133,13 @@ export class AccountClient {
     });
   }
   async token(signal: AbortSignal) {
+    signal.throwIfAborted();
+    const current = await this.store.read();
+    signal.throwIfAborted();
+    if (!current) throw new ManagedError('not_signed_in');
+    if (current.expiresAt > Date.now() + 30000) return current.accessToken;
+    // Only refreshes rotate shared state. Re-read under the lock in case another
+    // terminal refreshed or signed out while this request was waiting.
     return this.store.locked(signal, async () => {
       let saved = await this.store.read();
       if (!saved) throw new ManagedError('not_signed_in');
@@ -366,6 +373,7 @@ export class AccountClient {
     return {
       scope,
       connection,
+      cliVersion: result.cliVersion,
       stop: async (session: string, workspaceId: string, project: string) => {
         await this.response(
           `/v1/accounts/${selected}/git-sessions/${session}/stop`,

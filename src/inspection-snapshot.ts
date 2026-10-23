@@ -1,10 +1,12 @@
-import { mkdtemp, mkdir, lstat, rm } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, lstat, rm } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { isENOENT } from './fs-util.js';
 import { GitError, relativeProjectPath } from './git.js';
 import { checkoutRoot, gitlinks, indexBytes, inspectionFailure, inspectionGit, lstatOptional, nulStrings as strings, settleAll, stagedSubmodules } from './inspection-git.js';
 import { InspectionIncomplete, submoduleContents, type InspectionSnapshot, type TreeEntry } from './inspection-protocol.js';
+import { seedInspectionIndex } from './inspection-index.js';
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
 function parseTree(bytes: Buffer): TreeEntry[] {
@@ -43,11 +45,12 @@ export async function captureInspection(root: string, scope: string, includeIgno
     const paths = ['--', scope || '.'];
     const inventory = () => run(['ls-files', '--cached', '--others', '--exclude-standard', '-z', ...paths]);
     const ignoredPaths = () => run(['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z', ...paths]);
-    const [originalIndex, head, branch, objectFormat, before, ignoredBefore, staged, objectDirectory] = await Promise.all([
+    const [originalIndex, head, branch, objectFormat, before, ignoredBefore, staged, objectDirectory, indexInfo] = await Promise.all([
       indexBytes(indexPath), text(['rev-parse', '--verify', 'HEAD']), readBranch(),
       text(['rev-parse', '--show-object-format']) as Promise<InspectionSnapshot['objectFormat']>,
       inventory(), ignoredPaths(), run(['ls-files', '--stage', '-z']),
       text(['rev-parse', '--path-format=absolute', '--git-path', 'objects']),
+      lstatOptional(indexPath),
     ]).catch(stopReads);
     const stagedEntries = strings(staged);
     stagedSubmodules(stagedEntries, scope);
@@ -58,6 +61,7 @@ export async function captureInspection(root: string, scope: string, includeIgno
       signal.throwIfAborted();
       const info = await lstatOptional(join(root, path));
       if (info && !info.isFile() && !info.isSymbolicLink() && !info.isDirectory()) throw new InspectionIncomplete('The selected scope contains a special file that Git cannot compare.');
+      if (info?.isFile()) await access(join(root, path), constants.R_OK);
     })) if (result.status === 'rejected') throw result.reason;
     const objects = join(directory, 'objects'); await mkdir(objects);
     const temporary = {
@@ -65,9 +69,8 @@ export async function captureInspection(root: string, scope: string, includeIgno
       // Git accepts C-quoted alternate paths; quotes protect separators in paths.
       GIT_ALTERNATE_OBJECT_DIRECTORIES: JSON.stringify(objectDirectory),
     };
-    // Recreate entries without stat caches or assume-unchanged bits, then ask Git
-    // to capture working-tree bytes, including staged additions and deletions.
-    await run(['update-index', '-z', '--index-info'], { input: staged, env: temporary });
+    // Retain safe stat entries; conversions and racy files still get fresh hashes.
+    await seedInspectionIndex(run, staged, originalIndex, indexInfo?.mtimeNs, before, temporary);
     // An absent, untracked literal path is valid; git add would reject it.
     let present = !scope;
     if (scope) { try { await lstat(join(root, scope)); present = true; } catch (error) { if (!isENOENT(error)) throw error; } }

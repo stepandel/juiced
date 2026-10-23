@@ -104,6 +104,45 @@ test(
         return true;
       });
     }
+    await t.test('installed inspection uses the bootstrap release and keeps the config fallback for old services', async () => {
+      const project = join(root, 'inspection');
+      await mkdir(project);
+      const git = async (...args: string[]) => execute('git', ['-C', project, ...args]);
+      await git('init', '-b', 'main');
+      await git('config', 'user.name', 'Fixture'); await git('config', 'user.email', 'fixture@example.test');
+      await writeFile(join(project, 'README.md'), 'fixture\n');
+      await git('add', '.'); await git('commit', '-m', 'fixture');
+      const installed = join(output, 'inspection-data/releases/old'), bin = join(output, 'inspection-bin');
+      await mkdir(join(installed, 'bin'), { recursive: true }); await mkdir(bin);
+      await copyFile(built, join(installed, 'bin/juiced.mjs'));
+      await writeFile(join(installed, 'release.json'), JSON.stringify({ version: '0.2.1', platform: process.platform, arch: process.arch }));
+      await writeFile(join(installed, 'install-paths'), `${join(output, 'inspection-data')}\0${bin}\0`);
+      await writeFile(join(installed, 'bin/juiced'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      await symlink(join(installed, 'bin/juiced'), join(bin, 'juiced'));
+      const mock = join(output, 'inspection-fetch.mjs');
+      await writeFile(mock, `
+import assert from 'node:assert/strict';const calls=[],fetcher=globalThis.fetch;let runtime;
+globalThis.fetch=async(input,init)=>{const r=new Request(input,init),u=new URL(r.url);if(u.protocol==='data:')return fetcher(input,init);calls.push(u.pathname);
+if(u.pathname==='/v1/config'){assert.equal(process.env.TEST_OLD_SERVICE,'1');return Response.json({cliVersion:'0.2.1'});}
+if(u.pathname.endsWith('/bootstrap')){runtime=(await r.json()).runtimeId;return Response.json({id:'jin_'+'a'.repeat(32),status:'ready',runtimeId:runtime,minimumCli:'0.2.0',error:null,operationId:'test',...(process.env.TEST_OLD_SERVICE?{}:{cliVersion:'0.2.1'})});}
+const body=await r.json();assert.equal(body.command.type,'workspace.inspect');assert.equal(r.headers.get('x-cantelop-session-runtime'),runtime);return Response.json({protocolVersion:2,workspace:null});};
+process.on('exit',()=>process.stderr.write(JSON.stringify(calls)+'\\n'));
+`);
+      for (const old of [false, true]) {
+        await assert.rejects(execute(process.execPath, ['--import', mock, join(installed, 'bin/juiced.mjs'), 'claude', 'peek'], {
+          cwd: project, env: { ...env, PATH: process.env.PATH, JUICED_TELEMETRY_DISABLED: '1', ...(old ? { TEST_OLD_SERVICE: '1' } : {}) }, timeout: 6000,
+        }), error => {
+          const result = error as { code: number; stdout: string; stderr: string };
+          assert.equal(result.code, 2, result.stderr);
+          assert.match(result.stdout, /does not exist/);
+          const calls = JSON.parse(result.stderr.trim());
+          assert.equal(calls.length, old ? 3 : 2);
+          assert.equal(calls[0], '/v1/accounts/' + account + '/bootstrap');
+          assert.equal(calls.includes('/v1/config'), old);
+          return true;
+        });
+      }
+    });
     await t.test('installed CLI updates before work, retries bootstrap and avoids replaying started commands', async () => {
       const install = join(output, 'data'), old = join(install, 'releases/old'), bin = join(output, 'bin');
       await mkdir(join(old, 'bin'), { recursive: true });
@@ -126,18 +165,18 @@ const temp=join(process.env.JUICED_BIN_DIR,'new-link');await symlink(join(root,'
       await writeFile(mock, `
 import assert from 'node:assert/strict';let checks=0,runtime;
 globalThis.fetch=async(input,init)=>{const r=new Request(input,init),u=new URL(r.url),mode=process.env.FIXTURE_MODE;
-if(u.pathname==='/v1/config'){assert.equal(r.headers.has('authorization'),false);return Response.json({cliVersion:mode==='startup'||++checks>1?'0.2.2':'0.2.1'});}
+if(u.pathname==='/v1/config'){assert.notEqual(mode,'inspection','Inspection must use the bootstrap recommendation');assert.equal(r.headers.has('authorization'),false);return Response.json({cliVersion:mode==='startup'||++checks>1?'0.2.2':'0.2.1'});}
 assert.notEqual(mode,'startup','Update must precede authenticated work');
 if(u.origin==='https://api.github.com')return Response.json({login:'octocat'});
 if(u.pathname==='/v1/me')return Response.json({userId:'user',deviceId:'device',accounts:[{id:${JSON.stringify(account)},status:'active',entitlement:'active'}]});
-if(u.pathname.endsWith('/bootstrap')){if(mode==='bootstrap')return Response.json({error:'cli_upgrade_required'},{status:409});runtime=(await r.json()).runtimeId;return Response.json({id:'jin_'+'a'.repeat(32),status:'ready',runtimeId:runtime,minimumCli:'0.2.0',error:null,operationId:'provision:test'});}
+if(u.pathname.endsWith('/bootstrap')){if(mode==='bootstrap')return Response.json({error:'cli_upgrade_required'},{status:409});runtime=(await r.json()).runtimeId;return Response.json({id:'jin_'+'a'.repeat(32),status:'ready',runtimeId:runtime,minimumCli:'0.2.0',error:null,operationId:'provision:test',...(mode==='inspection'?{cliVersion:'0.2.2'}:{})});}
 return Response.json({error:'session_runtime_mismatch'},{status:409,headers:{'X-Juiced-Error':'1'}});
 };
 `);
-      for (const mode of ['startup', 'bootstrap', 'runtime']) {
+      for (const mode of ['startup', 'bootstrap', 'runtime', 'inspection']) {
         await rm(join(bin, 'juiced'), { force: true });
         await symlink(join(old, 'bin/juiced'), join(bin, 'juiced'));
-        const args = mode === 'startup' ? ['env', 'set', 'EXAMPLE', '--stdin'] : ['claude', 'github-configure'];
+        const args = mode === 'startup' ? ['env', 'set', 'EXAMPLE', '--stdin'] : mode === 'inspection' ? ['claude', 'peek'] : ['claude', 'github-configure'];
         const child = spawn(process.execPath, ['--import', mock, join(old, 'bin/juiced.mjs'), ...args], {
           cwd: root, env: { ...env, FIXTURE_MODE: mode, FIXTURE_NODE: process.execPath, FIXTURE_INSTALLER: installer, FIXTURE_REPLACEMENT: replacement },
           stdio: ['pipe', 'pipe', 'pipe'],
