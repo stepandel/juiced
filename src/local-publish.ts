@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isENOENT, writeFileAtomic } from './fs-util.js';
+import { atomicJSON, isENOENT } from './fs-util.js';
 import { ancestor, cleanRepository, discoverRepository, git, gitText, sha256, type Repository } from './git.js';
 import { GitWorkspaceClient, type GitWorkspace } from './git-workspace.js';
 import { validateExportManifest, validTransferId } from './git-protocol.js';
@@ -36,9 +36,6 @@ async function checkoutLock(root: string) {
   }
   throw new Error('Another Juiced client is updating this repository. Retry.');
 }
-
-// The receipt guards against applying twice, so it must survive a crash.
-const saveJSON = (path: string, value: unknown) => writeFileAtomic(path, JSON.stringify(value));
 
 export class LocalPublisher {
   constructor(private workspace: GitWorkspace, private project: Project, private original: Repository) {}
@@ -85,11 +82,11 @@ export class LocalPublisher {
       const initialHead = await check();
       client = new GitWorkspaceClient(this.workspace, this.project, repository, signal);
       const imported = await client.receive(publication);
-      await saveJSON(join(directory, 'publication.json'), publication);
-      await saveJSON(receiptPath, { fingerprint });
+      await atomicJSON(join(directory, 'publication.json'), publication);
+      await atomicJSON(receiptPath, { fingerprint });
       const complete = async (status: 'applied' | 'already-applied', message: string): Promise<PublishResult> => {
         const result = { status, message };
-        await saveJSON(receiptPath, { fingerprint, result });
+        await atomicJSON(receiptPath, { fingerprint, result });
         return result;
       };
       if (publication.kind === 'commits') {

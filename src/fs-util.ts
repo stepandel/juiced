@@ -4,6 +4,8 @@ import { dirname } from 'node:path';
 
 export const isENOENT = (error: unknown) => (error as NodeJS.ErrnoException | null | undefined)?.code === 'ENOENT';
 
+export const atomicJSON = (path: string, value: unknown) => writeFileAtomic(path, JSON.stringify(value));
+
 /**
  * Replace `path` so readers see either the old or the new contents, and a crash
  * after return keeps the new ones. Unique temporaries let concurrent writers race

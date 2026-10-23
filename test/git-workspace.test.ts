@@ -265,13 +265,26 @@ test('unchanged commits send no bundle and patch-only uploads preserve staged an
 });
 
 test('runtimes without part support receive a full bundle for an unchanged HEAD', async t => {
-  const f = await fixture(t), repository = (await discoverRepository(f.local))!;
+  const f = await fixture(t);
+  await writeFile(join(f.local, 'legacy.bin'), randomBytes(UPLOAD_CHUNK_BYTES * 2));
+  await git(f.local, ['add', '.']); await git(f.local, ['commit', '-m', 'legacy upload']);
+  const repository = (await discoverRepository(f.local))!;
   const legacy = await createUpload(repository, false, repository.head), parts = await createUpload(repository, false, repository.head, undefined, true);
   t.after(() => Promise.all([legacy.close(), parts.close()]));
   assert.equal(legacy.manifest.base, undefined);
   assert.deepEqual(legacy.manifest.files.map(file => file.name), ['bundle']);
   assert.equal(parts.manifest.base, repository.head);
   assert.deepEqual(parts.manifest.files, []);
+  const client = await f.client();
+  f.failNextChunk();
+  await client.uploadPrepared(legacy);
+  const chunks = f.commands.filter(command => command.action === 'chunk');
+  assert.ok(chunks.length > 2, 'The legacy transfer crosses chunk boundaries and retries a receipt');
+  assert.ok(chunks.every(command => command.part === undefined), 'Legacy requests omit the part capability');
+  assert.ok(!f.commands.some(command => command.action === 'finish'));
+  await client.call({ action: 'apply', id: legacy.id, initializeOnly: false });
+  assert.deepEqual(await readFile(join(f.target, 'legacy.bin')), await readFile(join(f.local, 'legacy.bin')));
+  await client.close();
 });
 
 test('Git uploads pipeline a bounded window and accept reversed part arrival with a retried receipt', { timeout: 30_000 }, async t => {
