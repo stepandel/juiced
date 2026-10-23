@@ -34,6 +34,8 @@ const messages: Record<string, string> = {
     'This CLI is incompatible with the service runtime. Run juiced update, then retry your command. You can also reinstall with: curl -fsSL https://juiced.codes/install.sh | sh',
   installation_changed: 'This command’s installation changed. Start a new Juiced command.',
   installation_pending: 'Your workspace service is being provisioned. Retry shortly.',
+  account_not_available:
+    'This Juiced account is not available to your sign-in. Pass --account with an account you belong to, or run juiced logout and sign in again.',
 };
 export class AccountClient {
   readonly origin: string;
@@ -292,15 +294,26 @@ export class AccountClient {
     if (!runtimeId) throw new ManagedError('cli_upgrade_required');
     if (!(await this.store.read()) && process.stdin.isTTY && process.stderr.isTTY)
       await this.login(signal);
-    const me = await this.me(signal),
-      saved = await this.store.read();
-    account ??= saved?.account ?? me.accounts[0]?.id;
-    if (!account || !me.accounts.some((a) => a.id === account))
-      throw new ManagedError('account_not_available');
+    const saved = await this.store.read();
+    // Bootstrap/installation authorizes membership itself. Only discover accounts
+    // when neither the command nor the saved sign-in already selects one.
+    account ??= saved?.account;
+    if (!account) account = (await this.me(signal)).accounts[0]?.id;
+    if (!account) throw new ManagedError('account_not_available');
     let result = readInstallation(
-      passive
-        ? await this.json(`/v1/accounts/${account}/installation`, undefined, signal, 'GET')
-        : await this.json(`/v1/accounts/${account}/bootstrap`, { version, runtimeId }, signal),
+      await (passive
+        ? this.json(`/v1/accounts/${account}/installation`, undefined, signal, 'GET')
+        : this.json(`/v1/accounts/${account}/bootstrap`, { version, runtimeId }, signal)
+      ).catch(async (error) => {
+        // The service reports a non-member account like any missing resource.
+        if (
+          error instanceof ManagedError &&
+          error.status === 404 &&
+          !(await this.me(signal)).accounts.some((a) => a.id === account)
+        )
+          throw new ManagedError('account_not_available', 404);
+        throw error;
+      }),
     );
     const until = Date.now() + 300000;
     let progress = false;

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Writable } from 'node:stream';
-import type { WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
+import type { SessionEventCursor, WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
 import { discoverRepository, sha256 } from './git.js';
 import { selectProject } from './project.js';
 import { captureInspection } from './inspection-snapshot.js';
@@ -42,15 +42,25 @@ async function remoteInventory<T>(workspace: InspectionWorkspace, command: Inspe
   const combined = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]);
   try {
     combined.throwIfAborted();
-    // A durable end boundary avoids replaying old inventories across CLI processes.
-    const after = fresh ? undefined : await session.view({ signal: combined }).then(view => view.cursor).catch(error => {
-      if (isViewMissing(error)) return undefined;
-      throw error;
-    });
-    const requested = session.request(command, { signal: combined, timeoutMs: INSPECTION_TIMEOUT_MS }).then(reply => {
+    // Small inventories fit in the reply: no view read, replay, or SSE connection.
+    // Older runtimes and large inventories still emit the command's tagged events.
+    const requested = session.request({ ...command, inline: !fresh }, { signal: combined, timeoutMs: INSPECTION_TIMEOUT_MS }).then(reply => {
       if (!reply?.ok) throw new InspectionIncomplete(reply?.error ?? 'The workspace rejected inspection.');
+      return reply;
     }).catch(error => { controller.abort(error); throw error; });
     void requested.catch(() => {});
+    let after: SessionEventCursor | undefined;
+    if (!fresh) {
+      const reply = await requested;
+      if (reply.inspection !== undefined) return validate(reply.inspection, command.scope);
+      // The runtime commits a boundary tagged with this command just before its
+      // chunks. Older runtimes, or a boundary another inspection has since
+      // replaced, replay retained output instead; events are filtered by ID.
+      after = await session.view({ signal: combined }).then(view => (view.state as { streaming?: unknown } | undefined)?.streaming === command.id ? view.cursor : undefined).catch(error => {
+        if (isViewMissing(error)) return undefined;
+        throw error;
+      });
+    }
     const chunks: Buffer[] = []; let size = 0;
     try {
       for await (const event of session.stream({ signal: combined, ...(after ? { after } : {}) })) {

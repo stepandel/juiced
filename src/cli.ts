@@ -9,7 +9,6 @@ import { ensureLogin } from './login.js';
 import { runRemoteTerminal } from './remote-terminal.js';
 import { useLocalTui } from './agent-protocol.js';
 import { RemoteAgent } from './remote-agent.js';
-import { runLocalTui } from './tui/app.js';
 import { selectProject as selectProjectBase } from './project.js';
 import { discoverRepository } from './git.js';
 import { createGitSession, GitWorkspaceClient } from './git-workspace.js';
@@ -282,6 +281,7 @@ async function main() {
             usage?.track('cli_session_active', properties);
           };
           if (localTui) {
+            const { runLocalTui } = await import('./tui/app.js');
             const agent = new RemoteAgent(session, {
               ...(directoryName ? { directoryName } : {}),
               ...(git ? { git } : {}),
