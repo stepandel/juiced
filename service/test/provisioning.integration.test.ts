@@ -48,16 +48,14 @@ test(
           }
           return remote;
         },
+        async find() { return remote; },
         async installation() {
           return remote!;
         },
-        async request(method: string, path: string) {
-          if (path.endsWith('/policy')) {
-            policies++;
-            remote!.policy_revision++;
-            return { revision: remote!.policy_revision };
-          }
-          return {};
+        async setPolicy() {
+          policies++;
+          remote!.policy_revision++;
+          return { revision: remote!.policy_revision };
         },
       } as unknown as Platform;
       const p = new Provisioner(pool, accounts, platform);
@@ -160,7 +158,7 @@ test(
       };
       const platform = {
         remove: missing,
-        request: missing,
+        removeById: missing,
         installation: missing,
       } as unknown as Platform;
       await new Provisioner(f.pool, accounts, platform, { async cancel() {} }).runOnce();
@@ -178,3 +176,61 @@ test(
     }
   },
 );
+
+test('provisioning observes CLI rollout and never changes an existing instance package', { skip: !process.env.JUICED_TEST_DATABASE_URL }, async () => {
+  const f = await testDatabase();
+  try {
+    const packageId = `pkg_${'b'.repeat(32)}`;
+    const accounts = new Accounts(f.pool, { packageId, runtimeId: 'runtime-new', minimumCli: '0.2.0' });
+    const account = await accounts.ensure(await user(f.pool));
+    await f.pool.query("UPDATE accounts SET entitlement='active',period_id='invoice',period_end=now()+interval '1 day' WHERE id=$1", [account.id]);
+    await f.pool.query(`INSERT INTO installations(id,account_id,external_key,platform_id,app_id,package_id,runtime_id,status,entitlement_epoch,policy_revision)
+      VALUES('jin_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',$1,'external-existing-account',$2,$3,$4,'runtime-old','ready','invoice',1)`, [account.id, `ins_${'a'.repeat(32)}`, `app_${'a'.repeat(32)}`, `pkg_${'a'.repeat(32)}`]);
+    const active = (await f.pool.query<Account>('SELECT * FROM accounts WHERE id=$1', [account.id])).rows[0]!;
+    await accounts.bootstrap(active, { version: '0.2.0', runtimeId: 'runtime-new' });
+    let remote: PlatformInstallation = {id:`ins_${'a'.repeat(32)}`,app_id:`app_${'a'.repeat(32)}`,package_id:`pkg_${'a'.repeat(32)}`,runtime_id:'runtime-old',status:'ready',policy_revision:1,enforced_revision:1};
+    const platform = { async installation() { return remote; } } as unknown as Platform;
+    const worker = new Provisioner(f.pool, accounts, platform);
+    await worker.runOnce();
+    assert.equal((await accounts.installation(account.id))!.package_id, `pkg_${'a'.repeat(32)}`);
+    assert.equal((await f.pool.query('SELECT status FROM jobs')).rows[0]!.status, 'pending');
+    // The CLI/platform finishes rollout outside the Juiced service.
+    remote = {...remote,package_id:packageId,runtime_id:'runtime-new'};
+    await f.pool.query('UPDATE jobs SET available_at=now()');
+    await worker.runOnce();
+    const current = (await accounts.installation(account.id))!;
+    assert.equal(current.status, 'ready');
+    assert.equal(current.runtime_id, 'runtime-new');
+    assert.equal(current.package_id, packageId);
+    assert.equal(current.desired_package_id, null);
+  } finally { await f.close(); }
+});
+
+test('a stale service release keeps ready installations usable and failed instances back off', { skip: !process.env.JUICED_TEST_DATABASE_URL }, async t => {
+  const f = await testDatabase();
+  try {
+    const packageId = `pkg_${'a'.repeat(32)}`;
+    const accounts = new Accounts(f.pool, { packageId, runtimeId: 'runtime-old', minimumCli: '0.2.0' });
+    const account = await accounts.ensure(await user(f.pool));
+    await f.pool.query("UPDATE accounts SET entitlement='active',period_id='invoice',period_end=now()+interval '1 day' WHERE id=$1", [account.id]);
+    await f.pool.query(`INSERT INTO installations(id,account_id,external_key,platform_id,app_id,package_id,runtime_id,status,entitlement_epoch,policy_revision)
+      VALUES('jin_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',$1,'external-existing-account',$2,$3,$4,'runtime-old','ready','invoice',1)`, [account.id, `ins_${'a'.repeat(32)}`, `app_${'a'.repeat(32)}`, packageId]);
+    await enqueue(f.pool, account.id, 'provision', {}, 'renewal');
+    // The CLI already rolled the Fleet forward; this service still names the old release.
+    let remote: PlatformInstallation = { id: `ins_${'a'.repeat(32)}`, app_id: `app_${'a'.repeat(32)}`, package_id: `pkg_${'b'.repeat(32)}`, runtime_id: 'runtime-new', status: 'ready', policy_revision: 1, enforced_revision: 1 };
+    const worker = new Provisioner(f.pool, accounts, { async installation() { return remote; } } as unknown as Platform);
+    const errors = t.mock.method(console, 'error', () => {});
+    await worker.runOnce();
+    const job = async () => (await f.pool.query("SELECT status,extract(epoch FROM available_at-now()) AS delay FROM jobs WHERE idempotency_key='renewal'")).rows[0]!;
+    assert.equal((await accounts.installation(account.id))!.status, 'ready');
+    assert.equal(JSON.parse(errors.mock.calls[0]!.arguments[0] as string).error, 'release_mismatch');
+    assert.equal((await job()).status, 'pending');
+    remote = { ...remote, package_id: packageId, runtime_id: 'runtime-old', status: 'failed' };
+    await f.pool.query("UPDATE jobs SET available_at=now(),attempts=4 WHERE idempotency_key='renewal'");
+    await worker.runOnce();
+    assert.equal((await accounts.installation(account.id))!.status, 'failed');
+    const failed = await job();
+    assert.equal(failed.status, 'pending');
+    assert.ok(Number(failed.delay) > 60, 'repeated waits back off instead of retrying every 5 seconds');
+  } finally { await f.close(); }
+});

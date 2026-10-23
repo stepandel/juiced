@@ -1,4 +1,3 @@
-import { CantelopClient } from '@cantelop/sdk';
 import type { Platform } from './platform';
 import type { Installation } from './accounts';
 import { ServiceError } from './config';
@@ -19,13 +18,7 @@ export async function stopGitSession(
     !i.platform_id
   )
     throw new ServiceError('invalid_git_stop');
-  const credential = await platform.credentials(i.platform_id);
-  if (credential.appId !== i.app_id) throw new ServiceError('installation_changed', 409);
-  const app = new CantelopClient().app({
-    name: 'juiced',
-    runtime: { receive() {} },
-    connection: platform.connection(credential),
-  });
+  const app = await platform.app(i.platform_id, { appId: i.app_id, runtimeId: i.runtime_id });
   const workspace = app.workspace({ id: input.workspaceId });
   if (!(await workspace.inspect())) throw new ServiceError('not_found', 404);
   const db = await workspace.database();

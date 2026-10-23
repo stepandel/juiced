@@ -11,6 +11,9 @@ test('the compiled Juice package uses isolated Fleet runtime capabilities and re
   t.after(() => rm(directory, { recursive: true, force: true }));
   const { apps, backend } = await buildAppArtifacts({ definition: resolve('src/cantelop.ts'), outdir: directory });
   const { edge, runtime } = apps[0]!;
+  assert.equal(edge.manifest.definition_kind, 'fleet');
+  assert.equal(runtime.manifest.definition_kind, 'fleet');
+  assert.equal(edge.manifest.cli_build_protocol_version, 7);
   assert.equal(edge.manifest.fleet_execution_protocol_version, 1);
   assert.ok(edge.manifest.optional_bindings.includes('CANTELOP_FLEET_EXECUTION_VERSION'));
   assert.equal(edge.manifest.session_runtime_id, runtime.manifest.session_runtime_id);

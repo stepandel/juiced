@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { build } from 'esbuild';
+import { CredentialStore } from '../src/account/store.js';
 import { createCantelopCompilerPlugin } from '@cantelop/sdk/build';
 
 const execute = promisify(execFile);
@@ -32,12 +33,17 @@ test('built github-configure CLI uses the app API without a workspace, Claude lo
         calls.push('github-verify');
         return process.env.TEST_REJECT_TOKEN ? new Response('fixture-token', { status: 401 }) : Response.json({ login: 'octocat' });
       }
+      if (new URL(request.url).pathname.endsWith('/bootstrap')) {
+        const body = await request.json();
+        return Response.json({ id: 'jin_' + 'a'.repeat(32), status: 'ready', runtimeId: body.runtimeId, minimumCli: '0.2.0', error: null, operationId: 'fixture' });
+      }
+      if (new URL(request.url).pathname === '/v1/telemetry') return new Response(null, { status: 204 });
       assert.equal(new URL(request.url).origin, 'https://fixture.invalid');
-      assert.equal(request.headers.get('Authorization'), 'Bearer fixture-app-token');
+      assert.equal(request.headers.get('Authorization'), 'Bearer fixture-app-token-0123456789');
       const body = await request.json();
       assert.equal(body.workspace, null);
       assert.equal(body.session, null);
-      assert.equal(new URL(request.url).pathname, '/commands/' + body.command.type);
+      assert.ok(new URL(request.url).pathname.endsWith('/commands/' + body.command.type));
       calls.push(body.command.type);
       if (body.command.type === 'app.environment.set') {
         assert.equal(body.command.name, 'GH_TOKEN');
@@ -49,8 +55,8 @@ test('built github-configure CLI uses the app API without a workspace, Claude lo
     process.on('exit', () => process.stdout.write(JSON.stringify(calls) + '\\n'));
     await import('./cli.mjs');
   `);
-  const env = { JUICED_MODE:'self-managed', PATH: '', HOME: root, CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-app-token',
-    CANTELOP_EDGE_URL: 'https://fixture.invalid', JUICED_WORKSPACE: 'ignored-project', TEST_EXPECTED_TOKEN: 'fixture-token' };
+  const env = { PATH: '', HOME: root, JUICED_CONFIG_HOME: join(root, 'config'), JUICED_TELEMETRY_DISABLED: '1', JUICED_SERVICE_URL: 'https://fixture.invalid', JUICED_WORKSPACE: 'ignored-project', TEST_EXPECTED_TOKEN: 'fixture-token' };
+  await new CredentialStore(env.JUICED_SERVICE_URL, env).write({ origin: env.JUICED_SERVICE_URL, accessToken: 'fixture-app-token-0123456789', refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000, account: 'acc_' + 'a'.repeat(32) });
   const configuredCalls = ['github-verify', 'app.environment.set', 'app.environment.status'];
   const savedDirectory = join(root, '.cantelop', 'juiced');
   await mkdir(savedDirectory, { recursive: true });

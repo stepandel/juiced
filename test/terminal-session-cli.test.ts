@@ -1,3 +1,4 @@
+import { accountFixtureEnv } from '../scripts/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
@@ -31,6 +32,7 @@ test('CLI reconnects the same tab, starts fresh on --new, and bypasses bindings 
     globalThis.fetch = async (input, init) => {
       const request = new Request(input, init);
       const body = await request.json();
+      if (new URL(request.url).pathname.endsWith('/bootstrap')) return Response.json({ id: 'jin_' + 'a'.repeat(32), status: 'ready', runtimeId: body.runtimeId, minimumCli: '0.2.0', error: null, operationId: 'fixture' });
       globalThis.fixtureOperations.push({ type: body.command.type, workspace: body.workspace });
       if (body.command.type === 'auth') return Response.json({ protocolVersion: 2, id: body.id, reply: { type: 'status', authenticated: true } });
       if (body.command.type === 'workspace.resolve') return Response.json({
@@ -41,10 +43,11 @@ test('CLI reconnects the same tab, starts fresh on --new, and bypasses bindings 
     };
     await import('./cli.mjs');
   `);
+  const accountEnv = await accountFixtureEnv(root, 'https://fixture.invalid');
   const run = async (argv: string[] = ['claude'], tab = 'tab-a', workspaceId = `wsp_${'1'.repeat(32)}`) => {
     const { stdout, stderr } = await execute(process.execPath, [bootstrap, ...argv], {
       cwd: root, timeout: 10_000,
-      env: { ...process.env, TERM_SESSION_ID: tab, TMUX: '', TMUX_PANE: '', STY: '', WINDOW: '', JUICED_WORKSPACE: 'chosen',
+      env: { ...process.env, ...accountEnv, TERM_SESSION_ID: tab, TMUX: '', TMUX_PANE: '', STY: '', WINDOW: '', JUICED_WORKSPACE: 'chosen',
         CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-token', CANTELOP_EDGE_URL: 'https://fixture.invalid', TEST_WORKSPACE_ID: workspaceId },
     });
     return { ...JSON.parse(stdout) as { id: string; argv: string[]; operations: Array<{ type: string; workspace: { id?: string; slug?: string } }> }, stderr };

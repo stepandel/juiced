@@ -1,3 +1,4 @@
+import { accountFixtureEnv, handleAccountFixture } from '../scripts/account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
@@ -27,6 +28,7 @@ test('non-Git launches keep local and remote files separate across sessions and 
   const tasks: Promise<unknown>[] = [], routes: string[] = [], failures: unknown[] = [];
   let origin: string;
   const server = createServer(async (request, response) => {
+    if (await handleAccountFixture(request, response, 'fixture-token')) return;
     const connection = new AbortController(); response.once('close', () => connection.abort());
     try {
       routes.push(request.url!);
@@ -85,6 +87,7 @@ test('non-Git launches keep local and remote files separate across sessions and 
     plugins: [createCantelopCompilerPlugin({ definition: join(projectRoot, 'src/cantelop.ts') })], outfile: join(buildDirectory, 'cli.mjs') });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const address = server.address(); assert.ok(address && typeof address !== 'string'); origin = `http://127.0.0.1:${address.port}`;
+  const accountEnv = await accountFixtureEnv(root, origin);
   const run = async () => {
     const child = spawn(process.execPath, [join(buildDirectory, 'cli.mjs'), 'claude', '-e', `
       const fs = require('node:fs');
@@ -92,7 +95,7 @@ test('non-Git launches keep local and remote files separate across sessions and 
         console.log(JSON.stringify({ cwd: process.cwd(), home: process.env.HOME, files: fs.readdirSync('.') }));
         fs.writeFileSync('agent.txt', 'remote only');
       });
-    `], { cwd: local, env: { ...process.env, HOME: root, JUICED_WORKSPACE: 'isolation', CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-token', CANTELOP_EDGE_URL: origin }, stdio: ['pipe', 'pipe', 'pipe'] });
+    `], { cwd: local, env: { ...process.env, ...accountEnv, HOME: root, JUICED_WORKSPACE: 'isolation', CANTELOP_APP_SLUG: 'juiced', CANTELOP_INTEGRATION_TOKEN: 'fixture-token', CANTELOP_EDGE_URL: origin }, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.on('data', bytes => { stdout += bytes; }); child.stderr.on('data', bytes => { stderr += bytes; });
     const timeout = setTimeout(() => child.kill('SIGKILL'), 10_000);

@@ -1,3 +1,4 @@
+import { accountFixtureEnv, handleAccountFixture } from './account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
@@ -11,7 +12,7 @@ import { discoverRepository, git } from '../src/git.ts';
 import { inspectRemote } from '../src/runtime/inspection.ts';
 
 // Built CLI -> real SDK Edge -> disposable platform fixture -> production
-// inspection handler. PATH contains Git only; no Cantelop CLI or account login.
+// inspection handler. PATH contains Git only; no Cantelop CLI or interactive login.
 const execute = promisify(execFile);
 const { createProtocolWorker } = await import(new URL('./protocol-edge.js', import.meta.resolve('@cantelop/sdk')));
 const manifest = JSON.parse(await readFile(new URL('../dist/cantelop/juiced/edge/cantelop-edge.json', import.meta.url), 'utf8'));
@@ -54,6 +55,7 @@ const worker = createProtocolWorker({ runtimeId: manifest.session_runtime_id, fe
   } }), { headers: { 'Content-Type': 'text/event-stream' } });
 } });
 const server = createServer(async (request, response) => {
+  if (await handleAccountFixture(request, response, 'fixture-token')) return;
   const controller = new AbortController(); response.once('close', () => controller.abort());
   try {
     calls.push(request.url); const bytes = []; for await (const chunk of request) bytes.push(chunk);
@@ -79,7 +81,7 @@ try {
   await writeFile(join(workspace, '.juiced', 'project', 'binding.json'), JSON.stringify({ version: 1, binding: repository.binding, sourceBranch: 'main' }));
   await mkdir(join(root, 'bin')); await symlink((await execute('which', ['git'])).stdout.trim(), join(root, 'bin', 'git'));
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); origin = `http://127.0.0.1:${server.address().port}`;
-  const env = { ...process.env, PATH: join(root, 'bin'), CANTELOP_PROFILE: 'inspection-smoke',
+  const env = { ...process.env, ...await accountFixtureEnv(root, origin), PATH: join(root, 'bin'), CANTELOP_PROFILE: 'inspection-smoke',
     CANTELOP_APP_CONFIG: JSON.stringify({ schemaVersion: 1, activeProfile: 'inspection-smoke', profiles: { 'inspection-smoke': {
       defaultApp: { slug: 'juiced' }, apps: [{ id: appId, slug: 'juiced', edgeUrl: origin, accessToken: 'fixture-token' }],
     } } }), CANTELOP_APP_SLUG: 'juiced', CANTELOP_EDGE_URL: origin, CANTELOP_INTEGRATION_TOKEN: 'fixture-token', CANTELOP_CONFIG: join(root, 'no-account-credentials.json'),

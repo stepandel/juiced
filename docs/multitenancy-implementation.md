@@ -101,8 +101,6 @@ write access: retain explicit `github-configure` for the remote `GH_TOKEN`.
 Published releases default to managed mode. Add `juiced login [--no-browser]`,
 `juiced logout [--all]`, and `juiced whoami`. A leading `--account ID` selects an
 authorized account; preserve existing `--workspace` and Claude command meanings.
-`juiced --self-managed ...` or `JUICED_MODE=self-managed` explicitly selects the
-existing Cantelop-profile path. Unknown modes/ambiguous selectors fail early.
 Managed mode never reads an ambient Cantelop profile as an authentication fallback.
 
 Store service origin/environment, selected account and device grant separately
@@ -200,8 +198,7 @@ There is a concrete direct-database path to remove from managed mode:
 `workspace.database()`, stops the Session, then deletes only those tokens. Cantelop
 currently issues database credentials for about 15 minutes. Move this operation
 to the typed service endpoint, maintaining snapshot-before-stop and compare-token
-cleanup so a new attachment's leases survive. Preserve the existing direct path
-for explicit self-managed mode. Managed clients receive neither App integration
+cleanup so a new attachment's leases survive. Managed clients receive neither App integration
 tokens nor provider database credentials. Runtime database access remains private
 and Workspace-bound.
 
@@ -385,7 +382,7 @@ the dependency gates before starting dependent implementation.
 | J02 | Juiced: GitHub/Google browser auth, CLI device grants, account/device endpoints | J01 | Verified personal account; safe linking; approval/denial/expiry; cross-process refresh; revoke all device requests/streams within the bound |
 | J03 | Juiced: provisioning adapter and reconciliation | J02, C03, C04 | Entitled bootstrap from two devices converges; killed workers resume; pending/failure states actionable; no secrets returned |
 | J04 | Juiced: account-bound relay, managed Git stop endpoint, terminal lifecycle | J03 | All existing workflows routed; cross-account IDs denied; no raw DB credentials; streaming, cancellation and retries preserve protocol semantics |
-| J05 | Juiced CLI: managed commands/context and scoped local state | J02-J04 | Login/logout/whoami, captured account target, self-managed opt-in, no fallback; account switch/reconnect cannot reuse another account's receipts/refs |
+| J05 | Juiced CLI: managed commands/context and scoped local state | J02-J04 | Login/logout/whoami, captured account target, no fallback; account switch/reconnect cannot reuse another account's receipts/refs |
 | A01 | All: free-account qualification and deployment | C04, J05 | Two real accounts complete the workflow matrix; default free allowances and per-App resource limits; recovery and rollback demonstrated |
 | C05 | Cantelop: durable allocation usage and cursor API | C04 | Duplicate/reordered/outage/crash events reconcile once, including detached/idle/auth allocations |
 | C06 | Cantelop: prepaid budget reservations, fenced lease renewal/deadlines | C05, P01 lease proof | Concurrent activation and control outage cannot exceed granted allowance; expiry stops native children; resource and budget denials are actionable |
@@ -506,7 +503,7 @@ high-water marks before issuing credit; fail closed if that evidence is missing.
 1. Establish compatible source pins, contracts and local staging fixtures.
 2. Deploy additive platform migrations, then compatible compute/storage and
    control workers, then expose the new Fleet API. Managed Apps fail closed on
-   missing policy; self-managed legacy Apps retain their existing behavior.
+   missing policy.
 3. Publish/qualify the first immutable Juiced package; provision a staging Fleet
    with two accounts and run the full isolation/recovery harness.
 4. Deploy Juiced auth/API/jobs and distribute the CLI candidate. New accounts use

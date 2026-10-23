@@ -11,10 +11,8 @@ export async function runtimeJSON(
   command: unknown,
   type: string,
 ) {
-  const credential = await platform.credentials(installation);
-  if (credential.appId !== app || credential.runtimeId !== runtime)
-    throw new ServiceError('installation_changed', 409);
-  const r = await platform.connection(credential).fetch(
+  const connection = await platform.connection(installation, { appId: app, runtimeId: runtime });
+  const r = await connection.fetch(
     new Request(`https://runtime.internal/commands/${type}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

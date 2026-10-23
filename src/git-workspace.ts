@@ -15,8 +15,8 @@ export type GitWorkspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, Ter
 type Project = Awaited<ReturnType<typeof selectProject>>;
 type Action = GitCommand extends infer C ? C extends GitCommand ? Omit<C, 'type' | 'directoryName' | 'binding'> : never : never;
 
-/** Retire only this attachment's observed checkout registrations after stopping. */
-export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<TerminalCommand>, 'database'>, project: Pick<Project, 'directoryName'>, id?: string,managedStop?:(session:string)=>Promise<void>): Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'view' | 'stop'> {
+/** Stop through the authorized service, which owns checkout lease cleanup. */
+export function createGitSession(workspace: GitWorkspace, stopSession: (session: string) => Promise<void>, id?: string): Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'view' | 'stop'> {
   const session = workspace.session({ keepAliveSeconds: 120, ...(id ? { id } : {}) });
   let stopping: Promise<void> | undefined;
   const open = () => { if (stopping) throw new Error('This Git session has stopped. Start a new session.'); };
@@ -26,20 +26,7 @@ export function createGitSession(workspace: GitWorkspace & Pick<WorkspaceRef<Ter
     dispatch(message, options) { open(); return session.dispatch(message, options); },
     stream(options) { return session.stream(options); },
     view(options) { return session.view(options); },
-    stop() {
-      return stopping ??= (async () => {
-        if(managedStop){await managedStop(session.id);return;}
-        const snapshot = (async () => {
-          const db = await workspace.database();
-          const rows = await db.execute({ sql: 'SELECT token FROM juiced_checkout_leases WHERE project = ? AND session = ?', args: [project.directoryName, session.id] });
-          return { db, rows };
-        })();
-        const { db, rows } = await snapshot.finally(() => session.stop());
-        // A new attachment may already have reopened this logical identity.
-        // Its newly acquired tokens must survive the old attachment's cleanup.
-        for (const row of rows.rows) await db.execute({ sql: 'DELETE FROM juiced_checkout_leases WHERE project = ? AND session = ? AND token = ?', args: [project.directoryName, session.id, String(row.token)] });
-      })();
-    },
+    stop() { return stopping ??= stopSession(session.id); },
   };
 }
 

@@ -43,7 +43,7 @@ transport errors to stderr. Terminal input contents are excluded.
 
 ## Live tests
 
-Live tests need a [self-managed deployment](self-managed.md), `npm link`, and
+Live tests need a configured [Juiced service and Fleet](fleet-sdk-migration.md), a Juiced login, `npm link`, and
 `juiced claude login`. They use your Claude subscription.
 
 - `npm run test:live` checks the remote Claude version and sends a small real

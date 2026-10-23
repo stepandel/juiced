@@ -1,3 +1,4 @@
+import { accountFixtureEnv, handleAccountFixture } from './account-fixture.mjs';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -27,6 +28,7 @@ const worker = createProtocolWorker({ runtimeId: 'fixture.v1', fetch: async requ
     : Response.json({ id, status: 'deleting', hostArchived: false }, { status: 202 });
 } });
 const server = createServer(async (request, response) => {
+  if (await handleAccountFixture(request, response, 'fixture-token')) return;
   try {
     calls.push(request.url);
     const chunks = [];
@@ -45,7 +47,7 @@ try {
   await mkdir(join(root, 'empty-bin'));
   await mkdir(join(root, 'project'));
   await writeFile(join(root, 'project', 'keep.txt'), 'local data');
-  const env = { ...process.env, PATH: join(root, 'empty-bin'), CANTELOP_PROFILE: 'deletion-smoke',
+  const env = { ...process.env, ...await accountFixtureEnv(root, origin), PATH: join(root, 'empty-bin'), CANTELOP_PROFILE: 'deletion-smoke',
     CANTELOP_APP_CONFIG: JSON.stringify({ schemaVersion: 1, activeProfile: 'deletion-smoke', profiles: {
       'deletion-smoke': { defaultApp: { slug: 'juiced' }, apps: [{ id: appId, slug: 'juiced', edgeUrl: origin, accessToken: 'fixture-token' }] },
     } }),
@@ -65,7 +67,7 @@ try {
   exists = true; fail = true;
   await assert.rejects(run(['--yes']), error => /control_unavailable/.test(error.stderr) && !/Deletion requested/.test(error.stderr));
   assert.equal(await readFile(join(root, 'project', 'keep.txt'), 'utf8'), 'local data');
-  console.log('Passed SDK deletion with an empty PATH and no account credentials: confirmation, canonical ID, absent workspace, errors, and local file preservation.');
+  console.log('Passed SDK deletion with an empty PATH and fixture account credentials: confirmation, canonical ID, absent workspace, errors, and local file preservation.');
 } finally {
   await new Promise(resolve => server.close(resolve));
   await rm(root, { recursive: true, force: true });

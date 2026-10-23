@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { buildAppArtifacts } from '@cantelop/sdk/build';
 
 const { apps } = await buildAppArtifacts({ definition: 'src/cantelop.ts', outdir: 'dist/cantelop' });
-for (const { name, edge } of apps) {
+for (const { name, edge, runtime } of apps) {
+  assert.equal(edge.manifest.definition_kind, 'fleet');
+  assert.equal(runtime.manifest.definition_kind, 'fleet');
+  assert.equal(edge.manifest.cli_build_protocol_version, 7);
   assert.equal(edge.manifest.fleet_execution_protocol_version, 1,
     `${name} requires the SDK shared Fleet package contract`);
   assert.ok(edge.manifest.optional_bindings.includes('CANTELOP_FLEET_EXECUTION_VERSION'),

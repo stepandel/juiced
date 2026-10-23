@@ -39,7 +39,6 @@ test(
     const env = {
       PATH: '',
       HOME: root,
-      JUICED_MODE: 'managed',
       JUICED_SERVICE_URL: origin,
       JUICED_CONFIG_HOME: join(root, 'config'),
       GH_TOKEN: 'fixture-token',

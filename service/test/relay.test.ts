@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import type { Pool } from 'pg';
 import { relay, boundedBody } from '../src/relay';
 import { Platform } from '../src/platform';
+import { CantelopClient } from '@cantelop/sdk';
+import type { JuicedFleet } from '../src/platform';
 import { Accounts, type Account, type Installation } from '../src/accounts';
 import { config } from '../src/config';
 const cfg = config({
@@ -65,36 +67,22 @@ function context(platform: Platform) {
     accounts: { entitled: () => true } as unknown as Accounts,
   };
 }
-test('relay pins server App credentials and streams without buffering or losing cancellation', async () => {
+test('relay pins server App credentials and streams without buffering or losing cancellation', async t => {
   let upstreamRequest: Request | undefined,
     cancelled = false;
   let source!: ReadableStreamDefaultController<Uint8Array>;
-  const platform = new Platform(
-    'https://platform.example',
-    'flt_' + 'a'.repeat(32),
-    'fsp_' + 'a'.repeat(32) + '.' + 'b'.repeat(64),
-    async (r) => {
-      upstreamRequest = r as Request;
-      return new Response(
-        new ReadableStream({
-          start(c) {
-            source = c;
-            c.enqueue(new TextEncoder().encode('data: first\n\n'));
-          },
-          cancel() {
-            cancelled = true;
-          },
-        }),
-        { headers: { 'Content-Type': 'text/event-stream' } },
-      );
-    },
-  );
-  platform.credentials = async () => ({
-    appId: installation.app_id!,
-    runtimeId: 'runtime-v1',
-    edgeUrl: 'https://tenant-a.example',
-    accessToken: 'server-app-token',
+  const previous = process.env.CANTELOP_APP_CONFIG;
+  process.env.CANTELOP_APP_CONFIG = JSON.stringify({schemaVersion:1,activeProfile:'default',profiles:{default:{apps:[],fleets:[{name:'juiced',id:`flt_${'a'.repeat(32)}`,controlUrl:'https://platform.example',accessToken:`fsp_${'a'.repeat(32)}.${'b'.repeat(64)}`}]}}});
+  t.after(() => { if (previous === undefined) delete process.env.CANTELOP_APP_CONFIG; else process.env.CANTELOP_APP_CONFIG = previous; });
+  t.mock.method(globalThis,'fetch', async (r: Request) => {
+    if (new URL(r.url).origin === 'https://platform.example') {
+      if (r.url.endsWith('/credentials')) return Response.json({appId:installation.app_id!,runtimeId:'runtime-v1',edgeUrl:'https://tenant-a.example',accessToken:'server-app-token'});
+      return Response.json({id:installation.platform_id,external_key:installation.external_key,app_id:installation.app_id,package_id:installation.package_id,runtime_id:'runtime-v1',status:'ready',version:'1.0.0',policy_revision:2,enforced_revision:2});
+    }
+    upstreamRequest = r;
+    return new Response(new ReadableStream<Uint8Array>({start(c) {source=c;c.enqueue(new TextEncoder().encode('data: first\n\n'));},cancel(){cancelled=true;}}),{headers:{'Content-Type':'text/event-stream'}});
   });
+  const platform = new Platform(new CantelopClient().fleet({name:'juiced',runtime:{receive(){},[Symbol.for('dev.cantelop.sdk.compiled-runtime.v1')]:'runtime-v1'}}) as JuicedFleet);
   const input = request('/commands/stream', envelope('stream'));
   const response = await relay(input, '/commands/stream', context(platform));
   assert.equal(upstreamRequest!.headers.get('authorization'), 'Bearer server-app-token');
@@ -109,7 +97,7 @@ test('relay pins server App credentials and streams without buffering or losing 
 test('relay rejects raw database, arbitrary paths, changed pins and protocol/path mismatches before upstream', async () => {
   let called = false;
   const platform = {
-    credentials: async () => {
+    connection: async () => {
       called = true;
       throw new Error('unexpected');
     },

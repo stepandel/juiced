@@ -14,7 +14,6 @@ let server;
 try {
   const env = {
     ...process.env,
-    JUICED_MODE: 'managed',
     JUICED_CONFIG_HOME: join(directory, 'config'),
   };
   for (const key of Object.keys(env))

@@ -1,5 +1,4 @@
 import { Provisioner } from './provisioning';
-import { UsageIngestor } from './usage';
 import { TerminalCloser } from './terminals';
 import { enqueue } from './accounts';
 import { transaction } from './db';
@@ -28,11 +27,9 @@ export async function reconcile(s: JobServices, wake = wakeJobs) {
       );
   });
   const provision = new Provisioner(s.pool, s.accounts, s.platform, s.billing);
-  const usage = new UsageIngestor(s.pool, s.platform);
   const terminals = new TerminalCloser(s.pool, s.platform);
   const workers: Array<{ name: string; run(): Promise<boolean> } | undefined> = [
     { name: 'billing', run: () => s.billing?.runOnce() ?? Promise.resolve(false) },
-    { name: 'usage', run: () => usage.runOnce() },
     { name: 'provisioning', run: () => provision.runOnce() },
     { name: 'terminals', run: () => terminals.runOnce() },
   ];
@@ -45,7 +42,7 @@ export async function reconcile(s: JobServices, wake = wakeJobs) {
       if (result.status !== 'rejected') continue;
       logError('job_worker_failed', result.reason, { worker: workers[index]!.name });
       retry = true;
-      // A broken usage page must not starve provisioning, billing or cleanup.
+      // A failed worker must not starve provisioning, billing or cleanup.
       // Retry the failed worker on the next queue delivery, after other queues
       // have advanced and their durable retry times have been scheduled.
       workers[index] = undefined;

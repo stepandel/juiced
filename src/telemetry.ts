@@ -29,7 +29,7 @@ export class CliTelemetry {
   ) { this.path = join(configRoot(env), 'telemetry.json'); }
 
   private excluded() {
-    return this.env.JUICED_MODE === 'self-managed' || this.env.JUICED_TELEMETRY_DISABLED === '1' ||
+    return this.env.JUICED_TELEMETRY_DISABLED === '1' ||
       this.env.DO_NOT_TRACK === '1' || (!!this.env.CI && this.env.CI !== 'false' && this.env.CI !== '0');
   }
   private async read(): Promise<State | undefined> {

@@ -255,11 +255,8 @@ reuse its import metadata.
 
 ## Migration and deletion
 
-Keep existing self-managed deployments usable through an explicit mode/profile
-while introducing managed accounts. Once managed mode is selected, missing or
-expired Juiced credentials must fail rather than fall back to an ambient
-Cantelop integration profile. Managed and self-managed targets need distinct
-local namespaces.
+All CLI runtime access uses the Juiced account service. Missing or expired
+credentials fail rather than falling back to a Cantelop integration profile.
 
 An existing `juiced` deployment is not evidence of which end user owns its data.
 Require a verified administrative claim/migration procedure for existing data,
@@ -283,7 +280,7 @@ App archival alone is not evidence that durable workspace data was purged.
    mapping, durable provisioning worker, entitlement checks, billing ledger,
    usage reconciliation, and revocation-aware streaming relay.
 3. **CLI:** managed login/logout/whoami, account-bound `AppConnection`, explicit
-   self-managed mode, local state scoping, installable package contents and
+   account authentication, local state scoping, installable package contents and
    release automation. The current `package.json` is private; publishing also
    needs a verified package name/registry, licensing decision, and package smoke
    tests outside the source checkout.
@@ -309,4 +306,4 @@ Operational acceptance also needs provisioning recovery after every external
 step, one App for simultaneous logins, independent `GH_TOKEN` rotation, bounded
 stream revocation, budget enforcement during detached work, complete deletion,
 and a tested rollback. Until these paths exist and pass, the current CLI remains
-a self-managed development client rather than a managed multitenant product.
+a development client rather than a managed multitenant product.
