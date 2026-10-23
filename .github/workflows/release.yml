@@ -9,7 +9,8 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: release-${{ github.ref }}
+  # Every main commit keeps its own run: release.mjs ships only a successful run for its exact sha.
+  group: release-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:

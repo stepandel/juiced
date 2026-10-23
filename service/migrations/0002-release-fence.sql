@@ -20,25 +20,21 @@ END $$;
 -- Enforce the boundary for pre-fence deployments too. Their existing SQL cannot
 -- claim jobs or overwrite installation identity once a generation is active.
 -- The owner still bypasses RLS for migrations/maintenance; runtime roles do not.
+-- application_name carries the deployment generation. A newer deployment may
+-- write while its rollout runs; promotion fences every older generation.
+-- CASE guarantees the cast only sees a well-formed name.
+CREATE FUNCTION juiced_release_current() RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT coalesce((SELECT CASE WHEN coalesce(current_setting('application_name',true),'') ~ '^juiced-release:[0-9]{1,18}$'
+      THEN substr(current_setting('application_name',true),16)::bigint>=generation ELSE false END
+    FROM juiced_release WHERE singleton),true)
+$$;
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY jobs_read ON jobs FOR SELECT USING (true);
 CREATE POLICY jobs_insert ON jobs FOR INSERT WITH CHECK (true);
-CREATE POLICY jobs_update_release ON jobs FOR UPDATE USING (
-  coalesce((SELECT 'juiced-release:'||generation::text=coalesce(current_setting('application_name',true),'')
-    FROM juiced_release WHERE singleton),true)
-);
-CREATE POLICY jobs_delete_release ON jobs FOR DELETE USING (
-  coalesce((SELECT 'juiced-release:'||generation::text=coalesce(current_setting('application_name',true),'')
-    FROM juiced_release WHERE singleton),true)
-);
+CREATE POLICY jobs_update_release ON jobs FOR UPDATE USING (juiced_release_current());
+CREATE POLICY jobs_delete_release ON jobs FOR DELETE USING (juiced_release_current());
 ALTER TABLE installations ENABLE ROW LEVEL SECURITY;
 CREATE POLICY installations_read ON installations FOR SELECT USING (true);
 CREATE POLICY installations_insert ON installations FOR INSERT WITH CHECK (true);
-CREATE POLICY installations_update_release ON installations FOR UPDATE USING (
-  coalesce((SELECT 'juiced-release:'||generation::text=coalesce(current_setting('application_name',true),'')
-    FROM juiced_release WHERE singleton),true)
-);
-CREATE POLICY installations_delete_release ON installations FOR DELETE USING (
-  coalesce((SELECT 'juiced-release:'||generation::text=coalesce(current_setting('application_name',true),'')
-    FROM juiced_release WHERE singleton),true)
-);
+CREATE POLICY installations_update_release ON installations FOR UPDATE USING (juiced_release_current());
+CREATE POLICY installations_delete_release ON installations FOR DELETE USING (juiced_release_current());

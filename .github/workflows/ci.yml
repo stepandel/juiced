@@ -3,7 +3,8 @@ on: [push, pull_request]
 permissions:
   contents: read
 concurrency:
-  group: checks-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  # Main commits are never cancelled: releases require successful CI for their exact sha.
+  group: checks-${{ github.event_name }}-${{ github.event.pull_request.number || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
   cancel-in-progress: true
 jobs:
   verify:

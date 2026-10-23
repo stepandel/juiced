@@ -37,10 +37,8 @@ export class Provisioner {
       // Hold the claimed row and account lock across projection. A replacement
       // worker cannot claim this job or race a billing/suspension transition.
       await transaction(this.pool, async (tx) => {
-        if (!await currentRelease(tx, this.accounts.release, true)) {
-          await tx.query("UPDATE jobs SET status='pending',lease_until=NULL WHERE id=$1 AND fence=$2", [row.id, row.fence]);
-          return;
-        }
+        // Promotion already released this claim; a stale role cannot update it anyway.
+        if (!await currentRelease(tx, this.accounts.release, true)) return;
         if (
           !(
             await tx.query(

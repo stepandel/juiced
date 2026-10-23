@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Accounts, enqueue } from '../src/accounts';
-import { promoteRelease } from '../src/release';
+import { currentRelease, promoteRelease } from '../src/release';
 import { Provisioner } from '../src/provisioning';
 import { reconcile } from '../src/jobs';
 import type { Platform } from '../src/platform';
@@ -41,6 +41,8 @@ test('promotion immediately resets observation backoff, fences stale workers and
     await reconcile({ pool: f.pool, accounts: f.accounts, platform: {} as Platform }, async () => { wake++; });
     assert.equal(wake, 0, 'stale deployments drain their queue without scheduling more messages');
     await assert.rejects(f.accounts.bootstrap(f.account, { version: '0.2.0', runtimeId: old.runtimeId }), { code: 'service_unavailable' });
+    assert.equal(await currentRelease(f.pool, { generation: 3, packageId: 'pkg_rolling', runtimeId: 'runtime-rolling' }), true,
+      'a newer deployment serves while its rollout runs, before promotion');
     const current = new Accounts(f.pool, next);
     const platform = { async installation() { return { id: 'ins_existing', app_id: 'app_existing', package_id: next.packageId,
       runtime_id: next.runtimeId, status: 'ready', policy_revision: 1, enforced_revision: 1 }; } } as unknown as Platform;

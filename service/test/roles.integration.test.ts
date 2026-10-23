@@ -79,6 +79,11 @@ test(
       await tx.query("SELECT set_config('application_name','juiced-release:2',true)");
       assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 1);
       assert.equal((await tx.query("UPDATE installations SET runtime_id='current' RETURNING id")).rowCount, 1);
+      // A newer deployment keeps working while its rollout runs, before promotion.
+      await tx.query("SELECT set_config('application_name','juiced-release:3',true)");
+      assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 1);
+      await tx.query("SELECT set_config('application_name','juiced-release:x',true)");
+      assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 0);
     } finally {
       await tx.query('ROLLBACK');
       tx.release();

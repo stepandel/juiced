@@ -100,14 +100,18 @@ export async function release(mode, options = {}, env = process.env) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await chmod(directory, 0o700);
   const lockPath = join(directory, 'lock');
-  const lock = await open(lockPath, 'wx', 0o600).catch(() => { throw new Error(`Release already locked: ${lockPath}. Remove only after confirming its process has stopped.`); });
+  const lock = await open(lockPath, 'wx', 0o600).catch(error => {
+    if (error.code !== 'EEXIST') throw error;
+    throw new Error(`Release already locked: ${lockPath}. Remove only after confirming its process has stopped.`);
+  });
   await lock.writeFile(String(process.pid));
   try {
     const statePath = join(directory, 'state.json');
     let state;
     try { state = JSON.parse(await readFile(statePath)); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
-    state ??= { schemaVersion: 1, commit: sha, version, generation: Date.now(), completed: {} };
+    // The generation is assigned on first ship, so promotion order follows shipping, not preparation.
+    state ??= { schemaVersion: 1, commit: sha, version, completed: {} };
     assert.equal(state.commit, sha, 'Resume from the original source commit');
     assert.equal(state.version, version);
     let saving = Promise.resolve();
@@ -171,9 +175,10 @@ export async function release(mode, options = {}, env = process.env) {
     const preparation = await Promise.allSettled([
       step('cli-artifacts', async () => {
         const id = await waitFor(async () => {
+          // List runs first: a run that completes before the lookup is then still found.
+          const { workflow_runs: runs } = await api(`repos/${repository}/actions/workflows/release.yml/runs?head_sha=${sha}&branch=main&event=push&per_page=20`);
           const found = await findPrepared(sha, repository, api);
           if (found) return found;
-          const { workflow_runs: runs } = await api(`repos/${repository}/actions/workflows/release.yml/runs?head_sha=${sha}&branch=main&event=push&per_page=20`);
           if (!runs.length || runs.every(r => r.status === 'completed')) throw new Error('No successful main preparation run. Inspect the Release Juiced CLI workflow before shipping.');
           console.log('Waiting for native CLI qualification…');
         }, { interval: 15_000 });
@@ -201,6 +206,7 @@ export async function release(mode, options = {}, env = process.env) {
       if (!runs.length || runs.every(r => r.status === 'completed')) throw new Error('Main service CI must pass before publication');
       console.log('Waiting for main service CI…');
     }, { interval: 15_000 });
+    if (!state.generation) { state.generation = Date.now(); await save(); }
     const checkActive = async () => {
       const result = await fetch(new URL('/api/release', origin), { redirect: 'error', signal: AbortSignal.timeout(20_000) });
       assert.equal(result.status, 200, 'Deploy the release control endpoint before using ship');
@@ -292,7 +298,12 @@ export async function release(mode, options = {}, env = process.env) {
       }
       const install = join(directory, 'install'), bin = join(directory, 'bin');
       const smokeEnv = { ...env, JUICED_INSTALL_DIR: install, JUICED_BIN_DIR: bin, JUICED_SERVICE_URL: origin.origin, JUICED_TELEMETRY_DISABLED: '1' };
-      await run('public-install', '/bin/sh', ['service/public/install.sh', version], { env: smokeEnv });
+      // Run the installer users actually fetch, not the checkout's copy.
+      const served = await fetch(new URL('/install.sh', origin), { signal: AbortSignal.timeout(20_000), redirect: 'error' });
+      assert.ok(served.ok, '/install.sh is unavailable');
+      const installer = join(directory, 'install.sh');
+      await writeFile(installer, await served.text(), { mode: 0o600 });
+      await run('public-install', '/bin/sh', [installer, version], { env: smokeEnv });
       const cli = join(bin, 'juiced'), prefix = ['--workspace', `release-${state.generation}`];
       let failure;
       try {

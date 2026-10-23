@@ -17,7 +17,9 @@ export async function currentRelease(db: Queryable, release: ReleaseIdentity, lo
     'SELECT generation,package_id,runtime_id FROM juiced_release',
   )).rows[0];
   // Additive migration: deployments keep working until the first explicit promotion.
-  return !row || (Number(row.generation) === (release.generation ?? 0) &&
+  // A newer deployment serves while its rollout runs; promotion then fences older ones.
+  const generation = release.generation ?? 0;
+  return !row || generation > Number(row.generation) || (Number(row.generation) === generation &&
     row.package_id === release.packageId && row.runtime_id === release.runtimeId);
 }
 
@@ -53,10 +55,14 @@ export async function promoteRelease(pool: Pool, release: ReleaseIdentity) {
         SELECT 'job_'||md5($2::text||':'||id),account_id,'provision','{}',operation_id
         FROM installations WHERE id=ANY($1::text[]) ON CONFLICT(idempotency_key) DO NOTHING`,
       [ids, release.generation]);
-      // Reset pending observation delays only. Never steal a running lease or retry a deletion early.
+      // Reset pending observation delays only. Never retry a deletion early.
       await tx.query(`UPDATE jobs SET available_at=now(),attempts=0 WHERE account_id=ANY($1::text[])
         AND kind IN ('provision','upgrade') AND status='pending'`, [accounts]);
     }
+    // The exclusive lock means no projection is in flight. A remaining lease belongs
+    // to a claim that will now fail its fence, and RLS blocks its own release.
+    await tx.query(`UPDATE jobs SET status='pending',lease_until=NULL
+      WHERE status='running' AND kind IN ('provision','suspend','delete','upgrade')`);
     return installations.length;
   });
 }
