@@ -5,6 +5,7 @@ import { Accounts, enqueue, type Account } from '../src/accounts';
 import { Provisioner } from '../src/provisioning';
 import type { Platform, PlatformInstallation } from '../src/platform';
 import { ServiceError } from '../src/config';
+import { policyEpoch } from '../src/resource-policy';
 
 test(
   'durable provisioning recovers an ambiguous create and renews policy once per epoch',
@@ -78,7 +79,7 @@ test(
       await enqueue(pool, a.id, 'provision', {}, 'renew-test');
       await p.runOnce();
       assert.equal(policies, 2);
-      assert.equal((await accounts.installation(a.id))!.entitlement_epoch, 'invoice-2');
+      assert.equal((await accounts.installation(a.id))!.entitlement_epoch, policyEpoch('invoice-2'));
       // A stale bootstrap snapshot cannot provision after suspension won the lock.
       const b = await accounts.ensure(await user(pool));
       await pool.query(
@@ -185,7 +186,7 @@ test('provisioning observes CLI rollout and never changes an existing instance p
     const account = await accounts.ensure(await user(f.pool));
     await f.pool.query("UPDATE accounts SET entitlement='active',period_id='invoice',period_end=now()+interval '1 day' WHERE id=$1", [account.id]);
     await f.pool.query(`INSERT INTO installations(id,account_id,external_key,platform_id,app_id,package_id,runtime_id,status,entitlement_epoch,policy_revision)
-      VALUES('jin_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',$1,'external-existing-account',$2,$3,$4,'runtime-old','ready','invoice',1)`, [account.id, `ins_${'a'.repeat(32)}`, `app_${'a'.repeat(32)}`, `pkg_${'a'.repeat(32)}`]);
+      VALUES('jin_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',$1,'external-existing-account',$2,$3,$4,'runtime-old','ready',$5,1)`, [account.id, `ins_${'a'.repeat(32)}`, `app_${'a'.repeat(32)}`, `pkg_${'a'.repeat(32)}`, policyEpoch('invoice')]);
     const active = (await f.pool.query<Account>('SELECT * FROM accounts WHERE id=$1', [account.id])).rows[0]!;
     await accounts.bootstrap(active, { version: '0.2.0', runtimeId: 'runtime-new' });
     let remote: PlatformInstallation = {id:`ins_${'a'.repeat(32)}`,app_id:`app_${'a'.repeat(32)}`,package_id:`pkg_${'a'.repeat(32)}`,runtime_id:'runtime-old',status:'ready',policy_revision:1,enforced_revision:1};
@@ -214,7 +215,7 @@ test('a stale service release keeps ready installations usable and failed instan
     const account = await accounts.ensure(await user(f.pool));
     await f.pool.query("UPDATE accounts SET entitlement='active',period_id='invoice',period_end=now()+interval '1 day' WHERE id=$1", [account.id]);
     await f.pool.query(`INSERT INTO installations(id,account_id,external_key,platform_id,app_id,package_id,runtime_id,status,entitlement_epoch,policy_revision)
-      VALUES('jin_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',$1,'external-existing-account',$2,$3,$4,'runtime-old','ready','invoice',1)`, [account.id, `ins_${'a'.repeat(32)}`, `app_${'a'.repeat(32)}`, packageId]);
+      VALUES('jin_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',$1,'external-existing-account',$2,$3,$4,'runtime-old','ready',$5,1)`, [account.id, `ins_${'a'.repeat(32)}`, `app_${'a'.repeat(32)}`, packageId, policyEpoch('invoice')]);
     await enqueue(f.pool, account.id, 'provision', {}, 'renewal');
     // The CLI already rolled the Fleet forward; this service still names the old release.
     let remote: PlatformInstallation = { id: `ins_${'a'.repeat(32)}`, app_id: `app_${'a'.repeat(32)}`, package_id: `pkg_${'b'.repeat(32)}`, runtime_id: 'runtime-new', status: 'ready', policy_revision: 1, enforced_revision: 1 };

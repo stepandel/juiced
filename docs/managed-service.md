@@ -220,12 +220,25 @@ platform exposes resource limits and subscription expiry rather than prepaid
 compute-credit budgets. Choose subscription pricing from observed infrastructure
 costs; this service does not advertise a live compute-consumption meter.
 
-Current policy permits two VMs, eight aggregate vCPUs, 9216 MiB aggregate guest
-capacity, and eight Workspaces sharing a 10 GiB ceiling: each Workspace gets a
+Current policy has no per-account Sandbox, vCPU or guest-memory cap. Sessions
+and helper operations share available host capacity. Eight Workspaces share a
+10 GiB ceiling: each Workspace gets a
 1 GiB JuiceFS hard quota and a 256 MiB Turso database limit. VM/Workspace admission
 is checked atomically. Retained storage continues occupying allocation until
 both database and filesystem purge succeed. Host memory includes additional VMM
 and filesystem overhead; account limits refer to guest capacity.
+
+Compute limits are explicit `null` values in the Fleet policy. Deploy the
+nullable-policy platform support before this service. The SDK dependency is
+pinned to its reviewed source commit until that support is published on npm;
+source installs build the SDK package and require Go. Replace the pin with the
+published SDK release when available.
+
+The entitlement projection key includes the resource-policy version. Promotion
+queues existing installations even when the package, runtime and billing period
+are unchanged. Bootstrap also repairs an older policy and waits for its enforced
+revision before reporting readiness. No manual database edit or billing renewal
+is needed to remove the old caps.
 
 Only the service holds App integration tokens. The CLI sends opaque device
 credentials to its service. The relay validates SDK commands and sync paths,
@@ -302,8 +315,8 @@ rollback reverses destructive application data changes.
 
 For canaries, deploy the new Next.js app and jobs to a separate staging Fleet/service origin
 first. Pin its package/runtime pair, qualify two accounts, then promote the same
-immutable package in the production Fleet and CLI build. Keep Fleet and host
-capacity limits deliberately small until provisioning and policy-enforcement latency is measured.
+immutable package in the production Fleet and CLI build. Qualify session and helper concurrency against the shared host pool; Fleet
+installations and per-account compute have no artificial concurrency cap.
 Current placement targets one configured compute ingress; multi-host scheduling
 is a later extension, and placement/host recovery remains platform-owned.
 

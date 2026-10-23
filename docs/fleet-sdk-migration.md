@@ -2,9 +2,13 @@
 
 This migration depends on SDK [PR #65](https://github.com/stepandel/cantelop-sdk/pull/65)
 and platform [PR #391](https://github.com/stepandel/cantelop-internal/pull/391).
-Juiced pins the published `@cantelop/sdk@1.6.0` registry package in both
-manifests and the lockfile. Install with `npm ci --ignore-scripts`; the published
-package includes its qualified runtime and native adapter artifacts.
+Unlimited per-account compute also depends on SDK
+[PR #66](https://github.com/stepandel/cantelop-sdk/pull/66) and platform
+[PR #398](https://github.com/stepandel/cantelop-internal/pull/398). Both manifests
+and the lockfile pin the SDK source commit until its npm release is published.
+Install with `npm ci` on a machine with Go 1.26.2; the SDK prepare step builds
+its JavaScript and native adapters. Replace the source pin with the published
+SDK package when available.
 
 ## Definition and clients
 

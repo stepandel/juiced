@@ -46,7 +46,7 @@
     "test:release": "node --test scripts/release.test.mjs"
   },
   "dependencies": {
-    "@cantelop/sdk": "1.6.0",
+    "@cantelop/sdk": "git+https://github.com/stepandel/cantelop-sdk.git#00f05c350b9ccd704e91b571ab554d96175d9914",
     "ink": "^8.0.0",
     "react": "^19.3.1",
     "string-width": "^8.3.0"

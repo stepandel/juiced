@@ -394,8 +394,8 @@ the dependency gates before starting dependent implementation.
 
 The main dependency path is P00/P01 -> C01-C04 + J01/J02 -> J03-J05 -> free accounts,
 then C05/C06 + J06 -> release/lifecycle/package qualification -> paid production.
-Free accounts retain per-App concurrency and shape quotas. Keep Fleet and host
-capacity limits bounded while qualifying the launch. Customer usage-based
+Free accounts have no per-App compute cap; shared host admission and finite
+Workspace/storage quotas still apply. Customer usage-based
 hard-cap claims wait for C05/C06.
 No calendar estimates are attached until P00/P01 resolve the version baseline,
 storage enforcement and lease costs; these are the largest current uncertainties.

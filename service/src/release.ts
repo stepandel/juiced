@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { transaction, type Queryable } from './db';
 import { ServiceError } from './config';
+import { RESOURCE_POLICY_VERSION } from './resource-policy';
 
 export interface ReleaseIdentity {
   packageId: string;
@@ -43,8 +44,9 @@ export async function promoteRelease(pool: Pool, release: ReleaseIdentity) {
     const installations = (await tx.query(`SELECT i.id,i.account_id FROM installations i
       JOIN accounts a ON a.id=i.account_id WHERE a.status='active' AND a.entitlement='active'
       AND i.status NOT IN ('deleted','deleting')
-      AND (i.package_id<>$1 OR i.runtime_id<>$2 OR i.status<>'ready' OR i.desired_package_id IS NOT NULL)
-      ORDER BY i.account_id FOR UPDATE OF a,i`, [release.packageId, release.runtimeId])).rows;
+      AND (i.package_id<>$1 OR i.runtime_id<>$2 OR i.status<>'ready' OR i.desired_package_id IS NOT NULL
+        OR i.entitlement_epoch IS DISTINCT FROM concat(a.period_id, ':', $3::text))
+      ORDER BY i.account_id FOR UPDATE OF a,i`, [release.packageId, release.runtimeId, RESOURCE_POLICY_VERSION])).rows;
     if (installations.length) {
       const ids = installations.map(i => String(i.id));
       const accounts = installations.map(i => String(i.account_id));

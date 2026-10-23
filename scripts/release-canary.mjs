@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { PassThrough, Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export const canaryPolicy = { maxSandboxes: 2, maxVcpus: 8, maxMemoryMib: 9216,
+export const canaryPolicy = { maxSandboxes: null, maxVcpus: null, maxMemoryMib: null,
   maxWorkspaces: 8, maxStorageBytes: 10 * 1024 ** 3 };
 
 export async function qualifyInstance(instance, expected, runTerminal, signal, sleep = delay) {

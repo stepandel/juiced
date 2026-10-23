@@ -6,6 +6,7 @@ import { transaction } from './db';
 import { ServiceError } from './config';
 import { logError } from './log';
 import { currentRelease } from './release';
+import { policyEpoch } from './resource-policy';
 
 /** Deletion retries must converge once the platform no longer has the installation. */
 async function unlessMissing<T>(work: Promise<T>) {
@@ -177,16 +178,16 @@ export class Provisioner {
             [i.id, remote.id, remote.app_id],
           );
           let revision = i.policy_revision;
-          if (i.entitlement_epoch !== a.period_id) {
+          if (i.entitlement_epoch !== policyEpoch(a.period_id)) {
             const result = await this.platform.setPolicy(remote.id, {
               expectedRevision: remote.policy_revision,
               sourceFence: String(row.projection_fence),
               policy: {
                 active: true,
                 expiresAt: a.period_end!.toISOString(),
-                maxSandboxes: 2,
-                maxVcpus: 8,
-                maxMemoryMib: 9216,
+                maxSandboxes: null,
+                maxVcpus: null,
+                maxMemoryMib: null,
                 maxWorkspaces: 8,
                 maxStorageBytes: 10 * 1024 ** 3,
               },
@@ -194,7 +195,7 @@ export class Provisioner {
             revision = result.revision;
             await tx.query(
               'UPDATE installations SET policy_revision=$2,entitlement_epoch=$3 WHERE id=$1',
-              [i.id, revision, a.period_id],
+              [i.id, revision, policyEpoch(a.period_id)],
             );
           }
           done =
