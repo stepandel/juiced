@@ -1,0 +1,306 @@
+{
+  "schemaVersion": 2,
+  "measuredAt": "2026-10-23T18:55:52.807Z",
+  "baselineCommit": "7f9cc2c61fcbc7d1aef6524ec0ef0405b3bf187f",
+  "candidateSourceSha256": "2e27bd14095e115da4162a77905391ac4c6ad601ca236cbdc1ea5114c7da95d5",
+  "platform": "darwin",
+  "nodeVersion": "v24.3.0",
+  "fixtures": [
+    {
+      "name": "small files",
+      "fileCount": 256,
+      "bytesPerFile": 128,
+      "directories": 1,
+      "totalBytes": 32768,
+      "scenarios": [
+        {
+          "scenario": "clean",
+          "measurementsMs": {
+            "baseline": [
+              103,
+              103,
+              99,
+              98,
+              100
+            ],
+            "candidate": [
+              68,
+              61,
+              62,
+              62,
+              60
+            ]
+          },
+          "medianMs": {
+            "baseline": 100,
+            "candidate": 62
+          },
+          "gitProcesses": {
+            "baseline": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "candidate": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": null,
+            "candidate": null
+          }
+        },
+        {
+          "scenario": "one dirty file",
+          "measurementsMs": {
+            "baseline": [
+              100,
+              98,
+              96,
+              104,
+              105
+            ],
+            "candidate": [
+              67,
+              64,
+              62,
+              65,
+              63
+            ]
+          },
+          "medianMs": {
+            "baseline": 100,
+            "candidate": 64
+          },
+          "gitProcesses": {
+            "baseline": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "candidate": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": null,
+            "candidate": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "large files",
+      "fileCount": 256,
+      "bytesPerFile": 262144,
+      "directories": 1,
+      "totalBytes": 67108864,
+      "scenarios": [
+        {
+          "scenario": "clean",
+          "measurementsMs": {
+            "baseline": [
+              89,
+              94,
+              93,
+              99,
+              93
+            ],
+            "candidate": [
+              53,
+              53,
+              50,
+              55,
+              52
+            ]
+          },
+          "medianMs": {
+            "baseline": 93,
+            "candidate": 53
+          },
+          "gitProcesses": {
+            "baseline": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "candidate": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": null,
+            "candidate": null
+          }
+        },
+        {
+          "scenario": "one dirty file",
+          "measurementsMs": {
+            "baseline": [
+              106,
+              103,
+              104,
+              104,
+              103
+            ],
+            "candidate": [
+              65,
+              64,
+              63,
+              64,
+              63
+            ]
+          },
+          "medianMs": {
+            "baseline": 104,
+            "candidate": 64
+          },
+          "gitProcesses": {
+            "baseline": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "candidate": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": null,
+            "candidate": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "nested files",
+      "fileCount": 1024,
+      "bytesPerFile": 128,
+      "directories": 64,
+      "totalBytes": 131072,
+      "scenarios": [
+        {
+          "scenario": "clean",
+          "measurementsMs": {
+            "baseline": [
+              241,
+              155,
+              166,
+              158,
+              159
+            ],
+            "candidate": [
+              138,
+              116,
+              109,
+              118,
+              184
+            ]
+          },
+          "medianMs": {
+            "baseline": 159,
+            "candidate": 118
+          },
+          "gitProcesses": {
+            "baseline": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "candidate": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": null,
+            "candidate": null
+          }
+        },
+        {
+          "scenario": "one dirty file",
+          "measurementsMs": {
+            "baseline": [
+              215,
+              165,
+              170,
+              163,
+              256
+            ],
+            "candidate": [
+              122,
+              134,
+              119,
+              146,
+              116
+            ]
+          },
+          "medianMs": {
+            "baseline": 170,
+            "candidate": 122
+          },
+          "gitProcesses": {
+            "baseline": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "candidate": [
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": null,
+            "candidate": null
+          }
+        }
+      ]
+    }
+  ],
+  "runtime": {
+    "name": "bun",
+    "version": "1.3.10"
+  },
+  "verification": "Every candidate snapshot equaled its baseline; the real index remained byte-for-byte unchanged.",
+  "limitations": [
+    "Local disposable filesystem fixtures, not production end-to-end latency.",
+    "Five alternating pairs per scenario; no latency percentiles or cold-storage guarantee.",
+    "Git command intervals overlap and must not be added together.",
+    "Null Git process counts or timelines mean the runtime did not support child-process instrumentation."
+  ]
+}

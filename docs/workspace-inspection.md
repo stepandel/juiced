@@ -98,6 +98,14 @@ ending conversion use a rebuilt index with fresh hashes instead. No computed
 snapshot or file hash is cached across commands. This captures tracked edits, deletions,
 staged additions, and non-ignored untracked files. The real index, Git object
 store, refs, and working files are unchanged. No temporary commit is created.
+
+Snapshot capture batches Git metadata reads and uses the existing staged-file
+read to identify assume-unchanged and skip-worktree flags. Only flagged entries
+need those extra private-index rewrites. Independent readability checks and index
+preparation overlap, as do tree creation and submodule enumeration. The final
+working-tree and checkout consistency checks also run together. An ordinary
+root capture uses 19 Git processes instead of 25; Git still applies conversions,
+creates the snapshot tree, and checks current working contents.
 `ls` uses local repository metadata to resolve the existing workspace pairing and
 relative path. On the remote side, Git enumerates tracked and eligible untracked
 paths, and filesystem metadata supplies their types. Listing does not read file
@@ -202,6 +210,7 @@ runtime requirements.
 npm run check
 npm test
 npm run test:inspection:local
+node scripts/benchmark-inspection.mjs --baseline BASE_COMMIT --output /tmp/inspection-benchmark.json
 ```
 
 The focused inspection tests cover remote-only listing, complete and filtered
@@ -210,6 +219,31 @@ binaries, symlinks, modes, ignored files and directories, literal paths, narrow
 terminals, directory summaries, linked worktrees, unavailable checkouts, preserved
 journals, and invalid streams. Preservation checks compare complete fixture
 working trees and Git directories against their original bytes and metadata.
+
+The benchmark compares candidate and baseline snapshots on disposable small-file,
+64 MiB binary, and nested-file repositories. It alternates five paired captures
+for clean and dirty states, verifies identical snapshots and unchanged source
+index bytes, and records Git child-process counts and timelines. Command
+intervals overlap and must not be summed. These local measurements do not
+establish fresh-VM or cold-storage latency on the hosted platform.
+
+The [2026-10-23 process-reduction measurements](../diagnostics/peek-snapshot-process-reduction-2026-10-23.json)
+against `7f9cc2c` recorded these local median capture times:
+
+| Fixture | Clean baseline → candidate | Dirty baseline → candidate |
+| --- | ---: | ---: |
+| 256 small files | 93 → 51 ms | 92 → 55 ms |
+| 256 files, 64 MiB total | 91 → 50 ms | 98 → 62 ms |
+| 1,024 files in 64 directories | 121 → 73 ms | 122 → 73 ms |
+
+The candidate reduced the local Node medians by 37–45%. The earlier hosted 701 ms
+fresh capture has not been remeasured with this source; these results must not
+be applied proportionally to that sample.
+
+A [local Bun 1.3.10 cross-check](../diagnostics/peek-snapshot-process-reduction-bun-2026-10-23.json)
+also preserved every paired snapshot and source index, with 26–43% lower median
+capture times. Bun did not expose the child-process instrumentation used by this
+benchmark, so that report marks command counts and timelines unavailable.
 
 The native runtime test checks the actual handler, session activity, output
 acknowledgments, and successful inspection while database access is rejected and
