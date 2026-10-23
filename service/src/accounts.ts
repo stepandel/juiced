@@ -5,6 +5,7 @@ import { ServiceError } from './config';
 import { transaction, type Queryable } from './db';
 import type { Identity } from './auth';
 import { cliVersionAtLeast } from '../../contracts/cli-version';
+import { currentRelease, type ReleaseIdentity } from './release';
 
 export const id = (prefix: string) => `${prefix}_${randomUUID().replaceAll('-', '')}`;
 export interface Account {
@@ -37,7 +38,7 @@ export interface Installation {
 export class Accounts {
   constructor(
     readonly pool: Pool,
-    readonly release: { packageId: string; runtimeId: string; minimumCli: string; cliVersion?: string },
+    readonly release: ReleaseIdentity & { minimumCli: string; cliVersion?: string },
   ) {}
   async ensure(user: string) {
     return transaction(this.pool, async (tx) => {
@@ -102,6 +103,8 @@ export class Accounts {
     )
       throw new ServiceError('cli_upgrade_required', 409);
     return transaction(this.pool, async (tx) => {
+      if (!await currentRelease(tx, this.release, true))
+        throw new ServiceError('service_unavailable', 503);
       const current = (
         await tx.query<Account>('SELECT * FROM accounts WHERE id=$1 FOR UPDATE', [a.id])
       ).rows[0];

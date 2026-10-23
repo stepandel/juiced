@@ -44,7 +44,13 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
     if (data.type === 'agent-output') await outputHook?.(data);
   } };
   const raw = async (value: Buffer) => currentOutput.send({ type: 'output', channel: 'stdout', data: value.toString('base64') });
-  const frame = async (value: ClaudeFrame) => raw(Buffer.from(JSON.stringify(value) + '\n'));
+  // Short idle deadlines exercise completed turns, not filesystem/initialization
+  // speed on a contended runner. Each simulated process starts with a long grace.
+  const timing = { idleTimeoutMs: 60_000, handoffRetryMs: 5, handoffRetryMaxMs: 20 };
+  const frame = async (value: ClaudeFrame) => {
+    if (value.type === 'result') timing.idleTimeoutMs = idleTimeoutMs;
+    return raw(Buffer.from(JSON.stringify(value) + '\n'));
+  };
   const context = { signal: lifetime.signal, session: { id: sessionId, keepAliveSeconds: 120 }, env: {}, database: async () => { throw new Error('unused'); } } as SessionHarnessContext;
   const factory = () => {
     let decoder = new ClaudeDecoder(), finish!: () => void;
@@ -52,6 +58,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
     const done = new Promise<void>(resolve => { finish = resolve; });
     return {
       async run(command: Extract<TerminalCommand, { type: 'start' }>, work: { output: typeof output; signal: AbortSignal }) {
+        timing.idleTimeoutMs = 60_000;
         launches.push(command.argv); currentOutput = work.output;
         const modeIndex = command.argv.indexOf('--permission-mode');
         permissionMode = command.argv.includes('--dangerously-skip-permissions') ? 'bypassPermissions'
@@ -101,7 +108,7 @@ async function fixture(t: test.TestContext, idleTimeoutMs = 60_000, sessionId = 
       cancel() { finish(); return true; },
     } as unknown as ReturnType<typeof createTerminal>;
   };
-  const service = createDurableAgent(context, factory, root, { idleTimeoutMs, handoffRetryMs: 5, handoffRetryMaxMs: 20 });
+  const service = createDurableAgent(context, factory, root, timing);
   let activity = Promise.resolve();
   const view = { async commit(state: unknown) { views.push(Number(object(state).agentSequence)); viewState = state; viewCursor = stored.at(-1)?.cursor; await viewHook?.(); } };
   const intake = { ...context, output, view, activity: { queue(work: (context: unknown) => Promise<void>, options: { timeoutMs: number }) {

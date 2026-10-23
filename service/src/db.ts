@@ -1,12 +1,17 @@
 import { Pool, type PoolClient } from 'pg';
 import { readFile } from 'node:fs/promises';
 import { ServiceError } from './config';
-export function database(raw: string) {
+export function database(raw: string, generation = 0) {
+  if (!Number.isSafeInteger(generation) || generation < 0)
+    throw new Error('JUICED_RELEASE_GENERATION must be a nonnegative safe integer');
   const url = new URL(raw);
   if (!['postgres:', 'postgresql:'].includes(url.protocol))
     throw new Error('A PostgreSQL database URL is required');
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))
     url.searchParams.set('sslmode', 'verify-full');
+  // application_name is tracked by transaction poolers; arbitrary startup GUCs
+  // may be rejected or lost when a transaction moves to another backend.
+  url.searchParams.set('application_name', `juiced-release:${generation}`);
   return new Pool({
     connectionString: url.toString(),
     max: 15,
@@ -57,7 +62,7 @@ export async function migrate(pool: Pool) {
     await tx.query(
       'CREATE TABLE IF NOT EXISTS juiced_migrations(id text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())',
     );
-    for (const name of ['0001-initial.sql']) {
+    for (const name of ['0001-initial.sql', '0002-release-fence.sql']) {
       if ((await tx.query('SELECT 1 FROM juiced_migrations WHERE id=$1', [name])).rowCount)
         continue;
       await tx.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));

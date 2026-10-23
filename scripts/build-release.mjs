@@ -6,12 +6,16 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { nodeDistribution } from './node-distribution.mjs';
 
 const execute = promisify(execFile);
 const root = fileURLToPath(new URL('..', import.meta.url));
 const output = resolve(process.argv[2] ?? join(root, 'dist/releases'));
 const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const lock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
+const runtimeId = JSON.parse(await readFile(join(root, 'dist/cantelop/backend/cantelop-client.json'), 'utf8'))
+  .apps.find(app => app.name === 'juiced').session_runtime_id;
+assert.match(runtimeId, /^rt_[a-f0-9]{64}$/, 'Run npm run build:runtime before packaging');
 assert.match(manifest.dependencies['@cantelop/sdk'], /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, 'Publish Juiced only after replacing the draft SDK Git pin with its released npm version');
 const { platform, arch } = process;
 assert.ok(['darwin', 'linux'].includes(platform) && ['arm64', 'x64'].includes(arch));
@@ -24,11 +28,11 @@ try {
   await mkdir(output, { recursive: true });
   const packed = JSON.parse((await execute('npm', [
     'pack', '--ignore-scripts', '--json', '--pack-destination', temporary,
-  ], { cwd: root })).stdout)[0];
+  ], { cwd: root, timeout: 60000 })).stdout)[0];
   assert.ok(packed.files.some(file => file.path === 'dist/cli.mjs'), 'Run npm run build first');
   const bundle = join(temporary, 'juiced');
   await mkdir(bundle);
-  await execute('tar', ['-xzf', join(temporary, packed.filename), '--strip-components=1', '-C', bundle]);
+  await execute('tar', ['-xzf', join(temporary, packed.filename), '--strip-components=1', '-C', bundle], { timeout: 60000 });
   // Preserve the committed dependency versions and integrity hashes, without the
   // service workspace, development tools, or package lifecycle scripts.
   for (const value of [manifest, lock.packages['']]) {
@@ -61,13 +65,11 @@ try {
     assert.ok(response.ok, `Cannot download Node ${name}: HTTP ${response.status}`);
     return Buffer.from(await response.arrayBuffer());
   };
-  const [nodeBytes, sums] = await Promise.all([download(nodeArchive), download('SHASUMS256.txt')]);
-  const expected = sums.toString().split('\n').find(line => line.endsWith(`  ${nodeArchive}`))?.split(' ')[0];
-  assert.equal(createHash('sha256').update(nodeBytes).digest('hex'), expected, 'Node checksum mismatch');
+  const nodeBytes = await nodeDistribution(nodeArchive, download, process.env.JUICED_NODE_CACHE);
   await writeFile(join(temporary, nodeArchive), nodeBytes);
   const runtime = join(temporary, 'runtime');
   await mkdir(runtime);
-  await execute('tar', ['-xzf', join(temporary, nodeArchive), '--strip-components=1', '-C', runtime]);
+  await execute('tar', ['-xzf', join(temporary, nodeArchive), '--strip-components=1', '-C', runtime], { timeout: 60000 });
   await mkdir(join(bundle, 'lib'));
   await copyFile(join(runtime, 'bin/node'), join(bundle, 'lib/node'));
   await chmod(join(bundle, 'lib/node'), 0o755);
@@ -76,15 +78,18 @@ try {
   await chmod(join(bundle, 'bin/juiced'), 0o755);
   await writeFile(join(bundle, 'release.json'), JSON.stringify({
     version: manifest.version, nodeVersion, platform, arch,
+    commit: (await execute('git', ['rev-parse', 'HEAD'], { cwd: root, timeout: 30000 })).stdout.trim(),
+    sourceClean: !(await execute('git', ['status', '--porcelain', '--untracked-files=normal'], { cwd: root, timeout: 30000 })).stdout.trim(),
+    runtimeId,
   }) + '\n');
 
   const env = { ...process.env, JUICED_CONFIG_HOME: join(temporary, 'config') };
-  const version = await execute(join(bundle, 'bin/juiced'), ['--version'], { env });
+  const version = await execute(join(bundle, 'bin/juiced'), ['--version'], { env, timeout: 15000 });
   assert.equal(version.stdout.trim(), `juiced ${manifest.version}`);
-  const help = await execute(join(bundle, 'bin/juiced'), ['--help'], { env });
+  const help = await execute(join(bundle, 'bin/juiced'), ['--help'], { env, timeout: 15000 });
   assert.match(help.stdout, /login/);
   const asset = `juiced-${platform}-${arch}.tar.gz`;
-  await execute('tar', ['-czf', join(output, asset), '-C', temporary, 'juiced']);
+  await execute('tar', ['-czf', join(output, asset), '-C', temporary, 'juiced'], { timeout: 120000 });
   const digest = createHash('sha256').update(await readFile(join(output, asset))).digest('hex');
   await writeFile(join(output, `${asset}.sha256`), `${digest}  ${asset}\n`);
   process.stdout.write(`Built ${asset} with Node ${nodeVersion}; offline help/version passed.\n`);
