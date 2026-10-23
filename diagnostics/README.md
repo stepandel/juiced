@@ -2,6 +2,38 @@
 
 Recorded evidence from hosted verification runs and platform investigations.
 
+## Peek latency investigation (October 23, 2026)
+
+Two consecutive runs of the installed 0.3.1 CLI took **6,450 ms** and **1,933 ms**.
+Both rendered the comparison and exited 2 because `.claude/` was ignored locally
+and present remotely. No model prompt or file upload was submitted. Exact message
+IDs matched both inventory requests to existing Cantelop traces. No production
+code, deployment or configuration was changed for these measurements.
+
+| Phase | First run | Immediate repeat |
+| --- | ---: | ---: |
+| Workspace lookup, client elapsed | 965 ms | 537 ms |
+| Lookup inside Cantelop's App request | 533 ms | 160 ms |
+| Inventory request, client elapsed | 4,543 ms | 868 ms |
+| Inventory inside Cantelop's App request | 1,751 ms | 560 ms |
+| Runtime receive handler, included above | 1,089 ms | 215 ms |
+| Remote Git snapshot, included in the handler | 1,076 ms | 214 ms |
+| Inventory time outside the App request | 2,792 ms | 308 ms |
+
+These are overlapping durations, not additive phases. The snapshot rebuild
+became 862 ms faster on the immediate repeat, but the inventory also spent 2,484
+ms less outside the App request. That outer time includes Juiced's database work,
+network travel, and Fleet status/credential setup before forwarding to the App.
+It is not evidence that Juiced's database alone, or Cantelop alone, caused the
+delay. The existing service does not expose its individual phase timings.
+
+The new opt-in `X-Juiced-Timing: 1` / `Server-Timing` instrumentation separates
+those service phases once deployed. `fleet_connection` still groups the SDK's
+status and credential requests. Platform dispatch/startup/reply work around the
+handler accounted for 662 ms / 345 ms; the trace does not individually isolate
+those components. Two samples do not establish latency percentiles or explain
+all first-run variability. [Evidence](peek-latency-2026-10-23.json).
+
 ## Release verification
 
 **Workspace deletion** — October 19, 2026, release v9

@@ -68,6 +68,36 @@ Local tests do not verify the hosted platform or your Claude subscription.
 
 ## Latency measurement
 
+To time the installed managed CLI's workspace inspection:
+
+```sh
+npm run measure:peek -- --samples 2 --output /tmp/juiced-peek-latency.json
+```
+
+The samples run consecutively, which exposes differences between the first run
+and an immediate repeat. `--command PATH` selects an installation and
+`--workspace SLUG` selects an existing workspace. The probe runs normal `peek`:
+sign-in may refresh and the service may bootstrap, but it submits no model prompt
+and uploads no project files. Reports contain timing metadata and opaque request
+IDs, excluding credentials, filenames and file contents. Exit code 2 is recorded
+as an incomplete comparison, which can be expected when one side ignores an entry.
+
+With a Cantelop CLI login, add `--app CANTELOP_APP_SLUG` to correlate inventory
+requests with exact platform message IDs. Workspace lookups lack a message and
+use a unique wall-clock window; ambiguous matches remain unknown. Platform time
+contains runtime-handler time, which contains snapshot time: these durations
+overlap and must not be added. Reading the JSON reply adds small probe overhead;
+the reported total excludes the launcher and Node startup.
+
+The probe sends `X-Juiced-Timing: 1`. A service with the instrumentation returns
+fixed numeric `Server-Timing` phases for initialization, authorization, rate
+limiting, account and installation reads, bootstrap, queue publication, Fleet
+connection setup, and the upstream request. Normal requests do not collect or
+return timings. `service_total` ends when response headers are ready and excludes
+stream lifetime. `fleet_connection` groups the SDK's status and credential calls;
+it does not separate them. An empty `serviceTimingMs` means the deployed service
+has no instrumentation; it must not be interpreted as zero work.
+
 To measure typing latency against the deployed app without submitting a model
 prompt:
 

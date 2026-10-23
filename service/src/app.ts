@@ -17,6 +17,7 @@ import { rateLimit, transaction } from './db';
 import { signIn, devicePage, accountPage } from './pages';
 import { logError } from './log';
 import type { Telemetry } from './telemetry';
+import { timed, withRequestTiming } from './timing';
 
 export interface Services {
   pool: Pool;
@@ -34,14 +35,14 @@ export function application(s: Services) {
   const auth = s.auth ?? authentication(s.pool, s.cfg);
   async function identity(request: Request): Promise<Identity> {
     let who: Identity;
-    if (request.headers.get('authorization')) who = await authenticate(s.pool, s.cfg, request);
+    if (request.headers.get('authorization')) who = await timed('auth', () => authenticate(s.pool, s.cfg, request));
     else {
       if (
         !['GET', 'HEAD'].includes(request.method) &&
         request.headers.get('origin') !== s.cfg.origin
       )
         throw new ServiceError('origin_required', 403);
-      const session = await auth.api.getSession({ headers: request.headers });
+      const session = await timed('auth', () => auth.api.getSession({ headers: request.headers }));
       if (!session) throw new ServiceError('not_signed_in', 401);
       who = {
         userId: session.user.id,
@@ -49,7 +50,7 @@ export function application(s: Services) {
         expiresAt: session.session.expiresAt.getTime(),
       };
     }
-    await rateLimit(s.pool, `device:${who.deviceId}`, 1200);
+    await timed('rate_limit', () => rateLimit(s.pool, `device:${who.deviceId}`, 1200));
     return who;
   }
   async function dispatch(request: Request): Promise<Response> {
@@ -176,7 +177,7 @@ export function application(s: Services) {
     const owner =
       (method === 'DELETE' && action === '') ||
       (method === 'POST' && action.startsWith('billing/'));
-    const a = await s.accounts.authorize(who, accountId, owner);
+    const a = await timed('account', () => s.accounts.authorize(who, accountId, owner));
     if (method === 'POST' && action.startsWith('billing/')) {
       if (!s.billing) throw new ServiceError('billing_unavailable', 503);
       if (action === 'billing/checkout') return Response.json(await s.billing.checkout(a));
@@ -214,8 +215,9 @@ export function application(s: Services) {
     }
     if (method === 'POST' && action === 'bootstrap') {
       if (!s.cfg.admissionEnabled) throw new ServiceError('admission_closed', 503);
-      const installation = await s.accounts.bootstrap(a, await jsonBody(request));
-      await s.wake?.();
+      const input = await jsonBody(request);
+      const installation = await timed('bootstrap', () => s.accounts.bootstrap(a, input));
+      await timed('job_wake', async () => { await s.wake?.(); });
       return Response.json(installation);
     }
     if (method === 'GET' && action === 'installation') {
@@ -235,7 +237,7 @@ export function application(s: Services) {
     }
     if (action.startsWith('runtime/')) {
       if (who.deviceId.startsWith('browser:')) throw new ServiceError('device_required', 401);
-      const installation = await s.accounts.installation(a.id);
+      const installation = await timed('installation', () => s.accounts.installation(a.id));
       if (!installation) throw new ServiceError('installation_pending', 409);
       if (
         !s.cfg.admissionEnabled &&
@@ -267,7 +269,7 @@ export function application(s: Services) {
     }
     return new Response('Not found', { status: 404 });
   }
-  return async (request: Request) => {
+  return (request: Request) => withRequestTiming(request, async () => {
     const requestId = crypto.randomUUID();
     let response: Response;
     try {
@@ -300,7 +302,7 @@ export function application(s: Services) {
       status: response.status,
       headers,
     });
-  };
+  });
 }
 
 export async function jsonBody(request: Request): Promise<Record<string, unknown>> {

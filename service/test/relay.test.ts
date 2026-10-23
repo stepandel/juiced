@@ -7,6 +7,8 @@ import { CantelopClient } from '@cantelop/sdk';
 import type { JuicedFleet } from '../src/platform';
 import { Accounts, type Account, type Installation } from '../src/accounts';
 import { config } from '../src/config';
+import { application } from '../src/app';
+import type { Auth } from '../src/auth';
 const cfg = config({
   NODE_ENV: 'test',
   JUICED_SERVICE_URL: 'http://127.0.0.1:3000',
@@ -84,7 +86,20 @@ test('relay pins server App credentials and streams without buffering or losing 
   });
   const platform = new Platform(new CantelopClient().fleet({name:'juiced',runtime:{receive(){},[Symbol.for('dev.cantelop.sdk.compiled-runtime.v1')]:'runtime-v1'}}) as JuicedFleet);
   const input = request('/commands/stream', envelope('stream'));
-  const response = await relay(input, '/commands/stream', context(platform));
+  input.headers.set('Authorization', 'Bearer ' + 'x'.repeat(40));
+  input.headers.set('X-Juiced-Timing', '1');
+  const ctx = context(platform);
+  const response = await application({ ...ctx, auth: {} as Auth,
+    pool: { async query(sql: string) {
+      if (sql.includes('"oauthAccessToken"')) return { rows: [{ user_id: 'user', device_id: 'dev_test', expires_at: new Date(Date.now() + 300000), scopes: ['juiced'], resources: [cfg.origin] }] };
+      if (sql.includes('api_limits')) return { rows: [{ count: 1 }] };
+      assert.fail('Unexpected database operation');
+    } } as unknown as Pool,
+    accounts: { entitled: () => true, async authorize() { return account; }, async installation() { return installation; } } as unknown as Accounts,
+  })(new Request('http://127.0.0.1:3000/v1/accounts/' + account.id + '/runtime/commands/stream', input));
+  const timing = response.headers.get('server-timing')!;
+  for (const phase of ['auth', 'rate_limit', 'account', 'installation', 'fleet_connection', 'edge', 'service_total']) assert.match(timing, new RegExp(`${phase};dur=\\d+\\.\\d`));
+  assert.doesNotMatch(timing, /Bearer|client-device-token|server-app-token|tenant-a|SELECT/);
   assert.equal(upstreamRequest!.headers.get('authorization'), 'Bearer server-app-token');
   assert.equal(new URL(upstreamRequest!.url).origin, 'https://tenant-a.example');
   const reader = response.body!.getReader();

@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-23T16:31:01.300Z",
+  "service": "https://juiced.codes",
+  "samples": [
+    {
+      "startedAt": "2026-10-23T16:31:01.465Z",
+      "cliVersion": "0.3.1",
+      "totalMs": 6450,
+      "exitCode": 2,
+      "comparisonRendered": true,
+      "requests": [
+        {
+          "path": "/v1/config",
+          "startedAt": "2026-10-23T16:31:01.593Z",
+          "headersMs": 244,
+          "status": 200,
+          "serviceRequestId": "15bd46f6-e033-4410-9ed9-fc037dfd085c",
+          "serviceTimingMs": {}
+        },
+        {
+          "path": "/api/auth/oauth2/token",
+          "startedAt": "2026-10-23T16:31:01.863Z",
+          "headersMs": 210,
+          "status": 200,
+          "serviceRequestId": "ed770791-ac65-4872-b531-b09037c28b8c",
+          "serviceTimingMs": {}
+        },
+        {
+          "path": "/v1/accounts/:account/bootstrap",
+          "startedAt": "2026-10-23T16:31:02.094Z",
+          "headersMs": 217,
+          "status": 200,
+          "serviceRequestId": "b32b8c0c-1486-42cb-8621-36e8b0d79c68",
+          "serviceTimingMs": {}
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/workspace.inspect",
+          "startedAt": "2026-10-23T16:31:02.392Z",
+          "command": "workspace.inspect",
+          "messageId": "msg_0812276212c54ce69607bd531c18602a",
+          "headersMs": 965,
+          "status": 200,
+          "serviceRequestId": "c409a104-1ec1-493a-9716-1870d670a3af",
+          "serviceTimingMs": {}
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/request",
+          "startedAt": "2026-10-23T16:31:03.368Z",
+          "command": "request",
+          "messageId": "msg_a145841f20e44316b3788b56dd6ba066",
+          "headersMs": 4543,
+          "status": 200,
+          "serviceRequestId": "93ac82c6-9a72-4387-8ac6-11c57eb3b2f6",
+          "snapshotMs": 1076,
+          "replyReadyMs": 4544,
+          "serviceTimingMs": {}
+        }
+      ],
+      "platform": [
+        {
+          "command": "workspace.inspect",
+          "matched": true,
+          "matchedBy": "time_window",
+          "traceId": "req_29c492127f6c4affbbcd99f288056ddd",
+          "platformMs": 533,
+          "outsidePlatformMs": 432,
+          "attempts": 0,
+          "handlerMs": null,
+          "platformOutsideHandlerMs": null,
+          "snapshotMs": null,
+          "handlerOutsideSnapshotMs": null
+        },
+        {
+          "command": "request",
+          "matched": true,
+          "matchedBy": "message_id",
+          "traceId": "req_5e4c928422da42ef8a42cc74f700beec",
+          "platformMs": 1751,
+          "outsidePlatformMs": 2792,
+          "attempts": 1,
+          "handlerMs": 1089,
+          "platformOutsideHandlerMs": 662,
+          "snapshotMs": 1076,
+          "handlerOutsideSnapshotMs": 13
+        }
+      ]
+    },
+    {
+      "startedAt": "2026-10-23T16:31:07.967Z",
+      "cliVersion": "0.3.1",
+      "totalMs": 1933,
+      "exitCode": 2,
+      "comparisonRendered": true,
+      "requests": [
+        {
+          "path": "/v1/config",
+          "startedAt": "2026-10-23T16:31:08.049Z",
+          "headersMs": 142,
+          "status": 200,
+          "serviceRequestId": "ff0d0512-93e2-4c52-bfb8-d81d373ddfdd",
+          "serviceTimingMs": {}
+        },
+        {
+          "path": "/v1/accounts/:account/bootstrap",
+          "startedAt": "2026-10-23T16:31:08.199Z",
+          "headersMs": 222,
+          "status": 200,
+          "serviceRequestId": "8bd68fc1-5f1b-49c4-b7e0-8294f285311c",
+          "serviceTimingMs": {}
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/workspace.inspect",
+          "startedAt": "2026-10-23T16:31:08.485Z",
+          "command": "workspace.inspect",
+          "messageId": "msg_42da12cc2c7c4e0981a953b5dd92d140",
+          "headersMs": 537,
+          "status": 200,
+          "serviceRequestId": "5b4826fa-d38d-48f6-8c33-1ff80339a704",
+          "serviceTimingMs": {}
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/request",
+          "startedAt": "2026-10-23T16:31:09.029Z",
+          "command": "request",
+          "messageId": "msg_475bc8c13b7046ef8023688d6a0b479b",
+          "headersMs": 868,
+          "status": 200,
+          "serviceRequestId": "74254a14-4f73-427a-a79d-a54917330c57",
+          "snapshotMs": 214,
+          "replyReadyMs": 869,
+          "serviceTimingMs": {}
+        }
+      ],
+      "platform": [
+        {
+          "command": "workspace.inspect",
+          "matched": true,
+          "matchedBy": "time_window",
+          "traceId": "req_c0a2a3d66c524629afed880edc723bd6",
+          "platformMs": 160,
+          "outsidePlatformMs": 377,
+          "attempts": 0,
+          "handlerMs": null,
+          "platformOutsideHandlerMs": null,
+          "snapshotMs": null,
+          "handlerOutsideSnapshotMs": null
+        },
+        {
+          "command": "request",
+          "matched": true,
+          "matchedBy": "message_id",
+          "traceId": "req_caf23b38130d4d79afd3270eaa0a08fd",
+          "platformMs": 560,
+          "outsidePlatformMs": 308,
+          "attempts": 1,
+          "handlerMs": 215,
+          "platformOutsideHandlerMs": 345,
+          "snapshotMs": 214,
+          "handlerOutsideSnapshotMs": 1
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Instrumented client timings exclude the launcher and Node startup. Reading cloned JSON responses adds small probe overhead.",
+    "Platform request time includes the application handler; these overlapping durations must not be added together.",
+    "Time outside the platform trace includes network, Juiced authorization/database work, and Fleet connection setup; these are not separated.",
+    "Workspace lookup trace matches use a unique one-second-tolerant wall-clock window; inventory matches use exact message IDs.",
+    "Empty serviceTimingMs means server instrumentation is unavailable. fleet_connection groups SDK status and credential requests; it does not separate them."
+  ]
+}
