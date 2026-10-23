@@ -59,6 +59,10 @@ export function serviceLoader(
       const s = services(env, role);
       try {
         await s.pool.query('SELECT 1 FROM juiced_migrations LIMIT 1');
+        if (env.NODE_ENV === 'production') {
+          const row = (await s.pool.query("SELECT row_security_active('jobs') AND row_security_active('installations') AS enforced")).rows[0];
+          if (!row?.enforced) throw new Error('Production services require restricted database roles that enforce release row policies');
+        }
         // Billing jobs need Stripe when it is configured. Requests check it lazily, so a
         // Stripe outage cannot take down sign-in or runtime access.
         if (role === 'worker') await s.billing?.ready();
