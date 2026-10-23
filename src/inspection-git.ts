@@ -47,9 +47,8 @@ export async function inspectionGit(root: string, signal: AbortSignal) {
   const env: NodeJS.ProcessEnv = { ...clean, GIT_DIR: gitDirectory, GIT_WORK_TREE: root };
   const run = (args: string[], options: { input?: Buffer; env?: NodeJS.ProcessEnv } = {}) => git(root, [...base, ...args], { ...options, env: { ...env, ...options.env }, signal });
   const text = async (args: string[]) => decoder.decode(await run(args)).trim();
-  const [topLevel, sparse] = await Promise.all([text(['rev-parse', '--show-toplevel']), sparseCheckout(text)]);
-  if (topLevel !== root) throw new InspectionIncomplete('Git points outside the selected checkout.');
-  if (sparse) throw new InspectionIncomplete('Workspace inspection does not support sparse checkouts.');
+  if (await text(['rev-parse', '--show-toplevel']) !== root) throw new InspectionIncomplete('Git points outside the selected checkout.');
+  if (await sparseCheckout(text)) throw new InspectionIncomplete('Workspace inspection does not support sparse checkouts.');
   return { run, text };
 }
 

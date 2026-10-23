@@ -10,8 +10,8 @@ import { validProjectName } from '../project-name.js';
 import { relativeProjectPath } from '../git.js';
 import { createGitRuntime, projectPaths, readBinding } from './git.js';
 import { acquireCheckout, acquireSessionCheckout, CheckoutBusy } from './project-state.js';
-import { captureRemoteInspection, inspectRemote, sendInspection } from './inspection.js';
-import { INSPECTION_TIMEOUT_MS, MAX_INSPECTION_REPLY_BYTES, validateInspectionCommand } from '../inspection-protocol.js';
+import { captureRemoteInspection, inspectRemote } from './inspection.js';
+import { INSPECTION_TIMEOUT_MS, MAX_INSPECTION_REPLY_BYTES, validateInspectionCommand, type InspectionListing, type InspectionSnapshot } from '../inspection-protocol.js';
 import { saveSettings } from './settings.js';
 import { createDurableAgent } from './durable-agent.js';
 import { listRemoteSessions } from './session-list.js';
@@ -308,24 +308,29 @@ export async function receiveTerminal(context: SessionContext<TerminalCommand, T
   if (command.type === 'inspect') {
     validateInspectionCommand(command);
     if (command.inline) {
+      // Capture in a managed activity so cancellation and its deadline apply. A
+      // request must reply during intake, so intake waits only for the capture.
+      const signal = AbortSignal.any([context.signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]);
       try {
-        const signal = AbortSignal.any([context.signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]);
-        const snapshot = await captureRemoteInspection(command, signal);
-        const reply = { ok: true as const, inspection: snapshot };
-        if (Buffer.byteLength(JSON.stringify(reply)) <= MAX_INSPECTION_REPLY_BYTES) {
-          context.reply(reply);
-          return;
-        }
-        // Capture once; stream larger inventories using the existing bounded protocol.
-        context.activity.queue(async activity => {
-          try { await sendInspection(command, snapshot, activity.output, activity.signal); }
-          catch (error) {
-            if (activity.signal.aborted) throw error;
-            await activity.output.send({ type: 'inspection-error', id: command.id, message: error instanceof Error ? error.message : 'Workspace inspection failed' });
-          }
-          await activity.view.commit({ inspection: 1 });
-        }, { timeoutMs: INSPECTION_TIMEOUT_MS });
-        context.reply({ ok: true });
+        const inline = await new Promise<InspectionSnapshot | InspectionListing | undefined>((resolve, reject) => {
+          // Queued work cancelled before it starts never runs; stop waiting for it.
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          context.activity.queue(async activity => {
+            let snapshot;
+            try { snapshot = await captureRemoteInspection(command, AbortSignal.any([activity.signal, signal])); }
+            catch (error) { return reject(error); }
+            if (Buffer.byteLength(JSON.stringify({ ok: true, inspection: snapshot })) <= MAX_INSPECTION_REPLY_BYTES) return resolve(snapshot);
+            // Mark where this command's chunks begin so the CLI skips older retained
+            // output. The commit settles only once the host collects output, so the
+            // reply must not wait for it; the chunks must.
+            const boundary = activity.view.commit({ inspection: 1, streaming: command.id }).catch(() => {});
+            resolve(undefined);
+            await boundary;
+            // Capture once; stream larger inventories using the existing bounded protocol.
+            await inspectRemote(command, activity.output, activity.signal, undefined, snapshot);
+          }, { timeoutMs: INSPECTION_TIMEOUT_MS });
+        });
+        context.reply(inline ? { ok: true, inspection: inline } : { ok: true });
       } catch (error) {
         if (context.signal.aborted) throw error;
         context.reply({ ok: false, error: error instanceof Error ? error.message : 'Workspace inspection failed' });

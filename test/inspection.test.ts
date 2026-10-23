@@ -189,6 +189,32 @@ test('small inventories use one request and validate the inline reply without re
   await assert.rejects(remoteSnapshot(workspace, { ...command, scope: 'wrong' }, f.controller.signal), /invalid/);
 });
 
+test('large inline fallbacks resume at their tagged boundary and otherwise replay retained output', async t => {
+  const f = await fixture(t), snapshot = await f.snapshot(f.local), bytes = Buffer.from(JSON.stringify(snapshot));
+  const cursor = { streamId: 'a'.repeat(32), sequence: 7 };
+  for (const tagged of [true, false]) {
+    const streamed: unknown[] = [];
+    const workspace = {
+      selector: { id: `wsp_${'a'.repeat(32)}` },
+      session() {
+        let command: InspectionCommand;
+        return {
+          async request(value: InspectionCommand) { command = value; return { ok: true }; },
+          async view() { return { state: { inspection: 1, ...(tagged ? { streaming: command.id } : {}) }, cursor }; },
+          async *stream({ after }: { after?: unknown }) {
+            streamed.push(after);
+            yield { data: { type: 'inspection-chunk', id: command.id, offset: 0, data: bytes.toString('base64') } };
+            yield { data: { type: 'inspection-end', id: command.id, size: bytes.length, sha256: sha256(bytes) } };
+          },
+        };
+      },
+    } as unknown as Parameters<typeof remoteSnapshot>[0];
+    const command: InspectionCommand = { type: 'inspect', id: randomUUID(), directoryName: 'project', binding: f.repository.binding, scope: '', includeIgnored: false };
+    assert.deepEqual(await remoteSnapshot(workspace, command, f.controller.signal), snapshot);
+    assert.deepEqual(streamed, [tagged ? cursor : undefined]);
+  }
+});
+
 test('expired or reset inspection replay retries once without stopping the shared session', async t => {
   const f = await fixture(t), snapshot = await f.snapshot(f.local), bytes = Buffer.from(JSON.stringify(snapshot));
   for (const code of ['event_cursor_expired', 'event_stream_reset']) {

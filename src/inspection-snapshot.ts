@@ -23,7 +23,10 @@ export async function captureInspection(root: string, scope: string, includeIgno
   const directory = await mkdtemp(join(tmpdir(), 'juiced-inspect-'));
   try {
     const rootBefore = await checkoutRoot(root);
-    const { run, text } = await inspectionGit(root, signal);
+    // Concurrent reads stop their siblings once one fails.
+    const reads = new AbortController();
+    const stopReads = (error: unknown): never => { reads.abort(error); throw error; };
+    const { run, text } = await inspectionGit(root, AbortSignal.any([signal, reads.signal]));
     // A path argument never follows an ancestor symlink to another directory.
     let ancestor = root;
     for (const part of scope.split('/').slice(0, -1)) {
@@ -45,7 +48,7 @@ export async function captureInspection(root: string, scope: string, includeIgno
       text(['rev-parse', '--show-object-format']) as Promise<InspectionSnapshot['objectFormat']>,
       inventory(), ignoredPaths(), run(['ls-files', '--stage', '-z']),
       text(['rev-parse', '--path-format=absolute', '--git-path', 'objects']),
-    ]);
+    ]).catch(stopReads);
     const stagedEntries = strings(staged);
     stagedSubmodules(stagedEntries, scope);
     // Git silently skips some special files; report those instead of false absence.
@@ -91,7 +94,7 @@ export async function captureInspection(root: string, scope: string, includeIgno
     catch (error) { if (error instanceof GitError && error.code === 1) throw new InspectionIncomplete('Files changed during inspection. Retry the command.'); throw error; }
     const [rootAfter, currentBranch, currentHead, currentIndex, currentInventory, currentIgnored] = await Promise.all([
       lstat(root, { bigint: true }), readBranch(), text(['rev-parse', 'HEAD']), indexBytes(indexPath), inventory(), ignoredPaths(),
-    ]);
+    ]).catch(stopReads);
     if (rootAfter.dev !== rootBefore.dev || rootAfter.ino !== rootBefore.ino || branch !== currentBranch || head !== currentHead ||
         !originalIndex.equals(currentIndex) || !before.equals(currentInventory) || !ignoredBefore.equals(currentIgnored)) throw new InspectionIncomplete('The checkout changed during inspection. Retry the command.');
     const result: InspectionSnapshot = { version: 1, scope, kind, entries, ignored: includeIgnored ? [] : ignored, head, branch, objectFormat, startedAt, finishedAt: new Date().toISOString() };
