@@ -1,14 +1,13 @@
 import { lstat, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SessionHarnessContext } from '@cantelop/sdk/session';
-import { cleanRepository, fileInfo, git, gitText } from '../git.js';
-import type { UploadManifest } from '../git-protocol.js';
+import { cleanRepository, git, gitText } from '../git.js';
 import { validTransferId } from '../git-protocol.js';
 import type { PublishResult, UploadRequest } from '../publish-protocol.js';
-import { isENOENT } from '../fs-util.js';
+import { atomicJSON, isENOENT } from '../fs-util.js';
 import { workingTree } from '../working-tree.js';
-import { atomicJSON, projectPaths, readBinding } from './git.js';
-import { prepareUploadCandidate, validateUploadManifest } from './git-upload.js';
+import { projectPaths, readBinding } from './git.js';
+import { prepareUploadCandidate, readUploadManifest, verifyUploadFiles } from './git-upload.js';
 import { acquireCheckout } from './project-state.js';
 
 /** The requesting Claude is waiting in MCP; other sessions must be absent. */
@@ -35,14 +34,10 @@ export async function applyLocalUpload(context: SessionHarnessContext, options: 
     // A crash during Git's multi-step update needs inspection, never a blind retry.
     try { await readFile(join(transfer, 'live-started.json')); throw new Error(`An earlier upload was interrupted. Inspect ${transfer} and the remote checkout before retrying.`); }
     catch (error) { if (!isENOENT(error)) throw error; }
-    const manifest = JSON.parse(await readFile(join(transfer, 'upload.json'), 'utf8')) as UploadManifest;
-    validateUploadManifest(manifest);
+    const manifest = await readUploadManifest(transfer);
     if (manifest.branch !== binding.sourceBranch || manifest.branch !== request.sourceBranch) throw new Error('The local source branch changed.');
     if (!request.includeUncommitted && manifest.files.some(file => file.name !== 'bundle')) throw new Error('This request approved commits only.');
-    for (const expected of manifest.files) {
-      const actual = await fileInfo(join(transfer, expected.name), expected.name);
-      if (actual.size !== expected.size || actual.sha256 !== expected.sha256) throw new Error('Incomplete or corrupt local upload.');
-    }
+    await verifyUploadFiles(transfer, manifest, 'Incomplete or corrupt local upload.');
     const branch = () => gitText(paths.target, ['symbolic-ref', '--quiet', 'HEAD']).catch(() => 'HEAD');
     const originalBranch = await branch();
     const check = async () => {

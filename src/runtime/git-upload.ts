@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ancestor, git, gitText } from '../git.js';
+import { ancestor, fileInfo, git, gitText } from '../git.js';
 import { MAX_TRANSFER_BYTES, validOid, type UploadManifest } from '../git-protocol.js';
 import { workingTree } from '../working-tree.js';
 
@@ -28,6 +28,20 @@ export function validateUploadManifest(value: UploadManifest) {
       new Set(value.files.map(file => file.name)).size !== value.files.length ||
       value.files.some(file => !['bundle', 'staged', 'unstaged'].includes(file.name) || !Number.isSafeInteger(file.size) || file.size < 0 || file.size > MAX_TRANSFER_BYTES || !/^[a-f0-9]{64}$/.test(file.sha256)) || value.files.reduce((sum, file) => sum + file.size, 0) > MAX_TRANSFER_BYTES) {
     throw new Error('Invalid Git transfer manifest');
+  }
+}
+
+export async function readUploadManifest(transfer: string): Promise<UploadManifest> {
+  const manifest = JSON.parse(await readFile(join(transfer, 'upload.json'), 'utf8')) as UploadManifest;
+  validateUploadManifest(manifest);
+  return manifest;
+}
+
+/** Both checkout replacement and live application verify the same pinned bytes. */
+export async function verifyUploadFiles(transfer: string, manifest: UploadManifest, message: string) {
+  for (const expected of manifest.files) {
+    const actual = await fileInfo(join(transfer, expected.name), expected.name);
+    if (actual.size !== expected.size || actual.sha256 !== expected.sha256) throw new Error(message);
   }
 }
 

@@ -4,17 +4,17 @@ import { join } from 'node:path';
 import type { SessionHarnessContext, SessionOutput } from '@cantelop/sdk/session';
 import { applyRemoteConfiguration, validateRemoteConfiguration, type GitRemoteConfiguration } from '../git-remotes.js';
 import { cleanRepository, fileInfo, git, gitText } from '../git.js';
-import { DOWNLOAD_CHUNK_BYTES, MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, validTransferId, type ExportManifest, type GitCommand, type GitEvent, type GitResult, type UploadManifest } from '../git-protocol.js';
+import { DOWNLOAD_CHUNK_BYTES, MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, validTransferId, type ExportManifest, type GitCommand, type GitEvent, type GitResult } from '../git-protocol.js';
 import { validProjectName } from '../project-name.js';
 import { acquireCheckout, reapCheckout } from './project-state.js';
 import { workingTree } from '../working-tree.js';
-import { prepareUploadCandidate, validateUploadManifest } from './git-upload.js';
+import { prepareUploadCandidate, readUploadManifest, validateUploadManifest, verifyUploadFiles } from './git-upload.js';
 import { finishUpload, prepareUploadParts, saveUploadPart } from './upload-chunks.js';
-import { isENOENT, writeFileAtomic } from '../fs-util.js';
+import { atomicJSON, isENOENT } from '../fs-util.js';
 import { BASE64 } from '../protocol.js';
 
 type Binding = { version: 1; binding: string; sourceBranch: string | null; publishBase?: { head: string; tree: string } };
-type Journal = { id: string; binding: Binding; hadOriginal: boolean };
+type Journal = { id: string; binding: Binding };
 const exists = async (path: string) => { try { await lstat(path); return true; } catch (error) { if (isENOENT(error)) return false; throw error; } };
 
 export async function projectPaths(workspace: string, directoryName: string) {
@@ -43,8 +43,6 @@ export async function readBinding(metadata: string): Promise<Binding | undefined
     return value;
   } catch (error) { if (isENOENT(error)) return; throw error; }
 }
-
-export const atomicJSON = (path: string, value: unknown) => writeFileAtomic(path, JSON.stringify(value));
 
 export function createGitRuntime(context: SessionHarnessContext, workspace = process.cwd()) {
   async function handle(command: GitCommand, output?: SessionOutput<GitEvent>, operationSignal = context.signal): Promise<GitResult> {
@@ -138,7 +136,7 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
       }
       case 'chunk': {
         if (!['bundle', 'staged', 'unstaged'].includes(command.file) || !Number.isSafeInteger(command.offset) || command.offset < 0 || typeof command.data !== 'string' || command.data.length > UPLOAD_CHUNK_BYTES / 3 * 4 || !BASE64.test(command.data) || command.part !== undefined && typeof command.part !== 'boolean') throw new Error('Invalid transfer chunk');
-        const manifest = JSON.parse(await readFile(join(transfer!, 'upload.json'), 'utf8')) as UploadManifest;
+        const manifest = await readUploadManifest(transfer!);
         const expected = manifest.files.find(file => file.name === command.file);
         const bytes = Buffer.from(command.data, 'base64');
         if (!expected || !bytes.length || command.offset + bytes.length > expected.size) throw new Error('Transfer chunk exceeds its declared file');
@@ -161,8 +159,7 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
         } finally { await file.close(); }
       }
       case 'finish': {
-        const manifest = JSON.parse(await readFile(join(transfer!, 'upload.json'), 'utf8')) as UploadManifest;
-        validateUploadManifest(manifest);
+        const manifest = await readUploadManifest(transfer!);
         await finishUpload(transfer!, manifest, operationSignal);
         return {};
       }
@@ -172,12 +169,8 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
           if (await exists(join(transfer!, 'result.json'))) return {};
           const binding = await readBinding(paths.metadata);
           if (command.initializeOnly && binding) return {};
-          const manifest = JSON.parse(await readFile(join(transfer!, 'upload.json'), 'utf8')) as UploadManifest;
-          validateUploadManifest(manifest);
-          for (const expected of manifest.files) {
-            const actual = await fileInfo(join(transfer!, expected.name), expected.name);
-            if (actual.size !== expected.size || actual.sha256 !== expected.sha256) throw new Error('Incomplete or corrupt Git transfer. Retry the upload.');
-          }
+          const manifest = await readUploadManifest(transfer!);
+          await verifyUploadFiles(transfer!, manifest, 'Incomplete or corrupt Git transfer. Retry the upload.');
           if (!binding && await exists(paths.target) && (await readdir(paths.target)).length) throw new Error('This workspace contains older synced files. Select a fresh --workspace; the existing files were preserved.');
           if (binding && binding.sourceBranch !== manifest.branch) throw new Error('The local branch changed. Select a fresh --workspace for that branch.');
           if (binding && !await cleanRepository(paths.target)) throw new Error('The remote checkout has uncommitted changes. Commit or resolve them before syncing to it.');
@@ -191,7 +184,7 @@ export function createGitRuntime(context: SessionHarnessContext, workspace = pro
             return {};
           }
           const { tree } = await prepareUploadCandidate(paths.target, transfer!, command.id, manifest, Boolean(binding), signal);
-          await atomicJSON(join(paths.metadata, 'journal.json'), { id: command.id, binding: { version: 1, binding: command.binding, sourceBranch: manifest.branch, publishBase: { head: manifest.head, tree } }, hadOriginal: await exists(paths.target) } satisfies Journal);
+          await atomicJSON(join(paths.metadata, 'journal.json'), { id: command.id, binding: { version: 1, binding: command.binding, sourceBranch: manifest.branch, publishBase: { head: manifest.head, tree } } } satisfies Journal);
           await recover();
           return {};
         });
