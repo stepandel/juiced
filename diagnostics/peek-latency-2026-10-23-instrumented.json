@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-23T16:39:43.982Z",
+  "service": "https://juiced.codes",
+  "samples": [
+    {
+      "startedAt": "2026-10-23T16:39:44.137Z",
+      "cliVersion": "0.3.1",
+      "totalMs": 4848,
+      "exitCode": 2,
+      "comparisonRendered": true,
+      "requests": [
+        {
+          "path": "/v1/config",
+          "startedAt": "2026-10-23T16:39:44.256Z",
+          "headersMs": 1088,
+          "status": 200,
+          "serviceRequestId": "782bafa9-df31-4b4d-98cb-ddce0867f152",
+          "serviceTimingMs": {
+            "service_init": 43.4,
+            "service_total": 57.1
+          }
+        },
+        {
+          "path": "/api/auth/oauth2/token",
+          "startedAt": "2026-10-23T16:39:45.351Z",
+          "headersMs": 234,
+          "status": 200,
+          "serviceRequestId": "daa3718a-f4d5-420d-b994-2ab6c29c6cac",
+          "serviceTimingMs": {
+            "service_total": 118.9
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/bootstrap",
+          "startedAt": "2026-10-23T16:39:45.604Z",
+          "headersMs": 229,
+          "status": 200,
+          "serviceRequestId": "b24605a6-04c6-4b18-9751-80b39017d719",
+          "serviceTimingMs": {
+            "auth": 3.3,
+            "rate_limit": 4.1,
+            "account": 2.5,
+            "bootstrap": 10,
+            "job_wake": 82.2,
+            "service_total": 104
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/workspace.inspect",
+          "startedAt": "2026-10-23T16:39:45.907Z",
+          "command": "workspace.inspect",
+          "messageId": "msg_bc2ae373eaf44fe7905054f5b62e940f",
+          "headersMs": 937,
+          "status": 200,
+          "serviceRequestId": "a718a9d7-7e56-4659-8ba8-65c6e75f8789",
+          "serviceTimingMs": {
+            "auth": 3,
+            "rate_limit": 3.3,
+            "account": 2.2,
+            "installation": 2.4,
+            "fleet_connection": 206.6,
+            "edge": 589.3,
+            "service_total": 810.3
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/request",
+          "startedAt": "2026-10-23T16:39:46.850Z",
+          "command": "request",
+          "messageId": "msg_93685e5e2c9043af85bc187a0fc18ece",
+          "headersMs": 2127,
+          "status": 200,
+          "serviceRequestId": "f758d76d-177e-4eef-854d-8ddadf7fc15e",
+          "serviceTimingMs": {
+            "auth": 3.1,
+            "rate_limit": 3.3,
+            "account": 2.4,
+            "installation": 2.2,
+            "fleet_connection": 92.6,
+            "edge": 1918.6,
+            "service_total": 2024
+          },
+          "snapshotMs": 1199,
+          "replyReadyMs": 2129
+        }
+      ],
+      "platform": [
+        {
+          "command": "workspace.inspect",
+          "matched": true,
+          "matchedBy": "time_window",
+          "traceId": "req_c7b6726c926a4fe5b8e6af017df397bc",
+          "platformMs": 493,
+          "outsidePlatformMs": 444,
+          "attempts": 0,
+          "handlerMs": null,
+          "platformOutsideHandlerMs": null,
+          "snapshotMs": null,
+          "handlerOutsideSnapshotMs": null
+        },
+        {
+          "command": "request",
+          "matched": true,
+          "matchedBy": "message_id",
+          "traceId": "req_9719e8f5c4ee4f149181dc0999b938d3",
+          "platformMs": 1886,
+          "outsidePlatformMs": 241,
+          "attempts": 1,
+          "handlerMs": 1215,
+          "platformOutsideHandlerMs": 671,
+          "snapshotMs": 1199,
+          "handlerOutsideSnapshotMs": 16
+        }
+      ]
+    },
+    {
+      "startedAt": "2026-10-23T16:39:49.042Z",
+      "cliVersion": "0.3.1",
+      "totalMs": 1778,
+      "exitCode": 2,
+      "comparisonRendered": true,
+      "requests": [
+        {
+          "path": "/v1/config",
+          "startedAt": "2026-10-23T16:39:49.117Z",
+          "headersMs": 203,
+          "status": 200,
+          "serviceRequestId": "79afbe50-f050-4d4e-9718-07c7f9a578c7",
+          "serviceTimingMs": {
+            "service_total": 0.7
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/bootstrap",
+          "startedAt": "2026-10-23T16:39:49.327Z",
+          "headersMs": 167,
+          "status": 200,
+          "serviceRequestId": "80486493-d334-41e2-b3cf-e11e137178f0",
+          "serviceTimingMs": {
+            "auth": 4.6,
+            "rate_limit": 3.2,
+            "account": 2.3,
+            "bootstrap": 9.7,
+            "job_wake": 44.1,
+            "service_total": 66
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/workspace.inspect",
+          "startedAt": "2026-10-23T16:39:49.555Z",
+          "command": "workspace.inspect",
+          "messageId": "msg_a95db3dbf924435cbfa130d511d58371",
+          "headersMs": 454,
+          "status": 200,
+          "serviceRequestId": "59cb692f-7a19-463f-841d-44a33143ec79",
+          "serviceTimingMs": {
+            "auth": 3,
+            "rate_limit": 3.2,
+            "account": 2.6,
+            "installation": 2.3,
+            "fleet_connection": 107.6,
+            "edge": 211.9,
+            "service_total": 332
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/request",
+          "startedAt": "2026-10-23T16:39:50.014Z",
+          "command": "request",
+          "messageId": "msg_e4f96780d89e40988e894840e9119181",
+          "headersMs": 799,
+          "status": 200,
+          "serviceRequestId": "1a6e0363-99c6-4bdb-b94e-7d752c7f00f0",
+          "serviceTimingMs": {
+            "auth": 3.2,
+            "rate_limit": 3.4,
+            "account": 2.3,
+            "installation": 2.2,
+            "fleet_connection": 125.7,
+            "edge": 557.7,
+            "service_total": 696.2
+          },
+          "snapshotMs": 202,
+          "replyReadyMs": 801
+        }
+      ],
+      "platform": [
+        {
+          "command": "workspace.inspect",
+          "matched": true,
+          "matchedBy": "time_window",
+          "traceId": "req_54ce645f8d5d41f1abd0531a94b2de33",
+          "platformMs": 187,
+          "outsidePlatformMs": 267,
+          "attempts": 0,
+          "handlerMs": null,
+          "platformOutsideHandlerMs": null,
+          "snapshotMs": null,
+          "handlerOutsideSnapshotMs": null
+        },
+        {
+          "command": "request",
+          "matched": true,
+          "matchedBy": "message_id",
+          "traceId": "req_71122349eb6d4e249d53bab47802f9e7",
+          "platformMs": 521,
+          "outsidePlatformMs": 278,
+          "attempts": 1,
+          "handlerMs": 206,
+          "platformOutsideHandlerMs": 315,
+          "snapshotMs": 202,
+          "handlerOutsideSnapshotMs": 4
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Instrumented client timings exclude the launcher and Node startup. Reading cloned JSON responses adds small probe overhead.",
+    "Platform request time includes the application handler; these overlapping durations must not be added together.",
+    "Time outside the platform trace includes network, Juiced authorization/database work, and Fleet connection setup. Service timings separate the named phases; remaining client/hosting/network time is not isolated.",
+    "Workspace lookup trace matches use a unique one-second-tolerant wall-clock window; inventory matches use exact message IDs.",
+    "Empty serviceTimingMs means server instrumentation is unavailable. fleet_connection groups SDK status and credential requests; it does not separate them."
+  ],
+  "deployment": {
+    "sourceCommit": "95421fb",
+    "vercelDeploymentId": "dpl_C7SunQYHbjhW21JbF7g9yuFsJ3aB",
+    "url": "https://juiced-9ws90al97-stepandels-projects.vercel.app",
+    "productionAlias": "https://juiced.codes"
+  }
+}

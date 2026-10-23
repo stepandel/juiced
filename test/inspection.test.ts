@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -112,6 +112,53 @@ test('Git rather than raw-byte rules determine equality, modes, staged additions
   assert.equal(rows.find(row => row.name === 'run.sh')?.status, 'different');
   assert.equal(rows.find(row => row.name === 'broken')?.status, 'matching');
   assert.equal(rows.find(row => row.name === '.env')?.status, 'local only');
+});
+
+test('stat reuse cannot hide assume-unchanged or skip-worktree edits and preserves the real flags', async t => {
+  const f = await fixture(t);
+  await git(f.local, ['update-index', '--assume-unchanged', 'README.md']);
+  await git(f.local, ['update-index', '--skip-worktree', 'src/entry.ts']);
+  await git(f.local, ['config', 'core.ignoreStat', 'true']);
+  await git(f.local, ['config', 'core.trustctime', 'false']);
+  await writeFile(join(f.local, 'README.md'), 'edit\n');
+  await writeFile(join(f.local, 'src/entry.ts'), 'edit\n');
+  const before = await state(f.local);
+  const rows = compareInspection(await f.snapshot(f.local), await f.snapshot(f.remote)).rows;
+  assert.equal(rows.find(row => row.name === 'README.md')?.status, 'different');
+  assert.equal(rows.find(row => row.name === 'src')?.status, 'different');
+  assert.deepEqual(await state(f.local), before);
+});
+
+test('copying an index cannot make a racy timestamp look clean', async t => {
+  const f = await fixture(t);
+  await git(f.local, ['update-index', '--index-version', '2']);
+  const path = join(f.local, '.git/index'), bytes = await readFile(path);
+  assert.equal(bytes.readUInt32BE(4), 2);
+  assert.equal(bytes.subarray(74, bytes.indexOf(0, 74)).toString(), '.gitignore');
+  const expected = await gitText(f.local, ['rev-parse', 'HEAD:.gitignore']);
+  // Model an old cached OID whose recorded stat still matches the file within
+  // the index's racy window. The wrong OID is valid, so write-tree alone cannot
+  // detect it. Git must read the file instead of trusting the copied stat.
+  Buffer.from(await gitText(f.local, ['rev-parse', 'HEAD:README.md']), 'hex').copy(bytes, 52);
+  createHash('sha1').update(bytes.subarray(0, -20)).digest().copy(bytes, bytes.length - 20);
+  await writeFile(path, bytes);
+  const timestamp = (await lstat(join(f.local, '.gitignore'))).mtimeMs / 1000 - 5;
+  await utimes(path, timestamp, timestamp);
+  const before = await state(f.local);
+  assert.equal((await f.snapshot(f.local)).entries.find(entry => entry.name === '.gitignore')?.oid, expected);
+  assert.deepEqual(await state(f.local), before);
+});
+
+test('clean-filter configuration changes rehash unchanged working files', async t => {
+  const f = await fixture(t);
+  await writeFile(join(f.local, '.gitattributes'), 'README.md filter=case\n');
+  await git(f.local, ['config', 'filter.case.clean', "tr 'a-z' 'A-Z'"]);
+  const expected = await gitText(f.local, ['hash-object', '--stdin'], { input: 'SAME\n' });
+  const before = await state(f.local);
+  assert.equal((await f.snapshot(f.local)).entries.find(entry => entry.name === 'README.md')?.oid, expected);
+  assert.deepEqual(await state(f.local), before);
+  await git(f.local, ['config', 'filter.case.clean', 'cat']);
+  assert.equal((await f.snapshot(f.local)).entries.find(entry => entry.name === 'README.md')?.oid, await gitText(f.local, ['rev-parse', 'HEAD:README.md']));
 });
 
 test('listing preserves Git-visible names and types without reading file contents or running clean filters', async t => {
@@ -273,6 +320,24 @@ test('linked worktrees use their own index and native object format without writ
   const before = await readFile(indexPath);
   assert.equal(compareInspection(await f.snapshot(linked), await f.snapshot(f.remote)).rows.find(row => row.name === 'src')?.status, 'different');
   assert.deepEqual(await readFile(indexPath), before);
+});
+
+test('private stat reuse materializes split indexes and supports SHA-256 repositories', async t => {
+  const f = await fixture(t);
+  await git(f.local, ['update-index', '--split-index']);
+  await writeFile(join(f.local, 'README.md'), 'split edit\n');
+  const before = await state(f.local);
+  assert.equal(compareInspection(await f.snapshot(f.local), await f.snapshot(f.remote)).rows.find(row => row.name === 'README.md')?.status, 'different');
+  assert.deepEqual(await state(f.local), before);
+  const sha = join(f.root, 'sha256'); await mkdir(sha);
+  await git(sha, ['init', '--object-format=sha256', '-b', 'main']);
+  await git(sha, ['config', 'user.name', 'Fixture']); await git(sha, ['config', 'user.email', 'fixture@example.test']);
+  await writeFile(join(sha, 'file'), 'base\n'); await git(sha, ['add', '.']); await git(sha, ['commit', '-m', 'base']);
+  const snapshot = await f.snapshot(sha);
+  assert.equal(snapshot.objectFormat, 'sha256');
+  assert.equal(snapshot.entries[0]?.oid, await gitText(sha, ['rev-parse', 'HEAD:file']));
+  await writeFile(join(sha, 'file'), 'edit\n');
+  assert.notEqual((await f.snapshot(sha)).entries[0]?.oid, snapshot.entries[0]?.oid);
 });
 
 test('submodules and embedded repositories exclude only affected rows and preserve all Git state', async t => {

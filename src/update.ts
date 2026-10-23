@@ -39,7 +39,7 @@ export class CliUpdater {
     this.write = options.write ?? (text => { process.stderr.write(text); });
   }
 
-  async check(signal: AbortSignal, reason: 'startup' | 'manual' | 'mismatch' = 'startup'): Promise<string | undefined> {
+  async check(signal: AbortSignal, reason: 'startup' | 'manual' | 'mismatch' = 'startup', advertisedVersion?: string): Promise<string | undefined> {
     const required = reason !== 'startup';
     let target: string | undefined;
     try {
@@ -52,7 +52,9 @@ export class CliUpdater {
         if (required) throw new Error('This is a source or package-manager installation. Update it using the same installation method (for a source checkout, run npm install and npm run build), or install the published CLI.');
         return;
       }
-      const version = await this.targetVersion(signal);
+      if (advertisedVersion !== undefined && !isCliVersion(advertisedVersion))
+        throw new Error('The service advertised an invalid CLI release.');
+      const version = advertisedVersion ?? await this.targetVersion(signal);
       target = version;
       if (cliVersionAtLeast(this.version, version)) {
         if (reason === 'mismatch') throw new Error(`Juiced ${this.version} is already at or ahead of the service's recommended release (${version}), but the service runtime differs. Retry after the matching service/CLI release is available.`);

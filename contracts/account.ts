@@ -6,6 +6,8 @@ export interface InstallationMetadata {
   status: string;
   runtimeId: string;
   minimumCli: string;
+  /** Recommended release, supplied with bootstrap to avoid a separate config read. */
+  cliVersion?: string;
   error: string | null;
   operationId: string;
 }
@@ -30,6 +32,7 @@ export function readInstallation(v: unknown): InstallationMetadata {
     v.runtimeId.length > 256 ||
     typeof v.minimumCli !== 'string' ||
     !isCliVersion(v.minimumCli) ||
+    (v.cliVersion !== undefined && (typeof v.cliVersion !== 'string' || !isCliVersion(v.cliVersion))) ||
     typeof v.operationId !== 'string' ||
     v.operationId.length > 256 ||
     (v.error !== null && (typeof v.error !== 'string' || !/^[a-z0-9_]{1,64}$/.test(v.error)))

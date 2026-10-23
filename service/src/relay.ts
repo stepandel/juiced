@@ -13,6 +13,7 @@ import { ServiceError, type Config } from './config';
 import { runtimeJSON } from './terminals';
 import type { ProtocolEnvelope } from '@cantelop/sdk/protocol';
 import type { Platform } from './platform';
+import { timed } from './timing';
 
 export async function relay(
   request: Request,
@@ -95,19 +96,19 @@ export async function relay(
     request.headers.get('x-cantelop-session-runtime') !== i.runtime_id
   )
     throw new ServiceError('cli_upgrade_required', 409);
-  const connection = await ctx.platform.connection(i.platform_id, { appId: i.app_id, runtimeId: i.runtime_id });
+  const connection = await timed('fleet_connection', () => ctx.platform.connection(i.platform_id!, { appId: i.app_id, runtimeId: i.runtime_id }));
   const headers = new Headers();
   if (contentType) headers.set('Content-Type', contentType);
   headers.set('X-Cantelop-Session-Runtime', i.runtime_id);
   if (type === 'stream') headers.set('Accept', 'text/event-stream');
-  const upstream = await connection.fetch(
+  const upstream = await timed('edge', () => connection.fetch(
     new Request(url, {
       method: request.method,
       headers,
       signal,
       ...(body === undefined ? {} : ({ body, duplex: 'half' } as RequestInit)),
     }),
-  );
+  ));
   if (
     type === 'auth' &&
     envelope?.command.type === 'auth' &&

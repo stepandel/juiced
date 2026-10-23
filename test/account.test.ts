@@ -17,6 +17,8 @@ test('installation responses carry prerelease minimums through the shared CLI/se
   };
   assert.deepEqual(readInstallation(installation), installation);
   assert.equal(readInstallation({ ...installation, minimumCli: '0.2.0' }).minimumCli, '0.2.0');
+  assert.equal(readInstallation({ ...installation, cliVersion: '0.3.2' }).cliVersion, '0.3.2');
+  assert.throws(() => readInstallation({ ...installation, cliVersion: 'invalid' }), /Invalid Juiced installation/);
   for (const minimumCli of ['0.2.0-rc.01', '0.2.0\n', 'not-a-version', '0.2.0-' + 'a'.repeat(128)])
     assert.throws(() => readInstallation({ ...installation, minimumCli }), /Invalid Juiced installation/);
 });
