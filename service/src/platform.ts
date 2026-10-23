@@ -28,10 +28,19 @@ const installation = (value: FleetInstanceStatus): PlatformInstallation => ({
   enforced_revision: value.enforcedRevision,
 });
 export interface InstancePin { appId: string | null; runtimeId: string }
+const CONNECTION_TTL_MS = 30_000;
+const MAX_CONNECTIONS = 256;
+interface CachedConnection {
+  expiresAt: number;
+  pending: Promise<AppConnection>;
+}
 
 /** Translate SDK failures into Juiced's public errors; transport and credentials stay in the SDK. */
 export class Platform {
-  constructor(readonly fleet: JuicedFleet) {}
+  // Reuse SDK transports, never authorization decisions or Workspace results.
+  // Each request still passes Juiced auth and the platform's current Edge gates.
+  private readonly connections = new Map<string, CachedConnection>();
+  constructor(readonly fleet: JuicedFleet, private readonly now = () => performance.now()) {}
 
   private async operation<T>(work: () => Promise<T>): Promise<T> {
     try { return await work(); }
@@ -89,7 +98,36 @@ export class Platform {
     return this.fleet.instance({ id });
   }
   connection(id: string, expected: InstancePin): Promise<AppConnection> {
-    return this.operation(async () => (await this.pinned(id, expected)).connection());
+    return this.operation(async () => {
+      const instance = this.pinned(id, expected);
+      const key = JSON.stringify([id, expected.appId, expected.runtimeId]);
+      const cached = this.connections.get(key);
+      if (cached && cached.expiresAt > this.now()) {
+        this.connections.delete(key);
+        this.connections.set(key, cached);
+        return cached.pending;
+      }
+      this.connections.delete(key);
+      const entry: CachedConnection = { expiresAt: Infinity, pending: Promise.resolve().then(async () => {
+        const connection = await instance.connection();
+        entry.expiresAt = this.now() + CONNECTION_TTL_MS;
+        return Object.freeze({ ...connection, fetch: async (request: Request) => {
+          const response = await connection.fetch(request);
+          // Drop rotated credentials and stale runtime bindings. Never replay a
+          // command or streaming upload after its body has reached the platform.
+          if ([401, 403, 409].includes(response.status) && this.connections.get(key) === entry)
+            this.connections.delete(key);
+          return response;
+        } });
+      }).catch(error => {
+        if (this.connections.get(key) === entry) this.connections.delete(key);
+        throw error;
+      }) };
+      this.connections.set(key, entry);
+      if (this.connections.size > MAX_CONNECTIONS)
+        this.connections.delete(this.connections.keys().next().value!);
+      return entry.pending;
+    });
   }
   app(id: string, expected: InstancePin) {
     return this.operation(async () => (await this.pinned(id, expected)).app());
