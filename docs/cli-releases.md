@@ -39,10 +39,13 @@ runs that archive with Node and npm absent from PATH.
    default in `src/version.ts`. Commit the source and qualify its managed runtime.
 2. Every push to `main` prepares immutable archives in `.github/workflows/release.yml`.
    Push a matching `v<version>` tag to publish them. The tag reuses a successful
-   main run only for the exact source commit, with all four unexpired archives
-   and its qualification receipt. Otherwise it builds fresh artifacts.
+   main push or protected preparation only for the exact source commit, with all
+   four unexpired archives and its qualification receipt. Otherwise it builds fresh artifacts.
    The workflow checks and packages Linux x64/arm64 and macOS Intel/Apple Silicon on native runners.
-   A manual workflow run builds artifacts without creating a release.
+   Background main runs cancel superseded background work. A manual workflow run
+   on `main`, with the exact main commit in its `commit` input, prepares that
+   selected commit in a separate concurrency group without creating a release.
+   Later main pushes cannot cancel selected preparations or tag publication.
    Packaging runs independently of tests. Intel macOS runs the same complete CLI
    suite in two native shards, serially within each shard, to avoid contention
    between compiler and filesystem fixtures. Every platform still installs its
@@ -89,15 +92,29 @@ or create a long-lived deployment principal. Revoke the short-lived principal
 through the secret manager after shipping. Optional overrides:
 `JUICED_RELEASE_REPOSITORY`, `VERCEL_PROJECT`, `VERCEL_SCOPE`, `JUICED_SERVICE_URL`.
 
-Preparation waits for the exact main commit's background archive build and runs
-`cantelop deploy --dry-run` concurrently. Archives include commit and runtime
-identity in `release.json`; every checksum, version, platform and runtime must
+Preparation reuses the exact main commit's qualified archives when available.
+Otherwise it dispatches (or joins) a protected preparation through the main
+workflow and runs `cantelop deploy --dry-run` concurrently. The operator's GitHub
+credential needs Actions write access to dispatch; CI itself remains read-only.
+The selected source must be an exact 40-character commit already on main. Every
+build and verification job checks out that source, even if main advances after
+selection. A protected run first waits for the same commit's in-flight background
+work, reusing its archives if it succeeds; if a newer main push cancels it, the
+protected run builds the selected commit. Failed or expired background results
+also require fresh tests and packaging. Pending background work has a bounded wait,
+after which the protected run builds the selected commit itself. To request this
+preparation directly:
+
+```sh
+gh workflow run release.yml --ref main -f commit=FULL_MAIN_COMMIT
+```
+
+Archives include commit and runtime identity in `release.json`; every checksum, version, platform and runtime must
 match before promotion. Cached archives expire after seven days. Failed native
 tests never produce reusable qualification, and pull-request/fork artifacts
 cannot satisfy preparation. A tag can rebuild expired artifacts normally.
-The automated command requires a successful main preparation run; if all of
-that commit's artifacts have expired, use a fresh main commit or the manual
-tag-and-qualify path above.
+Expired or cancelled background artifacts are rebuilt through protected
+preparation; no new source commit or early tag is needed.
 
 Shipping publishes the matching CLI assets first, deploys the Fleet package,
 qualifies an isolated canary with production resource limits, exports separate
@@ -115,7 +132,32 @@ remains on the shipping path. CLI assets must be public before that command,
 and the service binding must follow it promptly. Full preparation followed by
 an atomic Fleet promotion needs a separate platform/CLI capability.
 
-Each completed stage records its duration and completion in
+Each stage records successful and failed attempt durations, and each operator
+invocation records elapsed time. After receipt initialization, every prepare/ship exit prints a sanitized
+report and writes `summary.json` and `summary.md` beside the private receipt.
+The report includes CI job run times and scheduling delays measured from
+completion of dependencies; these delays include Actions orchestration overhead.
+For a rerun of an older CI run, the original queue delay and overall preparation
+time are unavailable, so the report cannot mistake days between retries for work.
+Operator time includes preflight and failed attempts, excludes pauses between
+commands, and counts overlapping intervals once. Recorded stage time also
+counts parallel work once. CI preparation is reported separately and must not be
+added to operator time because they may overlap. The report status is `shipped`,
+`partially-shipped` once any ship stage has run without finishing the release,
+`prepared`, or `partial`. A report that cannot be saved is logged without masking
+the release result.
+
+Read a report without credentials, network access, or source-commit matching:
+
+```sh
+npm run release -- report --state /private/previous-release
+npm run --silent release -- report --state /private/previous-release --json > release-summary.json
+```
+
+Only version, commit, known stages/jobs, statuses and numeric timings are exported.
+Share the summaries, never private state, tokens, integration files or logs. Older
+receipts still work, with missing timing marked unavailable; reporting never
+queries providers or retries a deployment. Each completed stage is checkpointed in
 `dist/release/<version>-<commit>/state.json`. Rerun the same command from the same
 source commit to resume; completed deployments and canaries are not repeated.
 All preparation branches settle before releasing the process lock. A failed

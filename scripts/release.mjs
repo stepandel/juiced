@@ -6,7 +6,8 @@ import { join, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { findPrepared } from './prepared-release.mjs';
+import { findPrepared, listPreparations, selectPreparation } from './prepared-release.mjs';
+import { stageNames, preparationTiming, releaseReport, formatReleaseReport, writeReleaseReport } from './release-report.mjs';
 import { targets, verifyArtifacts } from './release-artifacts.mjs';
 
 const execute = promisify(execFile);
@@ -17,10 +18,7 @@ const privateJSON = async path => {
   try { return JSON.parse(content); }
   catch { throw new Error(`Invalid JSON in private release configuration: ${path}`); }
 };
-export const releaseSteps = [
-  'cli-artifacts', 'runtime-preflight', 'publish-cli', 'deploy-runtime',
-  'qualify-runtime', 'deploy-service', 'resume-rollout', 'promote', 'verify-live',
-];
+export const releaseSteps = stageNames;
 
 export function assertGeneration(generation, active) {
   assert.ok(Number.isSafeInteger(generation) && generation > 0 &&
@@ -33,8 +31,16 @@ export async function checkpoint(state, name, work, save, report = console.log) 
   if (state.completed[name]) { report(`${name}: reused`); return; }
   report(`${name}: starting`);
   const start = Date.now();
-  await work();
-  state.completed[name] = { completedAt: new Date().toISOString(), durationMs: Date.now() - start };
+  state.attempts ??= [];
+  try { await work(); }
+  catch (error) {
+    state.attempts.push({ name, status: 'failure', completedAt: new Date().toISOString(), durationMs: Date.now() - start });
+    await save();
+    throw error;
+  }
+  const timing = { completedAt: new Date().toISOString(), durationMs: Date.now() - start };
+  state.attempts.push({ name, status: 'success', ...timing });
+  state.completed[name] = timing;
   await save();
   report(`${name}: completed in ${Math.ceil((Date.now() - start) / 1000)}s`);
 }
@@ -85,15 +91,21 @@ export async function waitFor(check, { timeout = 15 * 60_000, interval = 5000, s
 }
 
 export async function release(mode, options = {}, env = process.env) {
-  if (!['plan', 'prepare', 'ship'].includes(mode)) throw new Error('Usage: npm run release -- plan|prepare|ship [--state DIR] [--resume-package pkg_...]');
+  if (!['plan', 'prepare', 'ship', 'report'].includes(mode)) throw new Error('Usage: npm run release -- plan|prepare|ship|report [--state DIR] [--resume-package pkg_...] [--json]');
+  const printReport = async directory => {
+    const report = releaseReport(await privateJSON(join(directory, 'state.json')));
+    console.log(options.json ? JSON.stringify(report, null, 2) : formatReleaseReport(report));
+  };
+  if (mode === 'report' && options.state) return printReport(resolve(options.state));
   const sha = (await execute('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim();
   const version = manifest.version, tag = `v${version}`;
   if (mode === 'plan') {
     console.log(JSON.stringify({ commit: sha, version, prepare: releaseSteps.slice(0, 2), ship: releaseSteps.slice(2),
-      note: 'Preparation builds locally and downloads CI artifacts. Ship publishes and changes production.' }, null, 2));
+      note: 'Preparation builds locally and may request protected CI. Ship publishes and changes production.' }, null, 2));
     return;
   }
   const directory = resolve(options.state ?? join(root, 'dist/release', `${version}-${sha.slice(0, 12)}`));
+  if (mode === 'report') return printReport(directory);
   const inside = relative(root, directory);
   assert.ok(inside === '..' || inside.startsWith('../') || inside.startsWith('dist/release/'),
     'Keep private release state outside the source checkout or under dist/release/');
@@ -105,9 +117,9 @@ export async function release(mode, options = {}, env = process.env) {
     throw new Error(`Release already locked: ${lockPath}. Remove only after confirming its process has stopped.`);
   });
   await lock.writeFile(String(process.pid));
+  let state, invocation, save, succeeded = false;
   try {
     const statePath = join(directory, 'state.json');
-    let state;
     try { state = JSON.parse(await readFile(statePath)); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
     // The generation is assigned on first ship, so promotion order follows shipping, not preparation.
@@ -115,7 +127,9 @@ export async function release(mode, options = {}, env = process.env) {
     assert.equal(state.commit, sha, 'Resume from the original source commit');
     assert.equal(state.version, version);
     let saving = Promise.resolve();
-    const save = () => {
+    invocation = { mode, startedAt: new Date().toISOString() };
+    (state.invocations ??= []).push(invocation);
+    save = () => {
       const snapshot = JSON.stringify(state, null, 2);
       saving = saving.then(async () => {
         await writeFile(statePath + '.tmp', snapshot, { mode: 0o600 });
@@ -171,17 +185,28 @@ export async function release(mode, options = {}, env = process.env) {
     const fleetEnv = { ...env, CANTELOP_INTEGRATION_CONFIG: integration, CANTELOP_FLEET_SERVICE_TOKEN: binding.accessToken };
     delete fleetEnv.CANTELOP_APP_CONFIG;
     const deployArgs = ['deploy', '--app', 'juiced', '--fleet', binding.id, '--package-version', version, '--fleet-profile', 'api'];
-    const api = async path => JSON.parse(await run('github-api', 'gh', ['api', path]));
+    // One log per endpoint, so concurrent calls cannot overwrite each other's diagnostics.
+    const apiLog = path => `github-api-${path.replace(/^repos\/[^/]+\/[^/]+\//, '').replace(/[^\w.-]+/g, '-').slice(0, 120)}`;
+    const api = async (path, body) => JSON.parse((await run(apiLog(path), 'gh', ['api', path, ...(body ? ['--method', 'POST', '--input', '-'] : [])], body ? { input: JSON.stringify(body) } : {})) || '{}');
     const preparation = await Promise.allSettled([
       step('cli-artifacts', async () => {
-        const id = await waitFor(async () => {
-          // List runs first: a run that completes before the lookup is then still found.
-          const { workflow_runs: runs } = await api(`repos/${repository}/actions/workflows/release.yml/runs?head_sha=${sha}&branch=main&event=push&per_page=20`);
-          const found = await findPrepared(sha, repository, api);
+        const selection = await selectPreparation(sha, repository, api);
+        const id = selection.runId ?? await waitFor(async () => {
+          const runs = await listPreparations(sha, repository, api);
+          const found = await findPrepared(sha, repository, api, runs);
           if (found) return found;
-          if (!runs.length || runs.every(r => r.status === 'completed')) throw new Error('No successful main preparation run. Inspect the Release Juiced CLI workflow before shipping.');
-          console.log('Waiting for native CLI qualification…');
-        }, { interval: 15_000 });
+          const selected = runs.filter(r => selection.pendingRunIds.includes(r.id));
+          if (selected.length && selected.every(r => r.status === 'completed'))
+            throw new Error('Selected release preparation failed. Inspect the Release Juiced CLI workflow before retrying.');
+          console.log('Waiting for protected native CLI qualification…');
+        }, { interval: 15_000, timeout: 45 * 60_000 }); // Bounded background wait, macOS queueing and a fresh build.
+        try {
+          const [runInfo, { jobs }] = await Promise.all([
+            api(`repos/${repository}/actions/runs/${id}`),
+            api(`repos/${repository}/actions/runs/${id}/jobs?per_page=100`),
+          ]);
+          state.ciTiming = preparationTiming(runInfo, jobs);
+        } catch { console.log('CI timing data unavailable; qualification still verified.'); }
         for (const target of targets) for (const suffix of ['.tar.gz', '.tar.gz.sha256'])
           await rm(join(artifacts, `juiced-${target}${suffix}`), { force: true });
         await Promise.all(targets.map(target => run(`download-${target}`, 'gh', ['run', 'download', id, '--repo', repository, '--name', `juiced-${target}`, '--dir', artifacts])));
@@ -198,7 +223,7 @@ export async function release(mode, options = {}, env = process.env) {
     const qualified = await verifyArtifacts(artifacts, { sha, version });
     const compiled = JSON.parse(await readFile(join(root, 'dist/cantelop/backend/cantelop-client.json'))).apps.find(a => a.name === 'juiced');
     assert.equal(compiled.session_runtime_id, qualified.runtimeId, 'Local runtime differs from qualified archives');
-    if (mode === 'prepare') return;
+    if (mode === 'prepare') { succeeded = true; return; }
     await run('account-preflight', process.execPath, ['bin/juiced.mjs', 'whoami'], { env: { ...env, JUICED_SERVICE_URL: origin.origin, JUICED_TELEMETRY_DISABLED: '1' } });
     await waitFor(async () => {
       const { workflow_runs: runs } = await api(`repos/${repository}/actions/workflows/ci.yml/runs?head_sha=${sha}&branch=main&event=push&per_page=20`);
@@ -314,8 +339,18 @@ export async function release(mode, options = {}, env = process.env) {
       catch (error) { throw new AggregateError([failure, error].filter(Boolean), 'Release smoke/cleanup failed; resume after checking private logs'); }
       if (failure) throw failure;
     });
+    succeeded = true;
     console.log(`Shipped ${tag}; receipt and stage timings: ${statePath}`);
   } finally {
+    // Reporting is best-effort: it must neither hide the release error nor fail a completed release.
+    if (save) {
+      Object.assign(invocation, { status: succeeded ? 'success' : 'failure', completedAt: new Date().toISOString(),
+        durationMs: Date.now() - Date.parse(invocation.startedAt) });
+      try {
+        await save();
+        console.log(formatReleaseReport(await writeReleaseReport(directory, state)));
+      } catch (error) { console.error(`Release report not saved: ${error.message}`); }
+    }
     await lock.close();
     await rm(lockPath, { force: true });
   }
@@ -323,9 +358,10 @@ export async function release(mode, options = {}, env = process.env) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [mode = 'plan', ...args] = process.argv.slice(2), options = {};
-  for (let i = 0; i < args.length; i += 2) {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--json' && mode === 'report') { options.json = true; continue; }
     if (!['--state', '--resume-package'].includes(args[i]) || !args[i + 1]) throw new Error('Unknown or missing release option');
-    options[args[i].slice(2)] = args[i + 1];
+    options[args[i].slice(2)] = args[++i];
   }
   await release(mode, options);
 }

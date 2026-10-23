@@ -1,32 +1,42 @@
 name: Release Juiced CLI
+run-name: Prepare ${{ inputs.commit || github.sha }}
 on:
   push:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact main commit selected for release
+        required: true
+        type: string
 
 permissions:
   contents: read
   actions: read
 concurrency:
-  # Every main commit keeps its own run: release.mjs ships only a successful run for its exact sha.
-  group: release-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  # Background work follows main; selected commits and tags have separate, durable runs.
+  group: release-${{ github.event_name == 'workflow_dispatch' && format('selected-{0}', inputs.commit) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
 jobs:
   prepared:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 12 || 3 }}
     outputs:
       run_id: ${{ steps.lookup.outputs.run_id }}
+      source_sha: ${{ steps.lookup.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
       - id: lookup
         env:
           GH_TOKEN: ${{ github.token }}
+          SELECTED_COMMIT: ${{ inputs.commit }}
         run: node scripts/prepared-release.mjs
 
   # Two Intel shards + ARM tests + both Mac packagers fit five macOS slots.
@@ -47,6 +57,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepared.outputs.source_sha }}
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -74,6 +86,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepared.outputs.source_sha }}
       - uses: actions/setup-node@v6
         id: node
         with:
@@ -108,6 +122,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepared.outputs.source_sha }}
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -118,8 +134,18 @@ jobs:
           merge-multiple: true
           run-id: ${{ needs.prepared.outputs.run_id || github.run_id }}
           github-token: ${{ github.token }}
+      # Call the stable export, not the CLI: selected commits may predate any source-sha
+      # option, and their CLI would verify against GITHUB_SHA (main's tip on dispatch).
       - name: Verify archive checksums, commits, versions and runtime identities
-        run: node scripts/release-artifacts.mjs > dist/releases/qualified.json
+        env:
+          SOURCE_SHA: ${{ needs.prepared.outputs.source_sha }}
+        run: |
+          node --input-type=module > dist/releases/qualified.json <<'JS'
+          import { readFile } from 'node:fs/promises';
+          import { verifyArtifacts } from './scripts/release-artifacts.mjs';
+          const { version } = JSON.parse(await readFile('package.json'));
+          console.log(JSON.stringify(await verifyArtifacts('dist/releases', { sha: process.env.SOURCE_SHA, version })));
+          JS
       - uses: actions/upload-artifact@v4
         with:
           name: release-qualified
@@ -128,8 +154,9 @@ jobs:
       - name: Summarize preparation
         env:
           PREPARED_RUN: ${{ needs.prepared.outputs.run_id }}
+          SOURCE_SHA: ${{ needs.prepared.outputs.source_sha }}
         run: |
-          echo "Qualified commit $GITHUB_SHA; reused run: ${PREPARED_RUN:-fresh build}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Qualified commit $SOURCE_SHA; reused run: ${PREPARED_RUN:-fresh build}" >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -141,6 +168,8 @@ jobs:
       actions: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepared.outputs.source_sha }}
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
