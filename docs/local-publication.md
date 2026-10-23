@@ -33,7 +33,7 @@ include their hidden and ignored files recursively. Empty directories are not
 copied. Selecting the entire project root is unsupported; use the Git upload
 tool for repository transfers.
 
-Before approval, the laptop pins a private copy and shows the requested paths,
+Before approval, the laptop pins the bytes in memory and shows the requested paths,
 destination, file count, names and byte count. Later laptop edits are excluded.
 Denial sends no listing or file bytes. Approved pulls upload in bounded chunks
 over the existing attached session, verify file sizes and SHA-256 digests, and
@@ -45,8 +45,8 @@ unrelated remote edits and divergent Git history. Existing remote files are
 accepted only when their contents and executable status already match. Differing
 files, directories, symlink paths, `.git`, paths outside the project, and nested
 repositories are refused. Choose another destination to bring in an alternative
-copy for reconciliation. Files are installed with private permissions, retaining
-their executable status. Other Claude sessions must close before application;
+copy for reconciliation. Files and directories use the runtime's umask, retaining
+each file's executable status. Other Claude sessions must close before application;
 the requesting session remains open. Do not run concurrent tools or background
 jobs writing to the destination. All destinations are checked before files are
 installed, but installation of multiple files is not a filesystem transaction.
