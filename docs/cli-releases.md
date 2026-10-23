@@ -136,6 +136,8 @@ invocation records elapsed time. After receipt initialization, every prepare/shi
 report and writes `summary.json` and `summary.md` beside the private receipt.
 The report includes CI job run times and scheduling delays measured from
 completion of dependencies; these delays include Actions orchestration overhead.
+For a rerun of an older CI run, the original queue delay and overall preparation
+time are unavailable, so the report cannot mistake days between retries for work.
 Operator time includes preflight and failed attempts, excludes pauses between
 commands, and counts overlapping intervals once. Recorded stage time also
 counts parallel work once. CI preparation is reported separately and must not be

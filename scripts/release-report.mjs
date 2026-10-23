@@ -32,17 +32,20 @@ function activeTime(intervals) {
 // is measured from dependency completion and includes orchestration overhead.
 export function preparationTiming(run, jobs) {
   const known = jobs.filter(j => jobNames.has(j.name) && j.conclusion === 'success');
+  // created_at belongs to the first attempt. A rerun may happen days later;
+  // retain its job durations without treating that pause as runner queueing.
+  const created = run.run_attempt > 1 ? null : timestamp(run.created_at);
   const prepared = known.find(j => j.name === 'prepared');
   const buildEnds = known.filter(j => j.name !== 'qualified').map(j => timestamp(j.completed_at)).filter(t => t !== null);
   const timings = known.map(j => {
-    const ready = j.name === 'prepared' ? timestamp(run.created_at)
+    const ready = j.name === 'prepared' ? created
       : j.name === 'qualified' ? (buildEnds.length ? Math.max(...buildEnds) : null)
       : timestamp(prepared?.completed_at);
     return { name: j.name, schedulingDelayMs: difference(timestamp(j.started_at), ready),
       durationMs: difference(timestamp(j.completed_at), timestamp(j.started_at)) };
   });
   const qualified = known.find(j => j.name === 'qualified');
-  return { durationMs: difference(timestamp(qualified?.completed_at), timestamp(run.created_at)), jobs: timings };
+  return { durationMs: difference(timestamp(qualified?.completed_at), created), jobs: timings };
 }
 
 // Construct every exported field explicitly. Private state, logs and provider

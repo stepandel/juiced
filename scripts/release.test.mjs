@@ -183,6 +183,11 @@ test('timing reports measure scheduling after dependencies and export only known
   ]);
   assert.equal(ci.durationMs, 70000);
   assert.deepEqual(ci.jobs.map(j => j.schedulingDelayMs), [2000, 20000, 5000]);
+  const rerun = preparationTiming({ created_at: at(0), run_attempt: 2 }, [
+    { name: 'prepared', conclusion: 'success', started_at: at(86400), completed_at: at(86405) },
+  ]);
+  assert.equal(rerun.durationMs, null);
+  assert.deepEqual(rerun.jobs[0], { name: 'prepared', schedulingDelayMs: null, durationMs: 5000 });
   const state = { commit: sha, version: '1.0.0-rc.1', ciTiming: { ...ci, token: 'secret' },
     account: 'secret', integration: { accessToken: 'secret' },
     completed: { 'cli-artifacts': { completedAt: at(10), durationMs: 10000 }, 'runtime-preflight': { completedAt: at(15), durationMs: 10000 } },
