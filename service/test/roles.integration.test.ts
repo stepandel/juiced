@@ -74,9 +74,9 @@ test(
       // Simulate immutable old code, which has no application-level release guard.
       assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 0);
       assert.equal((await tx.query("UPDATE installations SET runtime_id='stale' RETURNING id")).rowCount, 0);
-      await tx.query("SELECT set_config('juiced.release_generation','1',true)");
+      await tx.query("SELECT set_config('application_name','juiced-release:1',true)");
       assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 0);
-      await tx.query("SELECT set_config('juiced.release_generation','2',true)");
+      await tx.query("SELECT set_config('application_name','juiced-release:2',true)");
       assert.equal((await tx.query("UPDATE jobs SET status='running' RETURNING id")).rowCount, 1);
       assert.equal((await tx.query("UPDATE installations SET runtime_id='current' RETURNING id")).rowCount, 1);
     } finally {

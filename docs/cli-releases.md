@@ -142,7 +142,9 @@ an older generation cannot reactivate itself. A rollback uses a newer generation
 with the selected older package/runtime, rather than reusing an old promotion.
 
 The additive migration leaves generation checking inactive until the first
-promotion. Runtime database connections declare their generation; row policies
+promotion. Runtime database connections declare their generation in
+`application_name`, which [PgBouncer tracks across transactions](https://www.pgbouncer.org/config#track_extra_parameters); provider connection options
+are preserved. Row policies
 on jobs and installations prevent restricted roles in pre-fence deployments
 from claiming or overwriting current rollout work, even without application
 guards. Use the restricted API/worker database roles, never an owner/bypass-RLS

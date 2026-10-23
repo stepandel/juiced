@@ -49,9 +49,18 @@ test('database connections declare their release generation while preserving pro
   const pool = database('postgresql://test@db.example/test?options=endpoint%3Dep-example', 42);
   try {
     const url = new URL(pool.options.connectionString!);
-    assert.equal(url.searchParams.get('options'), 'endpoint=ep-example -c juiced.release_generation=42');
+    assert.equal(url.searchParams.get('options'), 'endpoint=ep-example');
+    assert.equal(url.searchParams.get('application_name'), 'juiced-release:42');
     assert.equal(url.searchParams.get('sslmode'), 'verify-full');
     for (const generation of [-1, NaN, 1.5, Number.MAX_SAFE_INTEGER + 1])
       assert.throws(() => database('postgresql://localhost/test', generation), /RELEASE_GENERATION/);
   } finally { await pool.end(); }
 });
+
+test('the database receives the release identity as a tracked startup parameter',
+  { skip: !process.env.JUICED_TEST_DATABASE_URL }, async () => {
+    const pool = database(process.env.JUICED_TEST_DATABASE_URL!, 42);
+    try {
+      assert.equal((await pool.query("SELECT current_setting('application_name') AS name")).rows[0]!.name, 'juiced-release:42');
+    } finally { await pool.end(); }
+  });

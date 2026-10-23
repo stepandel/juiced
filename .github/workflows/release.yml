@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
   actions: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
   prepared:

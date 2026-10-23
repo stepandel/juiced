@@ -9,9 +9,9 @@ export function database(raw: string, generation = 0) {
     throw new Error('A PostgreSQL database URL is required');
   if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))
     url.searchParams.set('sslmode', 'verify-full');
-  // pg's connectionString options override separate Pool options. Preserve host
-  // routing/search_path settings, then declare the generation in the URL itself.
-  url.searchParams.set('options', `${url.searchParams.get('options') ?? ''} -c juiced.release_generation=${generation}`.trim());
+  // application_name is tracked by transaction poolers; arbitrary startup GUCs
+  // may be rejected or lost when a transaction moves to another backend.
+  url.searchParams.set('application_name', `juiced-release:${generation}`);
   return new Pool({
     connectionString: url.toString(),
     max: 15,
