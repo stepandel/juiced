@@ -1,0 +1,497 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-23T18:20:44.207923+00:00",
+  "objective": "Assess whether first-run juiced claude peek can fall below 2000ms by examining Cantelop and SDK cold paths.",
+  "sourceSnapshots": {
+    "platformCommit": "4c7c8ababb43d1755d6c51383f0cf5ce6c7b3584",
+    "sdkWorkingCheckoutCommit": "b65bf304527111f5a2d2d787d21d3e86ca1266b1",
+    "sdkReleasedCommit": "30f2ae8",
+    "sdkVersion": "1.6.0",
+    "juicedReleaseCommit": "9dedc4485a37380452a8b773952da0bc6e97c637",
+    "siblingRepositoriesEdited": false
+  },
+  "firstCallAfterGap": {
+    "schemaVersion": 1,
+    "measuredAt": "2026-10-23T18:12:15.043Z",
+    "service": "https://juiced.codes",
+    "samples": [
+      {
+        "startedAt": "2026-10-23T18:12:15.081Z",
+        "cliVersion": "0.3.2",
+        "totalMs": 2293,
+        "exitCode": 2,
+        "comparisonRendered": true,
+        "requests": [
+          {
+            "path": "/v1/accounts/:account/bootstrap",
+            "startedAt": "2026-10-23T18:12:15.143Z",
+            "headersMs": 209,
+            "status": 200,
+            "serviceRequestId": "bff17f32-7ce7-406c-a48c-2c632cd86b11",
+            "serviceTimingMs": {
+              "auth": 29.5,
+              "rate_limit": 3.5,
+              "account": 2.6,
+              "bootstrap": 12,
+              "service_total": 48.4
+            }
+          },
+          {
+            "path": "/v1/accounts/:account/runtime/commands/workspace.inspect",
+            "startedAt": "2026-10-23T18:12:15.404Z",
+            "command": "workspace.inspect",
+            "messageId": "msg_d8b9a42746604f78a1fad0126949b606",
+            "headersMs": 1100,
+            "status": 200,
+            "serviceRequestId": "ac1932e2-af12-4fc7-96c8-df3060e52eb3",
+            "serviceTimingMs": {
+              "auth": 3.3,
+              "rate_limit": 5.9,
+              "account": 2.5,
+              "installation": 3,
+              "fleet_connection": 237,
+              "edge": 747.5,
+              "service_total": 1000.3
+            }
+          },
+          {
+            "path": "/v1/accounts/:account/runtime/commands/request",
+            "startedAt": "2026-10-23T18:12:16.513Z",
+            "command": "request",
+            "messageId": "msg_751b67875a5c42a1a87995322c878569",
+            "headersMs": 854,
+            "status": 200,
+            "serviceRequestId": "90ad696c-9de2-4939-81cc-24318e97f399",
+            "serviceTimingMs": {
+              "auth": 3.3,
+              "rate_limit": 5.1,
+              "account": 2.6,
+              "installation": 2.6,
+              "fleet_connection": 103.3,
+              "edge": 636.5,
+              "service_total": 754.4
+            },
+            "snapshotMs": 259,
+            "replyReadyMs": 857
+          }
+        ],
+        "platform": [
+          {
+            "command": "workspace.inspect",
+            "matched": true,
+            "matchedBy": "time_window",
+            "traceId": "req_f52640adb5ba43e892b45f3a489e780e",
+            "platformMs": 637,
+            "outsidePlatformMs": 463,
+            "attempts": 0,
+            "handlerMs": null,
+            "platformOutsideHandlerMs": null,
+            "snapshotMs": null,
+            "handlerOutsideSnapshotMs": null
+          },
+          {
+            "command": "request",
+            "matched": true,
+            "matchedBy": "message_id",
+            "traceId": "req_49b97d538e0a4e25a32beccda9e24ad7",
+            "platformMs": 601,
+            "outsidePlatformMs": 253,
+            "attempts": 1,
+            "handlerMs": 266,
+            "platformOutsideHandlerMs": 335,
+            "snapshotMs": 259,
+            "handlerOutsideSnapshotMs": 7
+          }
+        ]
+      },
+      {
+        "startedAt": "2026-10-23T18:12:17.416Z",
+        "cliVersion": "0.3.2",
+        "totalMs": 1478,
+        "exitCode": 2,
+        "comparisonRendered": true,
+        "requests": [
+          {
+            "path": "/v1/accounts/:account/bootstrap",
+            "startedAt": "2026-10-23T18:12:17.480Z",
+            "headersMs": 177,
+            "status": 200,
+            "serviceRequestId": "7871e6a0-679e-4227-8c2f-6825e6b11d80",
+            "serviceTimingMs": {
+              "auth": 3.5,
+              "rate_limit": 3.4,
+              "account": 2.5,
+              "bootstrap": 10,
+              "service_total": 20.5
+            }
+          },
+          {
+            "path": "/v1/accounts/:account/runtime/commands/workspace.inspect",
+            "startedAt": "2026-10-23T18:12:17.711Z",
+            "command": "workspace.inspect",
+            "messageId": "msg_9e11c5bea191494787d09500659dc3d5",
+            "headersMs": 424,
+            "status": 200,
+            "serviceRequestId": "b8cd4957-33a8-4454-96a4-a3e51fb03292",
+            "serviceTimingMs": {
+              "auth": 3,
+              "rate_limit": 3.4,
+              "account": 2.4,
+              "installation": 2.2,
+              "fleet_connection": 123.1,
+              "edge": 168.2,
+              "service_total": 303.4
+            }
+          },
+          {
+            "path": "/v1/accounts/:account/runtime/commands/request",
+            "startedAt": "2026-10-23T18:12:18.141Z",
+            "command": "request",
+            "messageId": "msg_9588ba250cf44f14be0c679314f0e2c9",
+            "headersMs": 746,
+            "status": 200,
+            "serviceRequestId": "7c7da6e9-74d2-4d32-b3f9-b08aaad608bf",
+            "serviceTimingMs": {
+              "auth": 3.7,
+              "rate_limit": 3.5,
+              "account": 3,
+              "installation": 2.4,
+              "fleet_connection": 119.5,
+              "edge": 515.9,
+              "service_total": 649.3
+            },
+            "snapshotMs": 134,
+            "replyReadyMs": 749
+          }
+        ],
+        "platform": [
+          {
+            "command": "workspace.inspect",
+            "matched": true,
+            "matchedBy": "time_window",
+            "traceId": "req_2db594615a0847b6afaa7b40649c21ad",
+            "platformMs": 143,
+            "outsidePlatformMs": 281,
+            "attempts": 0,
+            "handlerMs": null,
+            "platformOutsideHandlerMs": null,
+            "snapshotMs": null,
+            "handlerOutsideSnapshotMs": null
+          },
+          {
+            "command": "request",
+            "matched": true,
+            "matchedBy": "message_id",
+            "traceId": "req_e24731fe22584d818fce13bc54fa3f53",
+            "platformMs": 456,
+            "outsidePlatformMs": 290,
+            "attempts": 1,
+            "handlerMs": 135,
+            "platformOutsideHandlerMs": 321,
+            "snapshotMs": 134,
+            "handlerOutsideSnapshotMs": 1
+          }
+        ]
+      }
+    ],
+    "limitations": [
+      "Instrumented client timings exclude the launcher and Node startup. Reading cloned JSON responses adds small probe overhead.",
+      "Platform request time includes the application handler; these overlapping durations must not be added together.",
+      "Time outside the platform trace includes network, Juiced authorization/database work, and Fleet connection setup. Service timings separate the named phases; remaining client/hosting/network time is not isolated.",
+      "Workspace lookup trace matches use a unique one-second-tolerant wall-clock window; inventory matches use exact message IDs.",
+      "Empty serviceTimingMs means server instrumentation is unavailable. fleet_connection groups SDK status and credential requests; it does not separate them."
+    ]
+  },
+  "freshSessionProbe": {
+    "schemaVersion": 1,
+    "probeMode": "fresh-inspection-session-with-zero-keepalive",
+    "measuredAt": "2026-10-23T18:15:24.067Z",
+    "service": "https://juiced.codes",
+    "samples": [
+      {
+        "startedAt": "2026-10-23T18:15:24.205Z",
+        "cliVersion": "0.3.2",
+        "totalMs": 3473,
+        "exitCode": 2,
+        "comparisonRendered": true,
+        "requests": [
+          {
+            "path": "/api/auth/oauth2/token",
+            "startedAt": "2026-10-23T18:15:24.304Z",
+            "headersMs": 262,
+            "status": 200,
+            "serviceRequestId": "ab0b32f1-1c97-472b-bab4-d4040fd8359c",
+            "serviceTimingMs": {
+              "service_total": 85.3
+            }
+          },
+          {
+            "path": "/v1/accounts/:account/bootstrap",
+            "startedAt": "2026-10-23T18:15:24.585Z",
+            "headersMs": 172,
+            "status": 200,
+            "serviceRequestId": "c17da95c-f561-4f67-8f2f-0e7846f55c71",
+            "serviceTimingMs": {
+              "auth": 4.4,
+              "rate_limit": 3.2,
+              "account": 2.3,
+              "bootstrap": 9,
+              "service_total": 19.6
+            }
+          },
+          {
+            "path": "/v1/accounts/:account/runtime/commands/workspace.inspect",
+            "startedAt": "2026-10-23T18:15:24.833Z",
+            "command": "workspace.inspect",
+            "messageId": "msg_2c4a3b5d20734d9ba59819d8de658276",
+            "headersMs": 1099,
+            "status": 200,
+            "serviceRequestId": "b6ab4ff6-ce04-482a-9d13-d4e83176fed2",
+            "serviceTimingMs": {
+              "auth": 2.9,
+              "rate_limit": 3.2,
+              "account": 2.1,
+              "installation": 2,
+              "fleet_connection": 182.6,
+              "edge": 801.1,
+              "service_total": 995.1
+            }
+          },
+          {
+            "path": "/v1/accounts/:account/runtime/commands/request",
+            "startedAt": "2026-10-23T18:15:25.937Z",
+            "freshInspectionSession": true,
+            "command": "request",
+            "messageId": "msg_a75048157d5a496595bbb3c8a93f1a47",
+            "headersMs": 1735,
+            "status": 200,
+            "serviceRequestId": "5d94105f-7f89-4517-84fe-dc451e2e7d05",
+            "serviceTimingMs": {
+              "auth": 4.5,
+              "rate_limit": 3.3,
+              "account": 4.8,
+              "installation": 9.2,
+              "fleet_connection": 99.5,
+              "edge": 1494.3,
+              "service_total": 1616.8
+            },
+            "snapshotMs": 701,
+            "replyReadyMs": 1737
+          }
+        ],
+        "platform": [
+          {
+            "command": "workspace.inspect",
+            "matched": true,
+            "matchedBy": "time_window",
+            "traceId": "req_7528fa92e45644478f47a0c850b309e0",
+            "platformMs": 608,
+            "outsidePlatformMs": 491,
+            "attempts": 0,
+            "handlerMs": null,
+            "platformOutsideHandlerMs": null,
+            "snapshotMs": null,
+            "handlerOutsideSnapshotMs": null
+          },
+          {
+            "command": "request",
+            "matched": true,
+            "matchedBy": "message_id",
+            "traceId": "req_b0f90d8527f34ed39e9aaf1595352806",
+            "platformMs": 1425,
+            "outsidePlatformMs": 310,
+            "attempts": 1,
+            "handlerMs": 716,
+            "platformOutsideHandlerMs": 709,
+            "snapshotMs": 701,
+            "handlerOutsideSnapshotMs": 15
+          }
+        ]
+      }
+    ],
+    "limitations": [
+      "Fresh-session probe changes only the inspection session ID and keep-alive to zero; it leaves the installed CLI and workspace files unchanged.",
+      "Instrumented client timings exclude the launcher and Node startup. Reading cloned JSON responses adds small probe overhead.",
+      "Platform request time includes the application handler; these overlapping durations must not be added together.",
+      "Time outside the platform trace includes network, Juiced authorization/database work, and Fleet connection setup. Service timings separate the named phases; remaining client/hosting/network time is not isolated.",
+      "Workspace lookup trace matches use a unique one-second-tolerant wall-clock window; inventory matches use exact message IDs.",
+      "Empty serviceTimingMs means server instrumentation is unavailable. fleet_connection groups SDK status and credential requests; it does not separate them."
+    ]
+  },
+  "platformTimelines": {
+    "firstAfterRelease": {
+      "requestId": "req_dacac30d2006447b998a9fd1ce5adf90",
+      "platformMs": 1323.0,
+      "edgeToAcceptanceMs": 130.0,
+      "acceptanceToQueueClaimMs": 21.0,
+      "queueClaimToBindingMs": 352.0,
+      "bindingToHandlerMs": 45.0,
+      "handlerMs": 656.0,
+      "handlerToEdgeReplyMs": 119.0
+    },
+    "firstCallAfterGap": {
+      "requestId": "req_49b97d538e0a4e25a32beccda9e24ad7",
+      "platformMs": 601.0,
+      "edgeToAcceptanceMs": 117.0,
+      "acceptanceToQueueClaimMs": 42.0,
+      "queueClaimToBindingMs": 29.0,
+      "bindingToHandlerMs": 44.0,
+      "handlerMs": 266.0,
+      "handlerToEdgeReplyMs": 103.0
+    },
+    "freshInspectionSession": {
+      "requestId": "req_b0f90d8527f34ed39e9aaf1595352806",
+      "platformMs": 1425.0,
+      "edgeToAcceptanceMs": 148.0,
+      "acceptanceToQueueClaimMs": 46.0,
+      "queueClaimToBindingMs": 344.0,
+      "bindingToHandlerMs": 46.0,
+      "handlerMs": 716.0,
+      "handlerToEdgeReplyMs": 125.0
+    }
+  },
+  "fleetReadBenchmark": {
+    "measuredAt": "2026-10-23T18:13:58.347Z",
+    "sdkVersion": "1.6.0",
+    "results": [
+      {
+        "sample": 1,
+        "operation": "sdk_connection",
+        "ms": 330,
+        "requests": [
+          {
+            "operation": "status",
+            "headersMs": 182,
+            "status": 200
+          },
+          {
+            "operation": "credentials",
+            "headersMs": 131,
+            "status": 200
+          }
+        ]
+      },
+      {
+        "sample": 1,
+        "operation": "credential_read_only",
+        "ms": 114,
+        "requests": [
+          {
+            "operation": "credentials",
+            "headersMs": 111,
+            "status": 200
+          }
+        ]
+      },
+      {
+        "sample": 2,
+        "operation": "sdk_connection",
+        "ms": 223,
+        "requests": [
+          {
+            "operation": "status",
+            "headersMs": 101,
+            "status": 200
+          },
+          {
+            "operation": "credentials",
+            "headersMs": 117,
+            "status": 200
+          }
+        ]
+      },
+      {
+        "sample": 2,
+        "operation": "credential_read_only",
+        "ms": 138,
+        "requests": [
+          {
+            "operation": "credentials",
+            "headersMs": 137,
+            "status": 200
+          }
+        ]
+      },
+      {
+        "sample": 3,
+        "operation": "sdk_connection",
+        "ms": 252,
+        "requests": [
+          {
+            "operation": "status",
+            "headersMs": 131,
+            "status": 200
+          },
+          {
+            "operation": "credentials",
+            "headersMs": 119,
+            "status": 200
+          }
+        ]
+      },
+      {
+        "sample": 3,
+        "operation": "credential_read_only",
+        "ms": 115,
+        "requests": [
+          {
+            "operation": "credentials",
+            "headersMs": 115,
+            "status": 200
+          }
+        ]
+      }
+    ],
+    "limitations": [
+      "Credential-only reads measure the existing endpoint, not an implemented SDK optimization or full peek.",
+      "The first SDK connection includes a cold control-plane HTTP connection; later calls share process connection pools.",
+      "Keeping selector, runtime, ownership and credential consistency checks requires a coordinated SDK/platform contract change."
+    ]
+  },
+  "edgeBundlePrototype": {
+    "measuredAt": "2026-10-23T18:17:38.001Z",
+    "results": [
+      {
+        "variant": "current SDK factory",
+        "bytes": 222287,
+        "containsLibsqlClient": true,
+        "basicProtocolAndRefusalChecksPassed": true
+      },
+      {
+        "variant": "command-only research prototype",
+        "bytes": 39036,
+        "containsLibsqlClient": false,
+        "basicProtocolAndRefusalChecksPassed": true
+      }
+    ],
+    "limitations": [
+      "Local bundle-size and basic protocol feasibility check; not deployed and not a latency benchmark.",
+      "The prototype intentionally makes webhook App construction unavailable. Production implementation must select a command-only build only when no webhook/homepage is declared and retain the existing implementation for Apps declaring them.",
+      "Removing code does not bypass Fleet release-gate authorization, request-specific capabilities, or package-integrity verification."
+    ]
+  },
+  "cleanup": {
+    "stoppedOnlyFreshProbeSession": true,
+    "completedAt": "2026-10-23T18:19:35.988Z"
+  },
+  "conclusion": {
+    "belowTwoSecondsDemonstrated": false,
+    "assessment": "Plausible combined target, not supported as an SDK-only fix or a proven production outcome. Fresh-session latency requires approximately 1.2\u20131.5 seconds of improvement.",
+    "primaryCandidates": [
+      "Compile a command-only Edge adapter for Apps without webhook or homepage declarations; prototype reduced 222287 bytes to 39036 bytes.",
+      "Return selector- and runtime-validated connection metadata from one Fleet endpoint to avoid the redundant status read, retaining ownership and runtime checks.",
+      "Combine Juiced bootstrap, workspace resolution and inspection in one backend operation while retaining canonical workspace pinning and no-workspace-creation semantics.",
+      "Instrument package read/hash/isolate startup and individual Git operations before assigning the remaining cold costs; optimize cold filesystem/executable work and activation based on those results."
+    ]
+  },
+  "limitations": [
+    "Probe timings exclude launcher and Node startup; no below-two-second full-command result was obtained.",
+    "One deliberately fresh inspection Session was sampled; its VM was created during the request. Host storage and backend caches were not reset.",
+    "The earlier 2293ms first-call-after-gap sample used a Sandbox allocated before that command, so it is not a true cold-Sandbox result.",
+    "Fresh-session sample included a 262ms token refresh. Subtracting that request gives an approximate 3211ms remainder, not an independently measured no-refresh run.",
+    "The Edge bundle prototype is a local feasibility experiment that removes the webhook App constructor; its byte reduction has not been measured as hosted latency.",
+    "Fleet direct reads ran from the local computer, so their per-call savings cannot be directly applied to Vercel server-to-server timing.",
+    "The platform trace exposes the complete Edge metadata path, not separate loader, release gate, package store and host-lookup spans; the cold loader contribution is not isolated.",
+    "Current uncommitted SDK work was preserved; production and sibling repositories were not changed."
+  ]
+}
