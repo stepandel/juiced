@@ -33,6 +33,15 @@ export function transferFailure(transfer: LocalTransfer, error: unknown, fallbac
   return { status: 'failed', message: `Juiced could not download this publication from the workspace (${message}). This was a connection or capacity error, not a file conflict, and the local approval was received. Local files, HEAD and the index were not changed, and the local client is still attached. ${recovery}` };
 }
 
+const FILE_TOOLS = { list: 'List local files', pull: 'Pull local files' } as const;
+const TRANSFER_TOOLS = { upload: 'Upload local changes', commits: 'Publish commits', snapshot: 'Publish snapshot' } as const;
+const DECLINED: Record<LocalTransfer['kind'], string> = {
+  files: 'The user declined the request. No local files or listing were sent.',
+  upload: 'The user declined the upload. No local files were sent.',
+  commits: 'The user declined local application. Local files were not changed.',
+  snapshot: 'The user declined local application. Local files were not changed.',
+};
+
 /** The agent state a broker shares: its approval list, events, runtime requests and lifetime. */
 export type PublicationHost = {
   readonly approvals: Map<string, Approval>;
@@ -73,12 +82,11 @@ export class PublicationBroker {
       let input: Record<string, unknown>;
       if (publication.kind === 'files' || publication.kind === 'upload') {
         try {
-          const transfer = publication.kind === 'files' ? this.host.localPublish?.files : this.host.localPublish?.upload;
-          if (!transfer) throw new Error('This local client does not support this transfer. Rebuild Juiced.');
-          input = await withTimeout(this.host.signal, Math.max(1, publication.expiresAt - Date.now()), expiry =>
-            publication.kind === 'files'
-              ? this.host.localPublish!.files!.prepare(publication, AbortSignal.any([expiry, controller.signal]))
-              : this.host.localPublish!.upload!.prepare(publication, AbortSignal.any([expiry, controller.signal])));
+          const { files, upload } = this.host.localPublish ?? {};
+          const prepare = publication.kind === 'files' ? files && ((signal: AbortSignal) => files.prepare(publication, signal))
+            : upload && ((signal: AbortSignal) => upload.prepare(publication, signal));
+          if (!prepare) throw new Error('This local client does not support this transfer. Rebuild Juiced.');
+          input = await withTimeout(this.host.signal, Math.max(1, publication.expiresAt - Date.now()), expiry => prepare(AbortSignal.any([expiry, controller.signal])));
         } catch (error) {
           if (!controller.signal.aborted) {
             await this.host.request({ type: 'publish-claim', id: publication.id, client: this.client });
@@ -97,7 +105,7 @@ export class PublicationBroker {
       if (this.finished.has(publication.id) || publication.expiresAt <= Date.now() || this.host.signal.aborted || controller.signal.aborted) { this.discard(publication.id); return; }
       this.host.approvals.set(publication.id, { id: publication.id, local: true, ...(publication.kind === 'upload' ? { upload: true } : {}),
         ...(publication.kind === 'files' ? { localFiles: publication.action } : {}),
-        tool: publication.kind === 'files' ? publication.action === 'list' ? 'List local files' : 'Pull local files' : publication.kind === 'upload' ? 'Upload local changes' : publication.kind === 'commits' ? 'Publish commits' : 'Publish snapshot', description: publication.summary, input });
+        tool: publication.kind === 'files' ? FILE_TOOLS[publication.action] : TRANSFER_TOOLS[publication.kind], description: publication.summary, input });
       this.host.emit('approvals');
     }).catch(() => { this.publications.delete(publication.id); this.controllers.delete(publication.id); this.discard(publication.id); });
     this.work.add(work);
@@ -119,7 +127,7 @@ export class PublicationBroker {
     this.controllers.set(id, controller);
     try {
       await this.host.request({ type: 'publish-claim', id, client: this.client });
-      let result: PublishResult = { status: 'declined', message: publication.kind === 'files' || publication.kind === 'upload' ? 'The user declined the request. No local files or listing were sent.' : 'The user declined local application. Local files were not changed.' };
+      let result: PublishResult = { status: 'declined', message: DECLINED[publication.kind] };
       if (allow) {
         try {
           result = await withTimeout(this.host.signal, Math.max(1, publication.expiresAt - Date.now()), async expiry => {

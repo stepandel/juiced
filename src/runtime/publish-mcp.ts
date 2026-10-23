@@ -1,5 +1,5 @@
 import { PUBLISH_TIMEOUT_MS } from '../publish-protocol.js';
-import { MAX_LOCAL_RESULT_BYTES } from '../local-files-protocol.js';
+import { localFilePath, MAX_LOCAL_RESULT_BYTES } from '../local-files-protocol.js';
 
 /** Self-contained Node program passed to Claude's stdio MCP launcher. Its socket timeout matches the server's. */
 const PUBLISH_MCP_SOURCE = String.raw`
@@ -34,7 +34,7 @@ function handle(request) {
   if (method !== 'tools/call') { error(id, -32601, 'Method not found'); return; }
   const args = params.arguments ?? {};
   const allowed = { publish_commits: ['summary', 'head'], publish_snapshot: ['summary'], pull_local_changes: ['summary', 'include_uncommitted'], list_local_files: ['summary', 'path', 'include_hidden', 'offset'], pull_local_files: ['summary', 'paths', 'destination'] };
-  const path = (value, root = false) => typeof value === 'string' && (root && value === '.' || value.length > 0 && value.length <= 1024 && !/[\\\x00-\x1f\x7f]/u.test(value) && value.split('/').every(part => !!part && part !== '.' && part !== '..' && part.toLowerCase() !== '.git'));
+  const path = ${localFilePath.toString()};
   if (!tools.some(tool => tool.name === params.name) || !args || Array.isArray(args) || typeof args.summary !== 'string' || !args.summary.trim() || args.summary.length > 2000 ||
       Object.keys(args).some(key => !allowed[params.name].includes(key)) ||
       args.include_uncommitted !== undefined && typeof args.include_uncommitted !== 'boolean' ||

@@ -1,9 +1,8 @@
 import { constants } from 'node:fs';
-import { lstat, mkdtemp, open, opendir, realpath, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, open, opendir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { sha256 } from './git.js';
-import { localFilePath, LOCAL_FILE_CHUNK_BYTES, LOCAL_LIST_PAGE, MAX_LOCAL_FILE_BYTES, MAX_LOCAL_FILES, MAX_LOCAL_FILES_BYTES, validateLocalFileManifest, validateLocalFilesRequest, type LocalFileInfo, type LocalFileListing, type LocalFilesPayload, type LocalFilesRequest } from './local-files-protocol.js';
+import { localFilePath, LOCAL_FILE_CHUNK_BYTES, LOCAL_LIST_PAGE, MAX_LOCAL_FILE_BYTES, MAX_LOCAL_FILES, MAX_LOCAL_FILES_BYTES, MAX_LOCAL_RESULT_BYTES, validateLocalFileManifest, validateLocalFilesRequest, type LocalFileInfo, type LocalFileListing, type LocalFilesPayload, type LocalFilesRequest } from './local-files-protocol.js';
 import type { PublishResult } from './publish-protocol.js';
 import type { TerminalReply } from './protocol.js';
 
@@ -28,7 +27,12 @@ export async function checkedLocalPath(root: string, path: string, missing = fal
   return target;
 }
 
-type Prepared = { directory?: string; listing?: LocalFileListing; files?: LocalFileInfo[] };
+/** Concurrent chunk requests: one round trip per 48 KiB would not fit 64 MiB in the deadline. */
+const LOCAL_FILE_WINDOW = 8;
+/** Room left in a listing result for its status, message and directory path. */
+const LISTING_BUDGET = MAX_LOCAL_RESULT_BYTES - 8 * 1024;
+
+type Prepared = { listing?: LocalFileListing; files?: LocalFileInfo[]; contents?: Buffer[] };
 export class LocalFiles {
   private prepared = new Map<string, Prepared>();
   constructor(private root: string) {}
@@ -48,21 +52,25 @@ export class LocalFiles {
       }
       names.sort();
       const entries = [];
+      let size = 0;
       for (const name of names.slice(request.offset, request.offset + LOCAL_LIST_PAGE)) {
         signal.throwIfAborted();
         const path = request.path === '.' ? name : `${request.path}/${name}`;
         if (!localFilePath(path)) throw new Error('This directory contains an unsupported filename.');
-        await checkedLocalPath(this.root, request.path);
         const info = await lstat(join(directory, name));
-        entries.push({ path, kind: info.isSymbolicLink() ? 'symlink' as const : info.isFile() ? 'file' as const : info.isDirectory() ? 'directory' as const : 'other' as const, size: info.size });
+        const entry = { path, kind: info.isSymbolicLink() ? 'symlink' as const : info.isFile() ? 'file' as const : info.isDirectory() ? 'directory' as const : 'other' as const, size: info.size };
+        // Long multibyte paths shorten the page; nextOffset continues after the last entry that fits.
+        size += Buffer.byteLength(JSON.stringify(entry)) + 1;
+        if (entries.length && size > LISTING_BUDGET) break;
+        entries.push(entry);
       }
       const listing: LocalFileListing = { path: request.path, entries, ...(request.offset + entries.length < names.length ? { nextOffset: request.offset + entries.length } : {}) };
       signal.throwIfAborted();
       this.prepared.set(request.id, { listing });
       return { directory: this.root, path: request.path, includeHidden: request.includeHidden, offset: request.offset, entries: entries.length, access: 'Share names, types and sizes only; no file contents.' };
     }
-    const directory = await mkdtemp(join(tmpdir(), 'juiced-local-files-'));
-    const files: LocalFileInfo[] = [], seen = new Set<string>();
+    // Approved bytes stay in memory: no plaintext copy outlives this process.
+    const files: LocalFileInfo[] = [], contents: Buffer[] = [], seen = new Set<string>();
     let bytes = 0, visited = 0;
     const capture = async (path: string, depth: number): Promise<void> => {
       signal.throwIfAborted();
@@ -91,18 +99,17 @@ export class LocalFiles {
         }
         const after = await file.stat();
         if (length !== before.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new Error(`Local file changed during capture: ${path}`);
-        const contents = data.subarray(0, length);
-        await writeFile(join(directory, String(files.length)), contents, { mode: 0o600, flag: 'wx', signal });
-        files.push({ path, size: length, sha256: sha256(contents), executable: !!(before.mode & 0o111) });
+        const pinned = data.subarray(0, length);
+        contents.push(pinned);
+        files.push({ path, size: length, sha256: sha256(pinned), executable: !!(before.mode & 0o111) });
         seen.add(path); bytes += length;
       } finally { await file.close(); }
     };
-    try {
-      for (const path of request.paths) await capture(path, 0);
-      validateLocalFileManifest(files, request); signal.throwIfAborted();
-      this.prepared.set(request.id, { directory, files });
-      return { directory: this.root, requestedPaths: request.paths, destination: request.destination, files: files.length, paths: files.map(file => file.path), bytes, ignoredFiles: 'Explicitly selected hidden and ignored files are included.', existingFiles: 'Different remote files will be refused.' };
-    } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
+    for (const path of request.paths) await capture(path, 0);
+    if (!files.length) throw new Error('The selected paths contain no regular files to pull.');
+    validateLocalFileManifest(files, request); signal.throwIfAborted();
+    this.prepared.set(request.id, { files, contents });
+    return { directory: this.root, requestedPaths: request.paths, destination: request.destination, files: files.length, paths: files.map(file => file.path), bytes, ignoredFiles: 'Explicitly selected hidden and ignored files are included.', existingFiles: 'Different remote files will be refused.' };
   }
 
   async send(request: LocalFilesRequest, signal: AbortSignal, send: (command: LocalFilesPayload) => Promise<TerminalReply>): Promise<PublishResult> {
@@ -116,24 +123,22 @@ export class LocalFiles {
       if (!reply.ok) throw new Error(reply.error);
     };
     await call({ type: 'publish-files', id: request.id, action: 'begin', files: prepared.files! });
-    for (const [index, info] of prepared.files!.entries()) {
-      const file = await open(join(prepared.directory!, String(index)), 'r');
+    const contents = prepared.contents!;
+    const chunks = contents.flatMap((data, index) => Array.from({ length: Math.ceil(data.length / LOCAL_FILE_CHUNK_BYTES) }, (_, chunk) => ({ index, offset: chunk * LOCAL_FILE_CHUNK_BYTES })));
+    let next = 0, failed = false;
+    const worker = async () => {
       try {
-        const data = Buffer.alloc(LOCAL_FILE_CHUNK_BYTES);
-        for (let offset = 0; offset < info.size;) {
-          signal.throwIfAborted();
-          const { bytesRead } = await file.read(data, 0, Math.min(data.length, info.size - offset), offset);
-          if (!bytesRead) throw new Error('The pinned local file was truncated.');
-          await call({ type: 'publish-files', id: request.id, action: 'chunk', index, offset, data: data.subarray(0, bytesRead).toString('base64') });
-          offset += bytesRead;
+        while (!failed && next < chunks.length) {
+          const { index, offset } = chunks[next++]!;
+          await call({ type: 'publish-files', id: request.id, action: 'chunk', index, offset, data: contents[index]!.subarray(offset, offset + LOCAL_FILE_CHUNK_BYTES).toString('base64') });
         }
-      } finally { await file.close(); }
-    }
+      } catch (error) { failed = true; throw error; }
+    };
+    await Promise.all(Array.from({ length: LOCAL_FILE_WINDOW }, worker));
     return { status: 'applied', message: 'Uploaded the approved files; awaiting remote application.' };
   }
 
   async discard(id: string): Promise<void> {
-    const prepared = this.prepared.get(id); this.prepared.delete(id);
-    if (prepared?.directory) await rm(prepared.directory, { recursive: true, force: true });
+    this.prepared.delete(id);
   }
 }

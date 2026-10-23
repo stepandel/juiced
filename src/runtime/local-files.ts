@@ -1,4 +1,4 @@
-import { chmod, link, lstat, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, mkdtemp, open, readFile, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import type { SessionHarnessContext } from '@cantelop/sdk/session';
 import { fileInfo, sha256 } from '../git.js';
@@ -14,6 +14,7 @@ import { projectPaths, readBinding } from './git.js';
 export class LocalFileReceiver {
   private directory?: string;
   private files?: LocalFileInfo[];
+  private received: Set<number>[] = [];
   private work: Promise<unknown> = Promise.resolve();
   constructor(private context: SessionHarnessContext, private options: { workspace: string; directoryName: string; binding: string }, private request: Extract<LocalFilesRequest, { action: 'pull' }>, private signal: AbortSignal) {}
 
@@ -30,31 +31,34 @@ export class LocalFileReceiver {
         const paths = await projectPaths(this.options.workspace, this.options.directoryName);
         const directory = await mkdtemp(join(paths.metadata, 'local-files-'));
         try {
-          for (let index = 0; index < command.files.length; index++) await writeFile(join(directory, String(index)), '', { flag: 'wx', mode: 0o600 });
+          // The private staging directory keeps these unreadable until linked; the umask sets their installed modes.
+          for (const [index, file] of command.files.entries()) await writeFile(join(directory, String(index)), '', { flag: 'wx', mode: file.executable ? 0o777 : 0o666 });
         } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
         this.directory = directory;
         this.files = structuredClone(command.files);
+        this.received = command.files.map(() => new Set());
         return;
       }
       if (command.action !== 'chunk' || !this.files || !this.directory || !Number.isSafeInteger(command.index) || command.index < 0 || !this.files[command.index] ||
           !Number.isSafeInteger(command.offset) || command.offset < 0 || typeof command.data !== 'string' || !command.data.length ||
           command.data.length > Math.ceil(LOCAL_FILE_CHUNK_BYTES / 3) * 4 || !BASE64.test(command.data)) throw new Error('Invalid local file chunk.');
       const data = Buffer.from(command.data, 'base64'), info = this.files[command.index]!;
-      if (command.offset + data.length > info.size) throw new Error('Local file chunk exceeds its declared size.');
+      // Chunks are aligned and full-sized, so they may arrive in any order while the client pipelines them.
+      if (command.offset % LOCAL_FILE_CHUNK_BYTES || data.length !== Math.min(LOCAL_FILE_CHUNK_BYTES, info.size - command.offset)) throw new Error('Invalid local file chunk.');
+      const chunk = command.offset / LOCAL_FILE_CHUNK_BYTES, received = this.received[command.index]!;
       const file = await open(join(this.directory, String(command.index)), 'r+');
       try {
-        const size = (await file.stat()).size;
-        if (command.offset < size) {
+        if (received.has(chunk)) {
           const previous = Buffer.alloc(data.length);
           const read = await file.read(previous, 0, previous.length, command.offset);
           if (read.bytesRead !== data.length || !previous.equals(data)) throw new Error('Conflicting local file chunk retry.');
         } else {
-          if (command.offset !== size) throw new Error('Local file chunks arrived out of order.');
           for (let offset = 0; offset < data.length;) {
             const write = await file.write(data, offset, data.length - offset, command.offset + offset);
             if (!write.bytesWritten) throw new Error('Local file upload made no progress.');
             offset += write.bytesWritten;
           }
+          received.add(chunk);
         }
       } finally { await file.close(); }
     });
@@ -68,7 +72,7 @@ export class LocalFileReceiver {
     const paths = await projectPaths(this.options.workspace, this.options.directoryName);
     const controller = new AbortController(), signal = AbortSignal.any([this.signal, controller.signal]);
     const lease = await acquireCheckout(await this.context.database(), this.options.directoryName, this.context.session.id, 'maintenance', error => controller.abort(error), true);
-    const installed: { path: string; index: number }[] = [];
+    const installed: { path: string; index: number }[] = [], created: { first: string; last: string }[] = [];
     try {
       const binding = await readBinding(paths.metadata);
       if (binding?.binding !== this.options.binding) throw new Error('The remote repository binding changed.');
@@ -94,11 +98,10 @@ export class LocalFileReceiver {
         if (Date.now() >= this.request.expiresAt) throw new Error('The local file request expired.');
         if (target.exists) continue;
         await checkedLocalPath(paths.target, relative(paths.target, target.path), true);
-        await mkdir(dirname(target.path), { recursive: true, mode: 0o700 });
+        const first = await mkdir(dirname(target.path), { recursive: true });
+        if (first) created.push({ first, last: dirname(target.path) });
         await checkedLocalPath(paths.target, relative(paths.target, target.path), true);
-        const staged = join(this.directory, String(target.index));
-        await chmod(staged, this.files[target.index]!.executable ? 0o700 : 0o600);
-        await link(staged, target.path);
+        await link(join(this.directory, String(target.index)), target.path);
         installed.push(target);
       }
       return { status: installed.length ? 'applied' : 'already-applied', message: `Pulled ${this.files.length} approved local files into ${this.request.destination}. Git HEAD and index are unchanged.` };
@@ -109,6 +112,13 @@ export class LocalFileReceiver {
           const current = await lstat(target.path), staged = await lstat(join(this.directory, String(target.index)));
           if (current.ino === staged.ino && current.dev === staged.dev) await unlink(target.path);
         } catch { /* Retain files if a concurrent writer changed their identity. */ }
+      }
+      // Remove directories this pull created, deepest first; rmdir keeps any that another writer filled.
+      for (const { first, last } of created.reverse()) {
+        for (let directory = last; ; directory = dirname(directory)) {
+          try { await rmdir(directory); } catch { break; }
+          if (directory === first) break;
+        }
       }
       throw error;
     } finally { await lease.release(); }

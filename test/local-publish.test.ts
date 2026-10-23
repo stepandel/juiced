@@ -159,7 +159,7 @@ test('file chunk protocol checks ownership, scope, integrity and retries before 
   await f.bridge.input({ type: 'publish-files', id, client, action: 'begin', files: [info] });
   await f.bridge.input({ type: 'publish-files', id, client, action: 'begin', files: [info] });
   await assert.rejects(f.bridge.input({ type: 'publish-files', id, client: randomUUID(), action: 'chunk', index: 0, offset: 0, data: bytes.toString('base64') }), /Another local client/);
-  await assert.rejects(f.bridge.input({ type: 'publish-files', id, client, action: 'chunk', index: 0, offset: 2, data: 'YQ==' }), /out of order/);
+  await assert.rejects(f.bridge.input({ type: 'publish-files', id, client, action: 'chunk', index: 0, offset: 2, data: 'YQ==' }), /Invalid local file chunk/);
   const corrupt = Buffer.alloc(bytes.length, 1).toString('base64');
   await f.bridge.input({ type: 'publish-files', id, client, action: 'chunk', index: 0, offset: 0, data: corrupt });
   await f.bridge.input({ type: 'publish-files', id, client, action: 'chunk', index: 0, offset: 0, data: corrupt });
