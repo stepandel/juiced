@@ -35,7 +35,7 @@ const messages: Record<string, string> = {
   installation_changed: 'This command’s installation changed. Start a new Juiced command.',
   installation_pending: 'Your workspace service is being provisioned. Retry shortly.',
   account_not_available:
-    'This Juiced account is not available to your sign-in. Pass --account with an account you belong to, or run juiced login.',
+    'This Juiced account is not available to your sign-in. Pass --account with an account you belong to, or run juiced logout and sign in again.',
 };
 export class AccountClient {
   readonly origin: string;
@@ -301,14 +301,19 @@ export class AccountClient {
     if (!account) account = (await this.me(signal)).accounts[0]?.id;
     if (!account) throw new ManagedError('account_not_available');
     let result = readInstallation(
-      passive
-        ? await this.json(`/v1/accounts/${account}/installation`, undefined, signal, 'GET')
-        : await this.json(`/v1/accounts/${account}/bootstrap`, { version, runtimeId }, signal).catch((error: unknown) => {
-            // Bootstrap authorizes membership; name a stale or mistyped account clearly.
-            if (error instanceof ManagedError && error.code === 'not_found')
-              throw new ManagedError('account_not_available', error.status);
-            throw error;
-          }),
+      await (passive
+        ? this.json(`/v1/accounts/${account}/installation`, undefined, signal, 'GET')
+        : this.json(`/v1/accounts/${account}/bootstrap`, { version, runtimeId }, signal)
+      ).catch(async (error) => {
+        // The service reports a non-member account like any missing resource.
+        if (
+          error instanceof ManagedError &&
+          error.status === 404 &&
+          !(await this.me(signal)).accounts.some((a) => a.id === account)
+        )
+          throw new ManagedError('account_not_available', 404);
+        throw error;
+      }),
     );
     const until = Date.now() + 300000;
     let progress = false;

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -103,10 +103,19 @@ try {
     timeout: 10000,
   });
   assert.match(help.stdout, /login/);
-  // Even a bundled release must defer Ink/Yoga (including its WASM fetch) until
-  // an interactive session actually opens. Exercise the installed chunk layout.
+  // Even a bundled release must defer Ink/Yoga until an interactive session
+  // actually opens. Only the lazy UI chunk may import Ink; an eager import would
+  // inline it elsewhere. With that chunk hidden, offline commands must still run
+  // and make no requests (some Node builds fetch Yoga's inline WASM).
+  const dist = join(directory, 'node_modules', 'juiced', 'dist'), chunks = join(dist, 'chunks');
+  const ui = (await readdir(chunks)).filter((name) => /^app-.*\.mjs$/.test(name));
+  assert.equal(ui.length, 1, 'the CLI must ship exactly one lazy UI chunk');
+  for (const file of ['cli.mjs', ...(await readdir(chunks)).filter((name) => name !== ui[0]).map((name) => join('chunks', name))])
+    assert.doesNotMatch(await readFile(join(dist, file), 'utf8'), /from\s*["']ink["']/, `${file} must not load Ink eagerly`);
+  await rename(join(chunks, ui[0]), join(chunks, `${ui[0]}.hidden`));
+  await execute(process.execPath, [bin, '--help'], { cwd: directory, env, timeout: 10000 });
   await execute(process.execPath, ['--input-type=module', '-e', `
-    globalThis.fetch = () => { throw new Error('Offline commands must not load Yoga or make network requests'); };
+    globalThis.fetch = () => { throw new Error('Offline commands must not make network requests'); };
     process.argv = [process.execPath, ${JSON.stringify(bin)}, '--version'];
     await import(${JSON.stringify(pathToFileURL(bin).href)});
   `], { cwd: directory, env, timeout: 10000 });
