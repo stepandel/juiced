@@ -92,21 +92,21 @@ oauth() {
 
 cantelop() {
   echo "Cantelop Fleet"
-  local fleet api worker
-  fleet=$(secret 'Fleet ID (flt_...)')
-  [[ $fleet =~ ^flt_[a-f0-9]{32}$ ]] || { echo "Invalid Fleet ID" >&2; exit 1; }
-  api=$(secret 'API principal token (credentials:read, installations:read)')
-  worker=$(secret 'Worker principal token (installations:read/write, policy:write, usage:read, credentials:read)')
-  for token in "$api" "$worker"; do
-    [[ $token =~ ^fsp_[a-f0-9]{32}\.[a-f0-9]{64}$ ]] || { echo "Invalid Fleet token" >&2; exit 1; }
-  done
-  [[ $api != "$worker" ]] || { echo "Use separate API and worker principals" >&2; exit 1; }
-  put CANTELOP_API_URL https://cantelop.com
-  put CANTELOP_FLEET_ID "$fleet"
-  put CANTELOP_FLEET_TOKEN "$api"
-  put CANTELOP_WORKER_FLEET_TOKEN "$worker"
-  put JUICED_PACKAGE_ID "$(secret 'Approved package ID')"
-  put JUICED_RUNTIME_ID "$(secret 'Runtime ID')"
+  local integration_path document
+  read -rp 'Private integration JSON file (api and worker profiles): ' integration_path
+  [[ -f $integration_path ]] || { echo "Integration file not found" >&2; exit 1; }
+  document=$(node --input-type=module - "$integration_path" <<'NODE'
+import { readFileSync } from 'node:fs';
+const document = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+const bindings = ['api', 'worker'].map(profile => document.profiles?.[profile]?.fleets?.find(fleet => fleet.name === 'juiced'));
+if (document.schemaVersion !== 1 || bindings.some(binding => !binding || !/^flt_[a-f0-9]{32}$/.test(binding.id) || !/^pkg_[a-f0-9]{32}$/.test(binding.packageId) || !/^fsp_[a-f0-9]{32}\.[a-f0-9]{64}$/.test(binding.accessToken) || !binding.runtimeId)) throw new Error('Invalid Juiced Fleet integration bindings');
+if (bindings[0].id !== bindings[1].id || bindings[0].packageId !== bindings[1].packageId || bindings[0].runtimeId !== bindings[1].runtimeId || bindings[0].accessToken === bindings[1].accessToken) throw new Error('Use matching deployment metadata with separate API and worker principals');
+process.stdout.write(JSON.stringify(document));
+NODE
+  )
+  put CANTELOP_APP_CONFIG "$document"
+  put CANTELOP_API_PROFILE api
+  put CANTELOP_WORKER_PROFILE worker
   put JUICED_CLI_VERSION "$(secret 'Published CLI version matching this runtime')"
   existing JUICED_MINIMUM_CLI || put JUICED_MINIMUM_CLI 0.2.0
 }

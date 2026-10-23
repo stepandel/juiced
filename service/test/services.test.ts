@@ -1,3 +1,4 @@
+import { fleet } from '../.cantelop/client/client.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { services } from '../src/services';
@@ -14,13 +15,10 @@ const base: NodeJS.ProcessEnv = {
   JUICED_GITHUB_CLIENT_SECRET: 'github-secret',
   JUICED_GOOGLE_CLIENT_ID: 'google-id',
   JUICED_GOOGLE_CLIENT_SECRET: 'google-secret',
-  JUICED_PACKAGE_ID: 'pkg_fixture',
-  JUICED_RUNTIME_ID: 'fixture.v1',
-  CANTELOP_API_URL: 'https://cantelop.example',
-  CANTELOP_FLEET_ID: `flt_${'a'.repeat(32)}`,
-  CANTELOP_FLEET_TOKEN: `fsp_${'b'.repeat(32)}.${'c'.repeat(64)}`,
-  CANTELOP_WORKER_FLEET_TOKEN: `fsp_${'d'.repeat(32)}.${'e'.repeat(64)}`,
+  CANTELOP_APP_CONFIG: JSON.stringify({schemaVersion: 1, activeProfile: 'api', profiles: Object.fromEntries(['api','worker'].map((profile,index) => [profile,{apps:[],fleets:[{name:'juiced',id:`flt_${'a'.repeat(32)}`,controlUrl:'https://cantelop.example',accessToken:`fsp_${'b'.repeat(32)}.${String(index+1).repeat(64)}`,packageId:`pkg_${'a'.repeat(32)}`,runtimeId:fleet.runtimeId}]}]))}),
 };
+// The Fleet SDK reads its integration document from the process environment.
+process.env.CANTELOP_APP_CONFIG = base.CANTELOP_APP_CONFIG;
 
 for (const role of ['api', 'worker'] as const)
   test(`${role} services start without Stripe and disable billing`, async () => {
@@ -51,4 +49,17 @@ test('public configuration advertises the CLI paired with the deployed service',
   }
   for (const cliVersion of ['invalid', '0.2.0'])
     assert.throws(() => services({ ...base, JUICED_CLI_VERSION: cliVersion, JUICED_MINIMUM_CLI: '0.2.1' }), /JUICED_CLI_VERSION/);
+});
+
+test('service startup requires CLI deployment metadata matching the compiled Fleet contract', () => {
+  const start = (value: string) => {
+    process.env.CANTELOP_APP_CONFIG = value;
+    try { return services({...base,CANTELOP_APP_CONFIG:value}); } finally { process.env.CANTELOP_APP_CONFIG = base.CANTELOP_APP_CONFIG; }
+  };
+  for (const value of ['', '{invalid', JSON.stringify({schemaVersion:1,profiles:{api:{apps:[],fleets:[]}}})])
+    assert.throws(() => start(value), /Fleet integration document|Fleet profile/);
+  const document = JSON.parse(base.CANTELOP_APP_CONFIG!);
+  document.profiles.api.fleets[0].runtimeId = 'runtime-other';
+  assert.throws(() => start(JSON.stringify(document)), /matching the compiled Juiced runtime/);
+  assert.throws(() => services({...base,CANTELOP_APP_CONFIG:JSON.stringify(document)}), /process environment the Fleet SDK reads/);
 });

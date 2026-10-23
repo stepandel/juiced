@@ -9,11 +9,15 @@
     "migrate": "node --import tsx src/migrate.ts",
     "start": "next start",
     "check": "tsc --noEmit -p tsconfig.json",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "node --import tsx --test test/*.test.ts",
+    "prebuild": "node ../scripts/build-service-client.mjs",
+    "predev": "node ../scripts/build-service-client.mjs",
+    "precheck": "node ../scripts/build-service-client.mjs",
+    "pretest": "node ../scripts/build-service-client.mjs"
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.12",
-    "@cantelop/sdk": "1.5.1",
+    "@cantelop/sdk": "1.6.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/queue": "0.8.0",
     "better-auth": "1.7.12",

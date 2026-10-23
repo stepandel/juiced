@@ -134,7 +134,7 @@ export class Accounts {
           i.id,
           i.operation_id,
         ]);
-        await enqueue(tx, a.id, 'upgrade', {}, i.operation_id);
+        await enqueue(tx, a.id, 'provision', {}, i.operation_id);
         i.desired_package_id = this.release.packageId;
         i.desired_runtime_id = this.release.runtimeId;
       }

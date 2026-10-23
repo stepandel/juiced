@@ -12,6 +12,7 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const output = resolve(process.argv[2] ?? join(root, 'dist/releases'));
 const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const lock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
+assert.match(manifest.dependencies['@cantelop/sdk'], /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, 'Publish Juiced only after replacing the draft SDK Git pin with its released npm version');
 const { platform, arch } = process;
 assert.ok(['darwin', 'linux'].includes(platform) && ['arm64', 'x64'].includes(arch));
 assert.ok(/^\d+\.\d+\.\d+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$/.test(manifest.version));
@@ -77,7 +78,7 @@ try {
     version: manifest.version, nodeVersion, platform, arch,
   }) + '\n');
 
-  const env = { ...process.env, JUICED_CONFIG_HOME: join(temporary, 'config'), JUICED_MODE: 'managed' };
+  const env = { ...process.env, JUICED_CONFIG_HOME: join(temporary, 'config') };
   const version = await execute(join(bundle, 'bin/juiced'), ['--version'], { env });
   assert.equal(version.stdout.trim(), `juiced ${manifest.version}`);
   const help = await execute(join(bundle, 'bin/juiced'), ['--help'], { env });

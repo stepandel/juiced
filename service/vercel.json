@@ -2,13 +2,22 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "installCommand": "npm ci --ignore-scripts --no-audit",
-  "buildCommand": "if [ \"$VERCEL_ENV\" = preview ]; then echo 'Skipping migrations for preview builds'; else npm run migrate; fi && next build",
+  "buildCommand": "node ../scripts/build-service-client.mjs && if [ \"$VERCEL_ENV\" = preview ]; then echo 'Skipping migrations for preview builds'; else npm run migrate; fi && next build",
   "functions": {
     "app/api/jobs/route.ts": {
       "experimentalTriggers": [
-        { "type": "queue/v2beta", "topic": "juiced-jobs", "retryAfterSeconds": 10 }
+        {
+          "type": "queue/v2beta",
+          "topic": "juiced-jobs",
+          "retryAfterSeconds": 10
+        }
       ]
     }
   },
-  "crons": [ { "path": "/api/cron", "schedule": "* * * * *" } ]
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "* * * * *"
+    }
+  ]
 }

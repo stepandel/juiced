@@ -69,7 +69,6 @@ export interface AccountView {
     created_at: Date;
   };
   installation: { status: string; error: string | null } | undefined;
-  used: string;
   devices: { id: string; label: string; created_at: Date; expires_at: Date }[];
   providers: string[];
 }
@@ -132,7 +131,7 @@ document.querySelectorAll('[data-sign-out]').forEach(b=>act(b,async()=>{await ap
   return page(
     'Your console',
     `<p>Your Juiced account, workspace host and CLI sign-ins.</p>
-<div class="grid"><section class="card"><h3>Plan</h3><p class="big"><span class="dot ${plan[0]}"></span>${plan[1]}</p><p>${free ? 'Workspace compute is included.' : account.period_end ? `Renews ${day(account.period_end)}.` : ''} ${BigInt(view.used).toLocaleString('en-US')} credits used${free ? '' : ' this period'}. Recent usage can take a few minutes to appear.</p></section>
+<div class="grid"><section class="card"><h3>Plan</h3><p class="big"><span class="dot ${plan[0]}"></span>${plan[1]}</p><p>${free ? 'Workspace compute is included.' : account.period_end ? `Renews ${day(account.period_end)}.` : ''} Access follows subscription status and workspace resource limits.</p></section>
 <section class="card"><h3>Workspace host</h3><p class="big"><span class="dot ${tone}"></span>${label}</p><p>${detail}</p></section></div>
 <p>Account <code>${escape(account.id)}</code> · member since ${day(account.created_at)}</p>
 <h2>CLI sign-ins</h2><p>Sign in once per computer. All terminal windows for the same user share that sign-in. Run <code>juiced logout</code> to sign out on this computer.</p>${devices}

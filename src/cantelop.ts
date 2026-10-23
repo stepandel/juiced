@@ -5,7 +5,7 @@ import { activateTerminal, receiveTerminal } from './runtime/terminal.js';
 
 const cantelop = new CantelopClient();
 
-export const app = cantelop.app<TerminalCommand, TerminalEvent, TerminalReply>({
+export const fleet = cantelop.fleet<TerminalCommand, TerminalEvent, TerminalReply>({
   name: 'juiced',
   runtime: { onActivate: activateTerminal, receive: receiveTerminal },
   auth: claudeAuth,

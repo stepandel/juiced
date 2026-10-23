@@ -2,9 +2,8 @@
 
 The CLI defaults to Juiced accounts. Juiced owns the Cantelop Fleet, provisioning
 and billing; customers sign in with GitHub or Google and bring their Claude login.
-Each personal account gets one isolated Cantelop App. Projects are Workspaces,
-and conversations remain Sessions. `--self-managed` selects the existing direct
-Cantelop workflow explicitly.
+Each personal account gets one isolated Fleet instance. Projects are Workspaces,
+and conversations remain Sessions. All clients use the authenticated service.
 
 ## Install and sign in
 
@@ -79,9 +78,9 @@ The project is `stepandels-projects/juiced`, connected to `stepandel/juiced` wit
 production branch `main`, root directory `service`, framework Next.js and Node 24.
 Source files outside the root directory must be enabled for shared contracts and
 the workspace lockfile. `service/vercel.json` declares the private `juiced-jobs`
-queue trigger and the once-per-minute `/api/cron` schedule. Production builds run
+queue trigger and the once-per-minute `/api/cron` schedule. Production builds generate the typed Fleet backend, then run
 `npm run migrate && next build`, migrating with the Neon integration's owner
-`DATABASE_URL`. Preview builds skip migrations when `VERCEL_ENV=preview` and run
+`DATABASE_URL`. Preview builds also generate the backend, skip migrations when `VERCEL_ENV=preview`, and run
 `next build` without account credentials or database access. Preview account routes
 return HTTP 503 until separate preview service configuration is supplied. Vercel
 builds do not publish the CLI or compile a Cantelop runtime.
@@ -101,8 +100,9 @@ and baseline measurement after deployment.
 `service/public/install.sh` is served at `/install.sh` by Vercel's CDN.
 
 Set the values in `service/.env.example` in the Vercel project. The API uses the
-limited `JUICED_DATABASE_URL` role and `CANTELOP_FLEET_TOKEN`; the private job
-consumer uses `JUICED_WORKER_DATABASE_URL` and `CANTELOP_WORKER_FLEET_TOKEN`. Keep
+limited `JUICED_DATABASE_URL` role and the `api` integration profile; the private job
+consumer uses `JUICED_WORKER_DATABASE_URL` and the `worker` integration profile in
+`CANTELOP_APP_CONFIG`. Keep
 `JUICED_SERVICE_URL=https://juiced.codes` and `JUICED_ADMISSION_ENABLED=false` until
 qualification. A random `CRON_SECRET` protects the cron endpoint; Vercel sends it
 as an Authorization bearer token. Queue authentication uses Vercel OIDC and its
@@ -112,15 +112,17 @@ Account bootstrap, deletion, device revocation and verified Stripe webhooks
 publish a queue wake-up after their database writes commit. Native-auth terminals
 also schedule a wake-up for their expiry. Queue messages carry no credentials or
 account payloads: Postgres retains authoritative jobs, billing events, retry
-schedules, usage and fencing. Each invocation runs a bounded batch and schedules
+schedules and fencing. Each invocation runs a bounded batch and schedules
 short pending retries through delayed queue delivery. Duplicate delivery uses the
 existing SQL locks and idempotency keys. If publishing fails after a commit, the
 request reports failure and a caller retry or the minute cron recovers the durable
 record. Cron also recovers jobs after message expiry and deployment changes.
 
-Usage and canonical Stripe reconciliation run with these batches, including the
-minute cron. Settled usage display can lag by a minute; hard budgets continue to
-be enforced independently by Cantelop's prepaid host grants. API authorization
+Canonical Stripe reconciliation runs with these batches, including the minute cron.
+The current platform has retired Fleet budget/usage APIs. Juiced does not call them
+or display a live compute credit counter. Historical usage rows remain available
+through the compatibility usage response with `metering: "retired"`; subscription
+status, expiry and projected resource policies control access. API authorization
 still checks entitlement and device expiry on each request, and streams recheck
 revocation every five seconds. The relay preserves streaming and cancellation;
 its 300-second Vercel invocation limit uses the CLI's existing replay reconnect.
@@ -198,17 +200,14 @@ After launch, schema changes belong in new forward migrations.
 
 Do not enable `JUICED_ADMISSION_ENABLED` until the deployment has passed the
 qualification below. Setting it to `false` closes new API work. To stop existing
-compute too, suspend accounts or stop lease renewal; prepaid host grants expire.
+compute too, project inactive resource policies and wait for enforced revisions.
 
 ## Allowances and isolation
 
-The fixed allowance covers infrastructure; Claude model access uses the user's
-own Claude authentication. Rate card `allocated-compute-v1` charges integral
-credits: **1024 per allocated vCPU-second plus one per MiB-second of maximum guest
-memory capacity**, including the configured hotplug capacity. This is capacity,
-not measured RSS or model tokens. Shutdown after suspension can conservatively
-consume up to five seconds of funded capacity. Choose included quantities and
-prices from observed costs before accepting paying customers.
+Claude model access uses the user's own Claude authentication. The current Fleet
+platform exposes resource limits and subscription expiry rather than prepaid
+compute-credit budgets. Choose subscription pricing from observed infrastructure
+costs; this service does not advertise a live compute-consumption meter.
 
 Current policy permits two VMs, eight aggregate vCPUs, 9216 MiB aggregate guest
 capacity, and eight Workspaces sharing a 10 GiB ceiling: each Workspace gets a
@@ -226,13 +225,12 @@ rechecked every five seconds; single-use auth terminals are recorded and closed
 by a queue job after device revocation. Git cleanup uses a typed server operation
 that retires observed checkout tokens after stopping the Session.
 
-Paid invoices grant immutable allowance epochs. Duplicate or delayed webhooks
-cannot refill an exhausted epoch. Queue jobs fetch canonical Stripe state;
-reconciliation also polls to repair missed events. Expired/delinquent accounts
-cannot start work. Bounded credit reservations are bound to host boot identities;
-only durable final host evidence returns unused credits. Ambiguous or lost-host
-reservations remain reserved until reconciled. Usage displayed in the account
-page is settled usage; recent and uncertain usage remains pending.
+Paid invoices grant immutable subscription epochs. Duplicate or delayed webhooks
+cannot refill an exhausted epoch. Queue jobs fetch canonical Stripe state and
+repair missed events. Expired/delinquent accounts cannot start work. Subscription
+records and historical usage remain in PostgreSQL, but this service no longer
+claims a platform-enforced compute-credit budget or ingests the retired Fleet
+usage feed. Resource caps and expiry are still projected to compute.
 
 Policy projections include a monotonic job fence, so a worker that lost its
 database lock cannot undo a newer suspension. External-key tombstones serialize
@@ -261,14 +259,22 @@ release. Its Edge manifest must declare `fleet_execution_protocol_version: 1` an
 the optional `CANTELOP_FLEET_EXECUTION_VERSION` binding. Poll the package endpoint
 until `execution` is `ready`; do not promote `preparing` or `legacy` packages.
 Shared installations attach the source release's prepared runtime image and reuse
-the package's Edge code while retaining separate credentials, storage and budgets.
+the package's Edge code while retaining separate credentials, storage and resource policies.
 
-Publish the matching CLI archives before setting the service's `JUICED_PACKAGE_ID`,
-`JUICED_RUNTIME_ID` and `JUICED_CLI_VERSION`. The existing bootstrap and upgrade jobs
-then move accounts through Cantelop's drain and release API. Verify a canary
-installation reports the new package/runtime and is ready before broader use.
-Package versions are immutable; the previous package remains available for rollback.
-See Cantelop's [shared-package rollout](https://github.com/stepandel/cantelop/blob/main/docs/managed-fleets.md).
+Publish matching CLI archives and deploy with the Fleet-aware Cantelop CLI:
+
+```sh
+cantelop deploy --app juiced --fleet flt_... --package-version 1.2.3 --fleet-profile service --create-app
+```
+
+The CLI owns package publication and existing-instance rollout. Its private
+integration document supplies package/runtime metadata to `CANTELOP_APP_CONFIG`;
+use separate API and worker profiles/principals as described in
+[Fleet SDK migration](fleet-sdk-migration.md). Remove `JUICED_PACKAGE_ID`,
+`JUICED_RUNTIME_ID` and the old individual Fleet token variables from service hosts.
+The worker observes the CLI rollout and updates local identity records; it never
+calls the package release API itself. Verify a canary instance before broader use.
+Package versions remain immutable and retained versions can be rolled back by CLI.
 
 Bootstrap requires an exact compiled runtime fingerprint and a minimum CLI
 version. Published CLIs automatically install the service's `JUICED_CLI_VERSION`
@@ -276,7 +282,7 @@ version. Published CLIs automatically install the service's `JUICED_CLI_VERSION`
 matching CLI archives before promoting that version with its package/runtime;
 raise `JUICED_MINIMUM_CLI` when older versions must stop starting work. See
 [CLI update and recovery behavior](cli-releases.md#updates-rollback-and-removal).
-Changing the approved package queues a durable upgrade generation.
+Changing deployment metadata queues a durable observation job. It waits for the CLI-owned rollout rather than upgrading the instance.
 Managed admission drains existing VMs before package activation; old connections
 stay pinned and cannot submit new work during the transition. Publish an older
 compatible package as the desired release to roll back. Existing Cantelop release
@@ -286,10 +292,9 @@ rollback reverses destructive application data changes.
 For canaries, deploy the new Next.js app and jobs to a separate staging Fleet/service origin
 first. Pin its package/runtime pair, qualify two accounts, then promote the same
 immutable package in the production Fleet and CLI build. Keep Fleet and host
-capacity limits deliberately small until load/lease-renewal latency is measured.
+capacity limits deliberately small until provisioning and policy-enforcement latency is measured.
 Current placement targets one configured compute ingress; multi-host scheduling
-is a later extension, and a boot identity change prevents pending grants from
-being reused on a replacement host.
+is a later extension, and placement/host recovery remains platform-owned.
 
 Operator commands use the worker database credential:
 
@@ -299,17 +304,15 @@ node --import tsx service/scripts/admin.ts suspend-all
 node --import tsx service/scripts/admin.ts invalidate-devices
 ```
 
-Accounts start with the free allowance automatically. Watch pending/stale jobs,
-billing retries, unreconciled reservations,
-policy/enforced revision lag, principal expiry, purge failures, pool wait times
-and lease-renewal latency. Job diagnostics must not contain credentials, command bodies or terminal content.
+Accounts start with the free subscription epoch automatically. Watch pending/stale
+jobs, billing retries, policy/enforced revision lag, principal expiry, purge
+failures and pool wait times. Job diagnostics must not contain credentials, command bodies or terminal content.
 
-After a database restore, keep admission closed and queue/cron processing disabled. Stop old
-hosts or verify their watchdogs killed all funded VMs, invalidate browser/CLI
-sessions, restore the accounting ledger from authoritative WAL/backups, reconcile
-host evidence and Stripe, and conservatively charge ambiguous reservations.
-Never reset usage cursors, mint replacement epochs or release reservations merely
-to make counters look healthy. Resume with bounded operator canaries. Rotate
+After a database restore, keep admission closed and queue/cron processing disabled.
+Stop or reconcile old compute, invalidate browser/CLI sessions, restore the
+service records from authoritative backups and reconcile subscription and
+instance identities before reopening admission. Resume with bounded operator
+canaries. Rotate
 principals and webhook secrets through their providers; Better Auth supports
 versioned encryption secrets through `BETTER_AUTH_SECRETS`. Retain prior keys
 until encrypted provider credentials have migrated; device tokens can be revoked

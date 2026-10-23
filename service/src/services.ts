@@ -3,6 +3,7 @@ import { config, required } from './config';
 import { database } from './db';
 import { Accounts } from './accounts';
 import { Platform } from './platform';
+import { configuredFleet } from './fleet';
 import { Billing } from './billing';
 import { VERSION } from '../../src/version';
 import { cliVersionAtLeast, isCliVersion } from '../../contracts/cli-version';
@@ -17,19 +18,15 @@ export function services(env: NodeJS.ProcessEnv = process.env, role: 'api' | 'wo
     pool = database(
       role === 'worker' ? (env.JUICED_WORKER_DATABASE_URL ?? cfg.databaseUrl) : cfg.databaseUrl,
     );
+  const deployment = configuredFleet(env, role);
   const accounts = new Accounts(pool, {
-    packageId: required(env, 'JUICED_PACKAGE_ID'),
-    runtimeId: required(env, 'JUICED_RUNTIME_ID'),
+    packageId: deployment.packageId,
+    runtimeId: deployment.runtimeId,
     minimumCli,
     cliVersion,
   });
-  const platform = new Platform(
-    required(env, 'CANTELOP_API_URL'),
-    required(env, 'CANTELOP_FLEET_ID'),
-    required(env, role === 'worker' ? 'CANTELOP_WORKER_FLEET_TOKEN' : 'CANTELOP_FLEET_TOKEN'),
-    fetch,
-    cfg.development,
-  );
+  const platform = new Platform(deployment.fleet);
+
   // Billing is enabled by STRIPE_SECRET_KEY. Without it, billing routes return
   // billing_unavailable and accounts use the default free allowance.
   const billing = env.STRIPE_SECRET_KEY

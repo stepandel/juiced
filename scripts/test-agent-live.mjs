@@ -12,7 +12,7 @@ await mkdir(join(root, '.cantelop'), { recursive: true });
 const temporary = await mkdtemp(join(root, '.cantelop', 'agent-live-'));
 let agent;
 try {
-  await build({ stdin: { contents: `export { app } from './src/cantelop.ts'; export { RemoteAgent } from './src/remote-agent.ts'; export { emptyConversation, userTurn, receiveFrame } from './src/tui/conversation.ts';`, resolveDir: root, sourcefile: 'live-agent.ts', loader: 'ts' },
+  await build({ stdin: { contents: `export { app } from './src/app.ts'; export { RemoteAgent } from './src/remote-agent.ts'; export { emptyConversation, userTurn, receiveFrame } from './src/tui/conversation.ts';`, resolveDir: root, sourcefile: 'live-agent.ts', loader: 'ts' },
     bundle: true, platform: 'node', target: 'node22', format: 'esm', packages: 'external', plugins: [createCantelopCompilerPlugin({ definition: join(root, 'src/cantelop.ts') })], outfile: join(temporary, 'app.mjs') });
   const { app, RemoteAgent, emptyConversation, userTurn, receiveFrame } = await import(pathToFileURL(join(temporary, 'app.mjs')).href);
   const resolved = await app.workspace({ slug: process.env.JUICED_WORKSPACE ?? 'default' }).resolve();

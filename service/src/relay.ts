@@ -95,14 +95,12 @@ export async function relay(
     request.headers.get('x-cantelop-session-runtime') !== i.runtime_id
   )
     throw new ServiceError('cli_upgrade_required', 409);
-  const credential = await ctx.platform.credentials(i.platform_id);
-  if (credential.appId !== i.app_id || credential.runtimeId !== i.runtime_id)
-    throw new ServiceError('installation_changed', 409);
+  const connection = await ctx.platform.connection(i.platform_id, { appId: i.app_id, runtimeId: i.runtime_id });
   const headers = new Headers();
   if (contentType) headers.set('Content-Type', contentType);
   headers.set('X-Cantelop-Session-Runtime', i.runtime_id);
   if (type === 'stream') headers.set('Accept', 'text/event-stream');
-  const upstream = await ctx.platform.connection(credential).fetch(
+  const upstream = await connection.fetch(
     new Request(url, {
       method: request.method,
       headers,
