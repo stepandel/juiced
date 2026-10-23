@@ -10,8 +10,31 @@ import { checkpoint, hostedIntegration, privateCommand } from './release.mjs';
 import { findPrepared, preparedRuns, completeArtifacts } from './prepared-release.mjs';
 import { targets, verifyArtifacts } from './release-artifacts.mjs';
 import { canaryPolicy, qualifyInstance } from './release-canary.mjs';
+import { nodeDistribution } from './node-distribution.mjs';
 const execute = promisify(execFile);
 const sha = 'a'.repeat(40), runtimeId = 'rt_' + 'b'.repeat(64), repository = 'stepandel/juiced';
+
+test('cached Node distributions are checked against fresh official sums and corrupt caches are replaced', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'juiced-node-cache-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const archive = 'node-v24.20.0-darwin-x64.tar.gz', bytes = Buffer.from('official portable runtime');
+  const digest = createHash('sha256').update(bytes).digest('hex'), requests = [];
+  const download = async name => {
+    requests.push(name);
+    return name === archive ? bytes : Buffer.from(`${digest}  ${archive}\n`);
+  };
+  await nodeDistribution(archive, download, dir);
+  assert.deepEqual(requests, ['SHASUMS256.txt', archive]);
+  requests.length = 0;
+  await nodeDistribution(archive, download, dir);
+  assert.deepEqual(requests, ['SHASUMS256.txt']);
+  await writeFile(join(dir, archive), 'corrupt cached bytes');
+  requests.length = 0;
+  assert.deepEqual(await nodeDistribution(archive, download, dir), bytes);
+  assert.deepEqual(requests, ['SHASUMS256.txt', archive]);
+  await assert.rejects(nodeDistribution(archive,
+    async name => name === archive ? Buffer.from('tampered') : Buffer.from(`${digest}  ${archive}\n`)), /checksum mismatch/);
+});
 
 test('artifact reuse requires successful main qualification of the exact commit in this repository', async () => {
   const valid = { id: 1, head_sha: sha, event: 'push', head_branch: 'main', conclusion: 'success', head_repository: { full_name: repository }, path: '.github/workflows/release.yml' };

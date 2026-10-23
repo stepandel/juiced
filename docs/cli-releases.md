@@ -47,6 +47,9 @@ runs that archive with Node and npm absent from PATH.
    suite in four native shards, serially within each shard, to avoid contention
    between compiler and filesystem fixtures. Every platform still installs its
    actual archive without Node/npm on PATH. Dependency downloads use npm caches.
+   Official portable Node archives are cached by version and platform and checked
+   against fresh upstream checksums on every use. Packaging stages have explicit
+   deadlines; an unhealthy runner cannot hold qualification open indefinitely.
 3. All four jobs must pass, including installation of their actual archives.
    The workflow creates a **draft** GitHub Release with the four archives,
    `SHA256SUMS` and a copy of `install.sh`. Review and publish the draft when
