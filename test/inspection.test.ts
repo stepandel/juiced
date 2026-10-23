@@ -118,15 +118,36 @@ test('stat reuse cannot hide assume-unchanged or skip-worktree edits and preserv
   const f = await fixture(t);
   await git(f.local, ['update-index', '--assume-unchanged', 'README.md']);
   await git(f.local, ['update-index', '--skip-worktree', 'src/entry.ts']);
+  await git(f.local, ['update-index', '--assume-unchanged', 'docs/guide.md']);
+  await git(f.local, ['update-index', '--skip-worktree', 'docs/guide.md']);
   await git(f.local, ['config', 'core.ignoreStat', 'true']);
   await git(f.local, ['config', 'core.trustctime', 'false']);
   await writeFile(join(f.local, 'README.md'), 'edit\n');
   await writeFile(join(f.local, 'src/entry.ts'), 'edit\n');
+  await writeFile(join(f.local, 'docs/guide.md'), 'edit\n');
   const before = await state(f.local);
   const rows = compareInspection(await f.snapshot(f.local), await f.snapshot(f.remote)).rows;
   assert.equal(rows.find(row => row.name === 'README.md')?.status, 'different');
   assert.equal(rows.find(row => row.name === 'src')?.status, 'different');
+  assert.equal(rows.find(row => row.name === 'docs')?.status, 'different');
   assert.deepEqual(await state(f.local), before);
+});
+
+test('batched Git metadata preserves newline paths, detached HEADs, and sparse-checkout rejection', async t => {
+  const f = await fixture(t), literal = join(f.root, 'literal\ncheckout');
+  await git(f.root, ['clone', '--no-hardlinks', f.local, literal]);
+  const ordinary = await f.snapshot(f.local);
+  const before = await state(literal), snapshot = await f.snapshot(literal);
+  assert.equal(snapshot.entry?.oid, ordinary.entry?.oid);
+  assert.equal(snapshot.head, ordinary.head);
+  assert.deepEqual(await state(literal), before);
+  await git(literal, ['checkout', '--detach']);
+  assert.equal((await f.snapshot(literal)).branch, null);
+  await git(literal, ['config', 'core.sparseCheckout', 'true']);
+  const sparseBefore = await state(literal);
+  await assert.rejects(f.snapshot(literal), /sparse checkouts/);
+  await assert.rejects(captureListing(literal, '', false, f.controller.signal), /sparse checkouts/);
+  assert.deepEqual(await state(literal), sparseBefore);
 });
 
 test('copying an index cannot make a racy timestamp look clean', async t => {

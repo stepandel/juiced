@@ -44,14 +44,21 @@ export async function inspectionGit(root: string, signal: AbortSignal) {
     GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined, GIT_COMMON_DIR: undefined,
     GIT_OBJECT_DIRECTORY: undefined, GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined, GIT_LITERAL_PATHSPECS: '1',
   };
-  const gitDirectory = decoder.decode(await git(root, [...base, 'rev-parse', '--absolute-git-dir'], { env: clean, signal })).trim();
+  // The known checkout suffix lets us batch these paths even when a directory
+  // name contains newlines; splitting rev-parse output on lines would not.
+  const initialText = async (args: string[]) => decoder.decode(await git(root, [...base, ...args], { env: clean, signal })).trim();
+  const [locations, sparse] = await Promise.all([
+    git(root, [...base, 'rev-parse', '--absolute-git-dir', '--show-toplevel'], { env: clean, signal }).then(bytes => decoder.decode(bytes)),
+    sparseCheckout(initialText),
+  ]);
+  const suffix = `\n${root}\n`;
+  if (!locations.endsWith(suffix)) throw new InspectionIncomplete('Git points outside the selected checkout.');
+  const gitDirectory = locations.slice(0, -suffix.length);
   const env: NodeJS.ProcessEnv = { ...clean, GIT_DIR: gitDirectory, GIT_WORK_TREE: root };
   const run = (args: string[], options: { input?: Buffer; env?: NodeJS.ProcessEnv } = {}) => git(root, [...base, ...args], { ...options, env: { ...env, ...options.env }, signal });
   const text = async (args: string[]) => decoder.decode(await run(args)).trim();
-  const [topLevel, sparse] = await Promise.all([text(['rev-parse', '--show-toplevel']), sparseCheckout(text)]);
-  if (topLevel !== root) throw new InspectionIncomplete('Git points outside the selected checkout.');
   if (sparse) throw new InspectionIncomplete('Workspace inspection does not support sparse checkouts.');
-  return { run, text };
+  return { run, text, gitDirectory };
 }
 
 /** Gitlink paths from `ls-files --stage -z` lines. */

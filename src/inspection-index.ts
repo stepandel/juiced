@@ -1,19 +1,19 @@
 import { utimes, writeFile } from 'node:fs/promises';
-import { GitError } from './git.js';
 import { nulStrings, type inspectionGit } from './inspection-git.js';
 
 type Run = Awaited<ReturnType<typeof inspectionGit>>['run'];
 
 /** Reuse ordinary Git stat entries without inheriting flags that hide changes. */
 export async function seedInspectionIndex(
-  run: Run, staged: Buffer, original: Buffer, indexMtime: bigint | undefined,
-  paths: Buffer, env: NodeJS.ProcessEnv,
+  run: Run,
+  { staged, original, indexMtime, paths, env, flagged, autocrlf }: {
+    staged: Buffer; original: Buffer; indexMtime: bigint | undefined;
+    paths: Buffer; env: NodeJS.ProcessEnv; flagged: string[]; autocrlf: Buffer;
+  },
 ) {
   const entries = nulStrings(staged);
   // Filters can depend on attributes, configuration, or external state even when
   // a file's stat is unchanged. Keep the fresh-hash path for converted contents.
-  const autocrlf = await run(['config', '--get', 'core.autocrlf'])
-    .catch(error => { if (error instanceof GitError && error.code === 1) return Buffer.alloc(0); throw error; });
   const automatic = autocrlf.length > 0 && autocrlf.toString().trim().toLowerCase() !== 'false';
   const attributes = automatic ? Buffer.alloc(0) : await run(['check-attr', '--all', '-z', '--stdin'], { input: paths });
   const converts = automatic || /\0(?:filter|text|eol|crlf|ident|working-tree-encoding)\0/.test(attributes.toString());
@@ -28,9 +28,14 @@ export async function seedInspectionIndex(
   const timestamp = Number(indexMtime / 1_000_000n - 1n) / 1000;
   await utimes(env.GIT_INDEX_FILE!, timestamp, timestamp);
   await run(['update-index', '--no-split-index', '--no-fsmonitor', '--no-untracked-cache'], { env });
-  const tracked = Buffer.from([...new Set(entries.map(entry => entry.slice(entry.indexOf('\t') + 1)))].join('\0') + (entries.length ? '\0' : ''));
-  if (tracked.length) {
-    await run(['update-index', '--no-assume-unchanged', '-z', '--stdin'], { input: tracked, env });
-    await run(['update-index', '--no-skip-worktree', '-z', '--stdin'], { input: tracked, env });
+  // ls-files -v reports these flags alongside the stage data we already need.
+  // Ordinary checkouts need neither of these index rewrites.
+  for (const [option, selected] of [
+    ['--no-assume-unchanged', flagged.filter(entry => /^[a-z]/.test(entry))],
+    ['--no-skip-worktree', flagged.filter(entry => /^[Ss]/.test(entry))],
+  ] as const) {
+    if (selected.length) await run(['update-index', option, '-z', '--stdin'], {
+      input: Buffer.from(selected.map(entry => entry.slice(entry.indexOf('\t') + 1)).join('\0') + '\0'), env,
+    });
   }
 }

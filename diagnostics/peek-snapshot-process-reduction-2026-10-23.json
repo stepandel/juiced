@@ -1,0 +1,1638 @@
+{
+  "schemaVersion": 2,
+  "measuredAt": "2026-10-23T18:55:43.331Z",
+  "baselineCommit": "7f9cc2c61fcbc7d1aef6524ec0ef0405b3bf187f",
+  "candidateSourceSha256": "2e27bd14095e115da4162a77905391ac4c6ad601ca236cbdc1ea5114c7da95d5",
+  "platform": "darwin",
+  "nodeVersion": "v26.8.1",
+  "fixtures": [
+    {
+      "name": "small files",
+      "fileCount": 256,
+      "bytesPerFile": 128,
+      "directories": 1,
+      "totalBytes": 32768,
+      "scenarios": [
+        {
+          "scenario": "clean",
+          "measurementsMs": {
+            "baseline": [
+              91,
+              98,
+              93,
+              92,
+              93
+            ],
+            "candidate": [
+              53,
+              50,
+              51,
+              51,
+              50
+            ]
+          },
+          "medianMs": {
+            "baseline": 93,
+            "candidate": 51
+          },
+          "gitProcesses": {
+            "baseline": [
+              25,
+              25,
+              25,
+              25,
+              25
+            ],
+            "candidate": [
+              19,
+              19,
+              19,
+              19,
+              19
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": [
+              {
+                "command": "rev-parse --absolute-git-dir",
+                "startMs": 2,
+                "durationMs": 5
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 7,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-toplevel",
+                "startMs": 7,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path index",
+                "startMs": 12,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --verify HEAD",
+                "startMs": 16,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 17,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-object-format",
+                "startMs": 17,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 18,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --stage -z",
+                "startMs": 18,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 18,
+                "durationMs": 6
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects",
+                "startMs": 19,
+                "durationMs": 5
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 27,
+                "durationMs": 5
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 32,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 37,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-assume-unchanged -z --stdin",
+                "startMs": 42,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-skip-worktree -z --stdin",
+                "startMs": 47,
+                "durationMs": 5
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 52,
+                "durationMs": 7
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 59,
+                "durationMs": 5
+              },
+              {
+                "command": "write-tree",
+                "startMs": 64,
+                "durationMs": 8
+              },
+              {
+                "command": "ls-tree -z 9679950c5db5350f564a4aaa334fdf808b269632",
+                "startMs": 72,
+                "durationMs": 5
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 78,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 83,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 84,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 84,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 85,
+                "durationMs": 6
+              }
+            ],
+            "candidate": [
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 1,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --absolute-git-dir --show-toplevel",
+                "startMs": 1,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects --show-object-format --verify HEAD",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 7,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 7,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 7,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --stage -v -z",
+                "startMs": 8,
+                "durationMs": 5
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 8,
+                "durationMs": 5
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 15,
+                "durationMs": 6
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 22,
+                "durationMs": 5
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 28,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 34,
+                "durationMs": 5
+              },
+              {
+                "command": "write-tree",
+                "startMs": 34,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-tree -z 9679950c5db5350f564a4aaa334fdf808b269632",
+                "startMs": 40,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 46,
+                "durationMs": 5
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 46,
+                "durationMs": 6
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 46,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 47,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 47,
+                "durationMs": 5
+              }
+            ]
+          }
+        },
+        {
+          "scenario": "one dirty file",
+          "measurementsMs": {
+            "baseline": [
+              93,
+              92,
+              92,
+              94,
+              92
+            ],
+            "candidate": [
+              56,
+              56,
+              55,
+              55,
+              54
+            ]
+          },
+          "medianMs": {
+            "baseline": 92,
+            "candidate": 55
+          },
+          "gitProcesses": {
+            "baseline": [
+              25,
+              25,
+              25,
+              25,
+              25
+            ],
+            "candidate": [
+              19,
+              19,
+              19,
+              19,
+              19
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": [
+              {
+                "command": "rev-parse --absolute-git-dir",
+                "startMs": 0,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-toplevel",
+                "startMs": 5,
+                "durationMs": 5
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 6,
+                "durationMs": 4
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path index",
+                "startMs": 10,
+                "durationMs": 4
+              },
+              {
+                "command": "rev-parse --verify HEAD",
+                "startMs": 15,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 15,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-object-format",
+                "startMs": 16,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --stage -z",
+                "startMs": 16,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 16,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 16,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects",
+                "startMs": 17,
+                "durationMs": 5
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 29,
+                "durationMs": 5
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 34,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 39,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-assume-unchanged -z --stdin",
+                "startMs": 44,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-skip-worktree -z --stdin",
+                "startMs": 49,
+                "durationMs": 5
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 54,
+                "durationMs": 7
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 61,
+                "durationMs": 5
+              },
+              {
+                "command": "write-tree",
+                "startMs": 66,
+                "durationMs": 9
+              },
+              {
+                "command": "ls-tree -z e01ee23ad6bac667d127e5a29dd55a0f27c2e929",
+                "startMs": 75,
+                "durationMs": 5
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 80,
+                "durationMs": 6
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 86,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 87,
+                "durationMs": 4
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 87,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 87,
+                "durationMs": 5
+              }
+            ],
+            "candidate": [
+              {
+                "command": "rev-parse --absolute-git-dir --show-toplevel",
+                "startMs": 0,
+                "durationMs": 5
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 1,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects --show-object-format --verify HEAD",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 6,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --stage -v -z",
+                "startMs": 7,
+                "durationMs": 5
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 7,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 7,
+                "durationMs": 6
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 14,
+                "durationMs": 6
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 20,
+                "durationMs": 5
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 25,
+                "durationMs": 7
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 33,
+                "durationMs": 5
+              },
+              {
+                "command": "write-tree",
+                "startMs": 33,
+                "durationMs": 9
+              },
+              {
+                "command": "ls-tree -z e01ee23ad6bac667d127e5a29dd55a0f27c2e929",
+                "startMs": 42,
+                "durationMs": 6
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 48,
+                "durationMs": 6
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 49,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 49,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 49,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 50,
+                "durationMs": 6
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "large files",
+      "fileCount": 256,
+      "bytesPerFile": 262144,
+      "directories": 1,
+      "totalBytes": 67108864,
+      "scenarios": [
+        {
+          "scenario": "clean",
+          "measurementsMs": {
+            "baseline": [
+              91,
+              88,
+              89,
+              93,
+              91
+            ],
+            "candidate": [
+              51,
+              50,
+              50,
+              49,
+              50
+            ]
+          },
+          "medianMs": {
+            "baseline": 91,
+            "candidate": 50
+          },
+          "gitProcesses": {
+            "baseline": [
+              25,
+              25,
+              25,
+              25,
+              25
+            ],
+            "candidate": [
+              19,
+              19,
+              19,
+              19,
+              19
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": [
+              {
+                "command": "rev-parse --absolute-git-dir",
+                "startMs": 0,
+                "durationMs": 4
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 5,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-toplevel",
+                "startMs": 5,
+                "durationMs": 6
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path index",
+                "startMs": 11,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --verify HEAD",
+                "startMs": 16,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 16,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-object-format",
+                "startMs": 16,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --stage -z",
+                "startMs": 17,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 17,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 17,
+                "durationMs": 7
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects",
+                "startMs": 18,
+                "durationMs": 5
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 26,
+                "durationMs": 5
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 31,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 36,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-assume-unchanged -z --stdin",
+                "startMs": 41,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-skip-worktree -z --stdin",
+                "startMs": 47,
+                "durationMs": 6
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 53,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 59,
+                "durationMs": 5
+              },
+              {
+                "command": "write-tree",
+                "startMs": 63,
+                "durationMs": 8
+              },
+              {
+                "command": "ls-tree -z d66239ca5bd6dbc252b0bf37fbf095479e0fba4d",
+                "startMs": 72,
+                "durationMs": 6
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 78,
+                "durationMs": 6
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 84,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 84,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 84,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 85,
+                "durationMs": 5
+              }
+            ],
+            "candidate": [
+              {
+                "command": "rev-parse --absolute-git-dir --show-toplevel",
+                "startMs": 0,
+                "durationMs": 5
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 1,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects --show-object-format --verify HEAD",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --stage -v -z",
+                "startMs": 7,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 7,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 7,
+                "durationMs": 6
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 8,
+                "durationMs": 5
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 13,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 20,
+                "durationMs": 5
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 26,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 32,
+                "durationMs": 5
+              },
+              {
+                "command": "write-tree",
+                "startMs": 32,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-tree -z d66239ca5bd6dbc252b0bf37fbf095479e0fba4d",
+                "startMs": 38,
+                "durationMs": 6
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 43,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 44,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 44,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 44,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 45,
+                "durationMs": 6
+              }
+            ]
+          }
+        },
+        {
+          "scenario": "one dirty file",
+          "measurementsMs": {
+            "baseline": [
+              98,
+              97,
+              98,
+              103,
+              102
+            ],
+            "candidate": [
+              62,
+              59,
+              63,
+              64,
+              62
+            ]
+          },
+          "medianMs": {
+            "baseline": 98,
+            "candidate": 62
+          },
+          "gitProcesses": {
+            "baseline": [
+              25,
+              25,
+              25,
+              25,
+              25
+            ],
+            "candidate": [
+              19,
+              19,
+              19,
+              19,
+              19
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": [
+              {
+                "command": "rev-parse --absolute-git-dir",
+                "startMs": 0,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-toplevel",
+                "startMs": 5,
+                "durationMs": 5
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 5,
+                "durationMs": 4
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path index",
+                "startMs": 10,
+                "durationMs": 4
+              },
+              {
+                "command": "rev-parse --verify HEAD",
+                "startMs": 14,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 15,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-object-format",
+                "startMs": 15,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 15,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --stage -z",
+                "startMs": 16,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects",
+                "startMs": 16,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 16,
+                "durationMs": 6
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 28,
+                "durationMs": 4
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 33,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 38,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-assume-unchanged -z --stdin",
+                "startMs": 43,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-skip-worktree -z --stdin",
+                "startMs": 48,
+                "durationMs": 5
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 53,
+                "durationMs": 12
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 65,
+                "durationMs": 5
+              },
+              {
+                "command": "write-tree",
+                "startMs": 70,
+                "durationMs": 9
+              },
+              {
+                "command": "ls-tree -z 9242e1f92286d319440cd24eeb6d79a357ce4430",
+                "startMs": 79,
+                "durationMs": 6
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 85,
+                "durationMs": 6
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 91,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 91,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 92,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 92,
+                "durationMs": 6
+              }
+            ],
+            "candidate": [
+              {
+                "command": "rev-parse --absolute-git-dir --show-toplevel",
+                "startMs": 0,
+                "durationMs": 5
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 1,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects --show-object-format --verify HEAD",
+                "startMs": 5,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 6,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 6,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --stage -v -z",
+                "startMs": 7,
+                "durationMs": 5
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 7,
+                "durationMs": 5
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 13,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 20,
+                "durationMs": 5
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 25,
+                "durationMs": 13
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 38,
+                "durationMs": 5
+              },
+              {
+                "command": "write-tree",
+                "startMs": 39,
+                "durationMs": 9
+              },
+              {
+                "command": "ls-tree -z 9242e1f92286d319440cd24eeb6d79a357ce4430",
+                "startMs": 48,
+                "durationMs": 6
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 54,
+                "durationMs": 5
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 54,
+                "durationMs": 6
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 55,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 55,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 56,
+                "durationMs": 6
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "nested files",
+      "fileCount": 1024,
+      "bytesPerFile": 128,
+      "directories": 64,
+      "totalBytes": 131072,
+      "scenarios": [
+        {
+          "scenario": "clean",
+          "measurementsMs": {
+            "baseline": [
+              124,
+              122,
+              119,
+              117,
+              121
+            ],
+            "candidate": [
+              92,
+              92,
+              69,
+              70,
+              73
+            ]
+          },
+          "medianMs": {
+            "baseline": 121,
+            "candidate": 73
+          },
+          "gitProcesses": {
+            "baseline": [
+              25,
+              25,
+              25,
+              25,
+              25
+            ],
+            "candidate": [
+              19,
+              19,
+              19,
+              19,
+              19
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": [
+              {
+                "command": "rev-parse --absolute-git-dir",
+                "startMs": 0,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-toplevel",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path index",
+                "startMs": 11,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --verify HEAD",
+                "startMs": 16,
+                "durationMs": 6
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 16,
+                "durationMs": 6
+              },
+              {
+                "command": "rev-parse --show-object-format",
+                "startMs": 17,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 17,
+                "durationMs": 9
+              },
+              {
+                "command": "ls-files --stage -z",
+                "startMs": 18,
+                "durationMs": 7
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 18,
+                "durationMs": 9
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects",
+                "startMs": 20,
+                "durationMs": 6
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 39,
+                "durationMs": 6
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 44,
+                "durationMs": 6
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 50,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-assume-unchanged -z --stdin",
+                "startMs": 56,
+                "durationMs": 6
+              },
+              {
+                "command": "update-index --no-skip-worktree -z --stdin",
+                "startMs": 62,
+                "durationMs": 6
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 68,
+                "durationMs": 10
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 78,
+                "durationMs": 5
+              },
+              {
+                "command": "write-tree",
+                "startMs": 84,
+                "durationMs": 18
+              },
+              {
+                "command": "ls-tree -z 89bb0f2d1e9a5f585ccae4e9b1488b3c514b32e2",
+                "startMs": 101,
+                "durationMs": 6
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 107,
+                "durationMs": 6
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 114,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 114,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 114,
+                "durationMs": 9
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 115,
+                "durationMs": 8
+              }
+            ],
+            "candidate": [
+              {
+                "command": "rev-parse --absolute-git-dir --show-toplevel",
+                "startMs": 0,
+                "durationMs": 5
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 1,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects --show-object-format --verify HEAD",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 6,
+                "durationMs": 9
+              },
+              {
+                "command": "ls-files --stage -v -z",
+                "startMs": 7,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 7,
+                "durationMs": 9
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 8,
+                "durationMs": 5
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 16,
+                "durationMs": 6
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 30,
+                "durationMs": 6
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 59,
+                "durationMs": 9
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 68,
+                "durationMs": 6
+              },
+              {
+                "command": "write-tree",
+                "startMs": 69,
+                "durationMs": 6
+              },
+              {
+                "command": "ls-tree -z 89bb0f2d1e9a5f585ccae4e9b1488b3c514b32e2",
+                "startMs": 75,
+                "durationMs": 6
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 81,
+                "durationMs": 6
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 81,
+                "durationMs": 7
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 82,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 82,
+                "durationMs": 9
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 82,
+                "durationMs": 10
+              }
+            ]
+          }
+        },
+        {
+          "scenario": "one dirty file",
+          "measurementsMs": {
+            "baseline": [
+              123,
+              122,
+              119,
+              121,
+              128
+            ],
+            "candidate": [
+              74,
+              78,
+              72,
+              73,
+              73
+            ]
+          },
+          "medianMs": {
+            "baseline": 122,
+            "candidate": 73
+          },
+          "gitProcesses": {
+            "baseline": [
+              25,
+              25,
+              25,
+              25,
+              25
+            ],
+            "candidate": [
+              19,
+              19,
+              19,
+              19,
+              19
+            ]
+          },
+          "firstSampleGitTimeline": {
+            "baseline": [
+              {
+                "command": "rev-parse --absolute-git-dir",
+                "startMs": 0,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-toplevel",
+                "startMs": 5,
+                "durationMs": 5
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 5,
+                "durationMs": 4
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path index",
+                "startMs": 10,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --verify HEAD",
+                "startMs": 15,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 15,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --show-object-format",
+                "startMs": 16,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 16,
+                "durationMs": 9
+              },
+              {
+                "command": "ls-files --stage -z",
+                "startMs": 17,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects",
+                "startMs": 17,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 17,
+                "durationMs": 8
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 50,
+                "durationMs": 5
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 56,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 61,
+                "durationMs": 5
+              },
+              {
+                "command": "update-index --no-assume-unchanged -z --stdin",
+                "startMs": 67,
+                "durationMs": 6
+              },
+              {
+                "command": "update-index --no-skip-worktree -z --stdin",
+                "startMs": 72,
+                "durationMs": 5
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 78,
+                "durationMs": 10
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 88,
+                "durationMs": 5
+              },
+              {
+                "command": "write-tree",
+                "startMs": 93,
+                "durationMs": 10
+              },
+              {
+                "command": "ls-tree -z 016e33a4f46c05cf7b7a46d6f411c85a2fadc814",
+                "startMs": 102,
+                "durationMs": 5
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 108,
+                "durationMs": 6
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 114,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 115,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 115,
+                "durationMs": 7
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 115,
+                "durationMs": 7
+              }
+            ],
+            "candidate": [
+              {
+                "command": "rev-parse --absolute-git-dir --show-toplevel",
+                "startMs": 0,
+                "durationMs": 5
+              },
+              {
+                "command": "config --bool core.sparseCheckout",
+                "startMs": 1,
+                "durationMs": 4
+              },
+              {
+                "command": "rev-parse --path-format=absolute --git-path objects --show-object-format --verify HEAD",
+                "startMs": 5,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 6,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 6,
+                "durationMs": 8
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 6,
+                "durationMs": 9
+              },
+              {
+                "command": "config --get core.autocrlf",
+                "startMs": 7,
+                "durationMs": 5
+              },
+              {
+                "command": "ls-files --stage -v -z",
+                "startMs": 7,
+                "durationMs": 5
+              },
+              {
+                "command": "check-attr --all -z --stdin",
+                "startMs": 16,
+                "durationMs": 6
+              },
+              {
+                "command": "update-index --no-split-index --no-fsmonitor --no-untracked-cache",
+                "startMs": 26,
+                "durationMs": 5
+              },
+              {
+                "command": "add -A -- .",
+                "startMs": 41,
+                "durationMs": 10
+              },
+              {
+                "command": "ls-files --stage -z -- .",
+                "startMs": 50,
+                "durationMs": 6
+              },
+              {
+                "command": "write-tree",
+                "startMs": 51,
+                "durationMs": 7
+              },
+              {
+                "command": "ls-tree -z 016e33a4f46c05cf7b7a46d6f411c85a2fadc814",
+                "startMs": 58,
+                "durationMs": 5
+              },
+              {
+                "command": "symbolic-ref --quiet --short HEAD",
+                "startMs": 64,
+                "durationMs": 5
+              },
+              {
+                "command": "rev-parse HEAD",
+                "startMs": 64,
+                "durationMs": 5
+              },
+              {
+                "command": "diff --quiet --no-ext-diff --no-textconv --ignore-submodules=all -- .",
+                "startMs": 64,
+                "durationMs": 8
+              },
+              {
+                "command": "ls-files --cached --others --exclude-standard -z -- .",
+                "startMs": 65,
+                "durationMs": 8
+              },
+              {
+                "command": "ls-files --others --ignored --exclude-standard --directory -z -- .",
+                "startMs": 65,
+                "durationMs": 8
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "runtime": {
+    "name": "node",
+    "version": "v26.8.1"
+  },
+  "verification": "Every candidate snapshot equaled its baseline; the real index remained byte-for-byte unchanged.",
+  "limitations": [
+    "Local disposable filesystem fixtures, not production end-to-end latency.",
+    "Five alternating pairs per scenario; no latency percentiles or cold-storage guarantee.",
+    "Git command intervals overlap and must not be added together.",
+    "Null Git process counts or timelines mean the runtime did not support child-process instrumentation."
+  ]
+}

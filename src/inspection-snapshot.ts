@@ -28,7 +28,7 @@ export async function captureInspection(root: string, scope: string, includeIgno
     // Concurrent reads stop their siblings once one fails.
     const reads = new AbortController();
     const stopReads = (error: unknown): never => { reads.abort(error); throw error; };
-    const { run, text } = await inspectionGit(root, AbortSignal.any([signal, reads.signal]));
+    const { run, text, gitDirectory } = await inspectionGit(root, AbortSignal.any([signal, reads.signal]));
     // A path argument never follows an ancestor symlink to another directory.
     let ancestor = root;
     for (const part of scope.split('/').slice(0, -1)) {
@@ -40,29 +40,35 @@ export async function captureInspection(root: string, scope: string, includeIgno
         catch (error) { if (!isENOENT(error)) throw error; }
       } catch (error) { if (!isENOENT(error)) throw error; break; }
     }
-    const indexPath = await text(['rev-parse', '--path-format=absolute', '--git-path', 'index']);
+    const indexPath = join(gitDirectory, 'index');
     const readBranch = () => text(['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(error => { if (error instanceof GitError && error.code === 1) return null; throw error; });
     const paths = ['--', scope || '.'];
     const inventory = () => run(['ls-files', '--cached', '--others', '--exclude-standard', '-z', ...paths]);
     const ignoredPaths = () => run(['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z', ...paths]);
-    const [originalIndex, head, branch, objectFormat, before, ignoredBefore, staged, objectDirectory, indexInfo] = await Promise.all([
-      indexBytes(indexPath), text(['rev-parse', '--verify', 'HEAD']), readBranch(),
-      text(['rev-parse', '--show-object-format']) as Promise<InspectionSnapshot['objectFormat']>,
-      inventory(), ignoredPaths(), run(['ls-files', '--stage', '-z']),
-      text(['rev-parse', '--path-format=absolute', '--git-path', 'objects']),
-      lstatOptional(indexPath),
+    const [originalIndex, metadata, branch, before, ignoredBefore, flaggedBytes, indexInfo, autocrlf] = await Promise.all([
+      indexBytes(indexPath), text(['rev-parse', '--path-format=absolute', '--git-path', 'objects', '--show-object-format', '--verify', 'HEAD']), readBranch(),
+      inventory(), ignoredPaths(), run(['ls-files', '--stage', '-v', '-z']), lstatOptional(indexPath),
+      run(['config', '--get', 'core.autocrlf']).catch(error => { if (error instanceof GitError && error.code === 1) return Buffer.alloc(0); throw error; }),
     ]).catch(stopReads);
+    // Only the final two fields are line-delimited; the object path may itself
+    // contain newlines. Git emits the verified HEAD after its option outputs.
+    const fields = metadata.split('\n'), head = fields.pop()!, objectFormat = fields.pop() as InspectionSnapshot['objectFormat'];
+    const objectDirectory = fields.join('\n');
+    const flagged = strings(flaggedBytes), staged = Buffer.from(flagged.map(entry => entry.slice(2)).join('\0') + (flagged.length ? '\0' : ''));
     const stagedEntries = strings(staged);
     stagedSubmodules(stagedEntries, scope);
     // Git silently skips some special files; report those instead of false absence.
     const eligible = new Set([...strings(before), ...(includeIgnored ? strings(await run(['ls-files', '--others', '--ignored', '--exclude-standard', '-z', ...paths])) : [])]);
     // Large inventories: stat concurrently, then report the first failure in inventory order.
-    for (const result of await settleAll([...eligible], 64, async path => {
-      signal.throwIfAborted();
-      const info = await lstatOptional(join(root, path));
-      if (info && !info.isFile() && !info.isSymbolicLink() && !info.isDirectory()) throw new InspectionIncomplete('The selected scope contains a special file that Git cannot compare.');
-      if (info?.isFile()) await access(join(root, path), constants.R_OK);
-    })) if (result.status === 'rejected') throw result.reason;
+    const validateFiles = async () => {
+      const results = await settleAll([...eligible], 64, async path => {
+        signal.throwIfAborted();
+        const info = await lstatOptional(join(root, path));
+        if (info && !info.isFile() && !info.isSymbolicLink() && !info.isDirectory()) throw new InspectionIncomplete('The selected scope contains a special file that Git cannot compare.');
+        if (info?.isFile()) await access(join(root, path), constants.R_OK);
+      });
+      for (const result of results) if (result.status === 'rejected') throw result.reason;
+    };
     const objects = join(directory, 'objects'); await mkdir(objects);
     const temporary = {
       GIT_INDEX_FILE: join(directory, 'index'), GIT_OBJECT_DIRECTORY: objects,
@@ -70,7 +76,9 @@ export async function captureInspection(root: string, scope: string, includeIgno
       GIT_ALTERNATE_OBJECT_DIRECTORIES: JSON.stringify(objectDirectory),
     };
     // Retain safe stat entries; conversions and racy files still get fresh hashes.
-    await seedInspectionIndex(run, staged, originalIndex, indexInfo?.mtimeNs, before, temporary);
+    await Promise.all([validateFiles(), seedInspectionIndex(run, {
+      staged, original: originalIndex, indexMtime: indexInfo?.mtimeNs, paths: before, env: temporary, flagged, autocrlf,
+    })]).catch(stopReads);
     // An absent, untracked literal path is valid; git add would reject it.
     let present = !scope;
     if (scope) { try { await lstat(join(root, scope)); present = true; } catch (error) { if (!isENOENT(error)) throw error; } }
@@ -82,21 +90,28 @@ export async function captureInspection(root: string, scope: string, includeIgno
     if (!selectedIgnored || includeIgnored) {
       if (present || tracked) await run(['add', '-A', ...(includeIgnored ? ['-f'] : []), ...paths], { env: temporary });
     }
+    // write-tree only updates the private index's tree cache. Its entry list is
+    // unchanged, so the independent submodule read can overlap object creation.
+    const [capturedEntries, treeBytes] = await Promise.all([
+      run(['ls-files', '--stage', '-z', ...paths], { env: temporary }), run(['write-tree'], { env: temporary }),
+    ]).catch(stopReads);
     // Git also turns previously untracked embedded repositories into gitlinks.
-    const submodules = [...new Set(gitlinks(strings(await run(['ls-files', '--stage', '-z', ...paths], { env: temporary })))
+    const submodules = [...new Set(gitlinks(strings(capturedEntries))
       .filter(path => !scope || path === scope || path.startsWith(scope + '/'))
       .map(path => path === scope ? posix.basename(path) : path.slice(scope ? scope.length + 1 : 0).split('/')[0]!))];
-    const tree = decoder.decode(await run(['write-tree'], { env: temporary })).trim();
+    const tree = decoder.decode(treeBytes).trim();
     const selected = scope ? parseTree(await run(['ls-tree', '-z', tree, '--', scope], { env: temporary }))[0] : { name: '.', mode: '040000' as const, oid: tree };
     const kind = selectedIgnored && !includeIgnored ? 'ignored' : !selected ? 'missing' : selected.mode === '040000' ? 'directory' : 'file';
     const entries = kind === 'directory' ? parseTree(await run(['ls-tree', '-z', selected!.oid], { env: temporary })) : [];
     const prefix = scope ? scope + '/' : '';
     const ignored = [...new Set(strings(ignoredBefore).filter(path => path.startsWith(prefix)).map(path => path.slice(prefix.length).split('/')[0]!).filter(Boolean))];
     // Nested repository contents are explicitly excluded from the comparison.
-    try { await run(['diff', '--quiet', '--no-ext-diff', '--no-textconv', '--ignore-submodules=all', ...paths], { env: temporary }); }
-    catch (error) { if (error instanceof GitError && error.code === 1) throw new InspectionIncomplete('Files changed during inspection. Retry the command.'); throw error; }
+    const unchanged = run(['diff', '--quiet', '--no-ext-diff', '--no-textconv', '--ignore-submodules=all', ...paths], { env: temporary }).catch(error => {
+      if (error instanceof GitError && error.code === 1) throw new InspectionIncomplete('Files changed during inspection. Retry the command.'); throw error;
+    });
     const [rootAfter, currentBranch, currentHead, currentIndex, currentInventory, currentIgnored] = await Promise.all([
       lstat(root, { bigint: true }), readBranch(), text(['rev-parse', 'HEAD']), indexBytes(indexPath), inventory(), ignoredPaths(),
+      unchanged,
     ]).catch(stopReads);
     if (rootAfter.dev !== rootBefore.dev || rootAfter.ino !== rootBefore.ino || branch !== currentBranch || head !== currentHead ||
         !originalIndex.equals(currentIndex) || !before.equals(currentInventory) || !ignoredBefore.equals(currentIgnored)) throw new InspectionIncomplete('The checkout changed during inspection. Retry the command.');
