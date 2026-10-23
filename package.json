@@ -1,6 +1,6 @@
 {
   "name": "juiced",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "description": "Run Claude Code on Cantelop from your terminal",
   "type": "module",
   "private": false,
@@ -43,7 +43,7 @@
     "build:service:client": "node scripts/build-service-client.mjs"
   },
   "dependencies": {
-    "@cantelop/sdk": "github:stepandel/cantelop-sdk#b65bf304527111f5a2d2d787d21d3e86ca1266b1",
+    "@cantelop/sdk": "1.6.0",
     "ink": "^8.0.0",
     "react": "^19.3.1",
     "string-width": "^8.3.0"

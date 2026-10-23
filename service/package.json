@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@better-auth/oauth-provider": "1.7.12",
-    "@cantelop/sdk": "github:stepandel/cantelop-sdk#b65bf304527111f5a2d2d787d21d3e86ca1266b1",
+    "@cantelop/sdk": "1.6.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/queue": "0.8.0",
     "better-auth": "1.7.12",

@@ -2,18 +2,9 @@
 
 This migration depends on SDK [PR #65](https://github.com/stepandel/cantelop-sdk/pull/65)
 and platform [PR #391](https://github.com/stepandel/cantelop-internal/pull/391).
-The draft pins an immutable SDK commit for review. **Replace the Git pin in both
-package manifests and regenerate the npm lockfile with the published Fleet SDK
-release before merging or publishing Juiced.** The SDK source dependency has no
-built `dist` when installed with this project's `--ignore-scripts` policy. CI,
-Vercel installation and CLI release packaging therefore require that registry
-release; the Git pin is not a shipping dependency.
-
-For local review, build the pinned SDK checkout (`pnpm build`, or
-`pnpm build:release` for native release qualification) and link/install that
-qualified package into this checkout. The migration is tested against that exact
-compiled SDK, including its review fixes. Keep Node 22+ and the existing native
-helper build prerequisites when building the SDK from source.
+Juiced pins the published `@cantelop/sdk@1.6.0` registry package in both
+manifests and the lockfile. Install with `npm ci --ignore-scripts`; the published
+package includes its qualified runtime and native adapter artifacts.
 
 ## Definition and clients
 
