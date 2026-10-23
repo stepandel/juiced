@@ -159,7 +159,9 @@ jobs:
           echo "Qualified commit $SOURCE_SHA; reused run: ${PREPARED_RUN:-fresh build}" >> "$GITHUB_STEP_SUMMARY"
 
   publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    # Cached native artifacts skip matrix jobs. Override implicit success() so
+    # those skipped ancestors do not suppress an otherwise qualified tag.
+    if: ${{ !cancelled() && needs.prepared.result == 'success' && needs.qualified.result == 'success' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
     needs: [prepared, qualified]
     runs-on: ubuntu-latest
     timeout-minutes: 3
