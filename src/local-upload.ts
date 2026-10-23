@@ -21,7 +21,7 @@ export class LocalUploader {
     });
     if (!known || !await ancestor(repository.root, request.head, repository.head))
       throw new Error('The laptop does not contain the remote HEAD. Import and reconcile remote commits before uploading local work.');
-    const upload = await createUpload(repository, request.includeUncommitted, request.head, signal);
+    const upload = await createUpload(repository, request.includeUncommitted, request.head, signal, request.uploadParts === true);
     try {
       // Reconstruct the pinned tree with a private index for an exact path preview.
       const env = { GIT_INDEX_FILE: join(upload.directory, 'preview-index') };

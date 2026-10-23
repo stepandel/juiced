@@ -9,6 +9,8 @@ export type Publication = {
 export type UploadRequest = {
   id: string; kind: 'upload'; summary: string; expiresAt: number;
   head: string; sourceBranch: string | null; includeUncommitted: boolean;
+  /** Set by runtimes that accept part chunks, `finish` and patch-only manifests. */
+  uploadParts?: boolean;
 };
 export type LocalTransfer = Publication | UploadRequest | LocalFilesRequest;
 export type PublishResult = {

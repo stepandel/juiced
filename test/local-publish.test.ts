@@ -586,7 +586,7 @@ test('uploads reject corrupt artifacts, ignored collisions, and remote HEAD chan
   await f.uploader.prepare(first.request, f.signal);
   const result = await f.uploader.send(first.request, f.signal);
   const transfer = join(f.remote, '.juiced', f.project.directoryName, 'transfers', result.uploadId!);
-  await writeFile(join(transfer, 'bundle'), 'corrupt');
+  await writeFile(join(transfer, 'unstaged'), 'corrupt');
   const owner = randomUUID();
   await f.bridge.input({ type: 'publish-claim', id: first.request.id, client: owner });
   const failure = await f.bridge.input({ type: 'publish-result', id: first.request.id, client: owner, result });

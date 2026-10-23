@@ -9,11 +9,25 @@ import { ancestor, cleanRepository, createUpload, fileInfo, git, gitText, sha256
 import { MAX_TRANSFER_BYTES, UPLOAD_CHUNK_BYTES, validOid, validTransferId, validateExportManifest, type GitCommand, type GitResult, type GitStatus, type ExportManifest, type FileInfo } from './git-protocol.js';
 import type { TerminalCommand, TerminalEvent, TerminalReply } from './protocol.js';
 import type { selectProject } from './project.js';
-import { ADMISSION_RETRY_MS, backoffMs, isAdmissionTimeout, isTransient, messageId } from './transport.js';
+import { ADMISSION_RETRY_MS, backoffMs, isAdmissionTimeout, isDeviceQuotaExceeded, isTransient, messageId, quotaWindowMs } from './transport.js';
 
 export type GitWorkspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'session'>;
 type Project = Awaited<ReturnType<typeof selectProject>>;
 type Action = GitCommand extends infer C ? C extends GitCommand ? Omit<C, 'type' | 'directoryName' | 'binding'> : never : never;
+
+// The service admits 1,200 requests per device per minute. Pace bulk upload
+// parts below that so interactive commands from this device keep headroom.
+const PART_BURST = 200, PART_RATE_PER_MS = 800 / 60_000;
+const partBucket = { tokens: PART_BURST, updated: Date.now() };
+async function partToken(signal: AbortSignal) {
+  for (;;) {
+    const now = Date.now();
+    partBucket.tokens = Math.min(PART_BURST, partBucket.tokens + (now - partBucket.updated) * PART_RATE_PER_MS);
+    partBucket.updated = now;
+    if (partBucket.tokens >= 1) { partBucket.tokens--; return; }
+    await delay(Math.ceil((1 - partBucket.tokens) / PART_RATE_PER_MS), undefined, { signal });
+  }
+}
 
 /** Stop through the authorized service, which owns checkout lease cleanup. */
 export function createGitSession(workspace: GitWorkspace, stopSession: (session: string) => Promise<void>, id?: string): Pick<SessionRef<TerminalCommand, TerminalEvent, TerminalReply>, 'id' | 'request' | 'dispatch' | 'stream' | 'view' | 'stop'> {
@@ -38,36 +52,45 @@ export class GitWorkspaceClient {
     this.session = workspace.session({ keepAliveSeconds: 120 });
   }
 
-  async call(action: Action): Promise<GitResult> {
+  async call(action: Action, signal = this.signal): Promise<GitResult> {
     const command = { ...action, type: 'git', directoryName: this.project.directoryName, binding: this.repository.binding } as GitCommand;
     let id = messageId();
     const startedAt = Date.now();
     for (let attempt = 0; ; attempt++) {
-      this.signal.throwIfAborted();
+      signal.throwIfAborted();
       let reply: TerminalReply;
-      try { reply = await this.session.request(command, { id, signal: this.signal, timeoutMs: 240_000 }); }
+      try { reply = await this.session.request(command, { id, signal, timeoutMs: 240_000 }); }
       catch (error) {
-        if (this.signal.aborted || !isTransient(error)) throw error;
+        // Pipelined transfers can fill the service's one-minute device quota.
+        // It rejects these before runtime delivery, so retain the delivery ID
+        // and wait for a fresh window rather than failing an otherwise valid upload.
+        // Quota waits do not consume the transient-retry budget below.
+        const wait = quotaWindowMs();
+        if (!signal.aborted && isDeviceQuotaExceeded(error) && Date.now() - startedAt + wait < 240_000) {
+          await delay(wait, undefined, { signal });
+          attempt--; continue;
+        }
+        if (signal.aborted || !isTransient(error)) throw error;
         // An unadmitted request never ran; wait out a finishing session's keep-alive.
         if (isAdmissionTimeout(error) ? Date.now() - startedAt >= ADMISSION_RETRY_MS : attempt >= 2) throw error;
         if (isAdmissionTimeout(error) && !this.waited) { this.waited = true; this.waiting?.(); }
-        await delay(isAdmissionTimeout(error) ? backoffMs(attempt, { base: 1000 }) : backoffMs(attempt), undefined, { signal: this.signal }); continue;
+        await delay(isAdmissionTimeout(error) ? backoffMs(attempt, { base: 1000 }) : backoffMs(attempt), undefined, { signal }); continue;
       }
       if (!reply?.ok) {
         if (reply && reply.stale?.length && action.action !== 'reap' && attempt < 2) {
           // An expired timestamp is not permission to reuse a live checkout.
           // Stop the recorded owners before removing their exact stale tokens.
           for (const lease of reply.stale) await this.workspace.session({ id: lease.session }).stop();
-          await this.call({ action: 'reap', leases: reply.stale });
-          return this.call(action);
+          await this.call({ action: 'reap', leases: reply.stale }, signal);
+          return this.call(action, signal);
         }
         if (reply?.busy === 'maintenance' && Date.now() - startedAt < 240_000) {
-          await delay(500, undefined, { signal: this.signal });
+          await delay(500, undefined, { signal });
           id = messageId();
           continue;
         }
         if (reply && /database_not_ready/.test(reply.error) && Date.now() - startedAt < 120_000) {
-          await delay(1000, undefined, { signal: this.signal });
+          await delay(1000, undefined, { signal });
           id = messageId();
           continue;
         }
@@ -87,7 +110,7 @@ export class GitWorkspaceClient {
     const status = await this.status();
     const configuration = await readRemoteConfiguration(this.repository.root, this.repository.branch);
     if (initializeOnly && status.initialized) { await this.call({ action: 'configure', configuration }); return; }
-    const upload = await createUpload(this.repository, includeUncommitted, status.head, this.signal);
+    const upload = await createUpload(this.repository, includeUncommitted, status.head, this.signal, status.uploadParts === true);
     try {
       await this.uploadPrepared(upload);
       await this.call({ action: 'apply', id: upload.id, initializeOnly });
@@ -103,16 +126,46 @@ export class GitWorkspaceClient {
     for (const info of upload.manifest.files) {
       const file = await open(join(upload.directory, info.name), 'r');
       try {
-        const bytes = Buffer.alloc(UPLOAD_CHUNK_BYTES);
-        for (let offset = 0; offset < info.size;) {
-          const { bytesRead } = await file.read(bytes, 0, Math.min(bytes.length, info.size - offset), offset);
-          if (!bytesRead) throw new Error('The prepared Git transfer was truncated');
-          const result = await this.call({ action: 'chunk', id: upload.id, file: info.name, offset, data: bytes.subarray(0, bytesRead).toString('base64') });
-          offset += bytesRead;
-          if (result.offset !== offset) throw new Error('The remote Git upload returned an unexpected offset');
+        if (!upload.uploadParts) {
+          // Runtimes without part support append strictly in order.
+          const bytes = Buffer.alloc(UPLOAD_CHUNK_BYTES);
+          for (let offset = 0; offset < info.size;) {
+            const { bytesRead } = await file.read(bytes, 0, Math.min(bytes.length, info.size - offset), offset);
+            if (!bytesRead) throw new Error('The prepared Git transfer was truncated');
+            const result = await this.call({ action: 'chunk', id: upload.id, file: info.name, offset, data: bytes.subarray(0, bytesRead).toString('base64') });
+            offset += bytesRead;
+            if (result.offset !== offset) throw new Error('The remote Git upload returned an unexpected offset');
+          }
+          continue;
         }
+        // One failure cancels sibling workers, including their retry waits.
+        const controller = new AbortController(), signal = AbortSignal.any([this.signal, controller.signal]);
+        let next = 0, failure: unknown;
+        const worker = async () => {
+          try {
+            const bytes = Buffer.alloc(UPLOAD_CHUNK_BYTES);
+            while (next < info.size) {
+              signal.throwIfAborted();
+              const offset = next, length = Math.min(bytes.length, info.size - offset);
+              next += length;
+              for (let read = 0; read < length;) {
+                const { bytesRead } = await file.read(bytes, read, length - read, offset + read);
+                if (!bytesRead) throw new Error('The prepared Git transfer was truncated');
+                read += bytesRead;
+              }
+              await partToken(signal);
+              const result = await this.call({ action: 'chunk', id: upload.id, file: info.name, offset, data: bytes.subarray(0, length).toString('base64'), part: true }, signal);
+              if (result.offset !== offset + length) throw new Error('The remote Git upload returned an unexpected offset');
+            }
+          } catch (error) { failure ??= error; controller.abort(error); throw error; }
+        };
+        // Each worker owns its buffer. Wait for in-flight writes to settle before
+        // closing the file or reporting failure; application requires finish.
+        await Promise.allSettled(Array.from({ length: Math.min(8, Math.ceil(info.size / UPLOAD_CHUNK_BYTES)) }, worker));
+        if (failure !== undefined) throw failure;
       } finally { await file.close(); }
     }
+    if (upload.uploadParts) await this.call({ action: 'finish', id: upload.id });
   }
 
   private async *downloadEvents(signal: AbortSignal, after?: SessionEventCursor) {

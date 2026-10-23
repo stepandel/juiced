@@ -22,7 +22,9 @@ export function validateUploadManifest(value: UploadManifest) {
   if (!value || value.version !== 1 || !validOid(value.head) || !['sha1', 'sha256'].includes(value.objectFormat) ||
       (value.branch !== null && (typeof value.branch !== 'string' || value.branch.length > 1024)) ||
       !value.author || [value.author.name, value.author.email].some(item => typeof item !== 'string' || item.length > 1024 || /[\0\r\n]/.test(item)) ||
-      !Array.isArray(value.files) || value.files.length < 1 || value.files.length > 3 || !value.files.some(file => file.name === 'bundle') ||
+      value.base !== undefined && (!validOid(value.base) || value.base !== value.head) ||
+      !Array.isArray(value.files) || value.files.length > 3 ||
+      (value.base === undefined ? !value.files.some(file => file.name === 'bundle') : value.files.some(file => file.name === 'bundle')) ||
       new Set(value.files.map(file => file.name)).size !== value.files.length ||
       value.files.some(file => !['bundle', 'staged', 'unstaged'].includes(file.name) || !Number.isSafeInteger(file.size) || file.size < 0 || file.size > MAX_TRANSFER_BYTES || !/^[a-f0-9]{64}$/.test(file.sha256)) || value.files.reduce((sum, file) => sum + file.size, 0) > MAX_TRANSFER_BYTES) {
     throw new Error('Invalid Git transfer manifest');
@@ -38,14 +40,19 @@ export async function prepareUploadCandidate(target: string, transfer: string, i
   // A copied core.worktree setting must never redirect staging operations
   // into the live checkout.
   const candidateGit = (args: string[]) => git(candidate, args, { signal, env: { GIT_DIR: join(candidate, '.git'), GIT_WORK_TREE: candidate } });
-  await candidateGit(['bundle', 'verify', join(transfer, 'bundle')]);
-  const refs = (await gitText(candidate, ['bundle', 'list-heads', join(transfer, 'bundle')])).split('\n');
-  if (!refs.some(line => line === `${manifest.head} refs/juiced/transfers/${id}`)) throw new Error('The bundle does not contain its declared commit');
-  await candidateGit(['fetch', '--no-tags', join(transfer, 'bundle'), `refs/juiced/transfers/${id}:refs/juiced/incoming`]);
+  if (manifest.base) {
+    if (!binding) throw new Error('A patch-only upload requires an initialized Git workspace.');
+    await candidateGit(['cat-file', '-e', `${manifest.base}^{commit}`]);
+  } else {
+    await candidateGit(['bundle', 'verify', join(transfer, 'bundle')]);
+    const refs = (await gitText(candidate, ['bundle', 'list-heads', join(transfer, 'bundle')])).split('\n');
+    if (!refs.some(line => line === `${manifest.head} refs/juiced/transfers/${id}`)) throw new Error('The bundle does not contain its declared commit');
+    await candidateGit(['fetch', '--no-tags', join(transfer, 'bundle'), `refs/juiced/transfers/${id}:refs/juiced/incoming`]);
+  }
   if (binding) {
     const previous = await gitText(candidate, ['rev-parse', 'HEAD']);
     if (!await ancestor(candidate, previous, manifest.head)) throw new Error('Local and remote histories diverged. Import remote commits before reconciling them.');
-    await candidateGit(['merge', '--ff-only', '--no-overwrite-ignore', 'refs/juiced/incoming']);
+    await candidateGit(['merge', '--ff-only', '--no-overwrite-ignore', manifest.base ?? 'refs/juiced/incoming']);
   } else if (manifest.branch) await candidateGit(['checkout', '-b', manifest.branch, manifest.head]);
   else await candidateGit(['checkout', '--detach', manifest.head]);
   for (const name of ['staged', 'unstaged'] as const) {
