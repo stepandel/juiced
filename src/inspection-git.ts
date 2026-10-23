@@ -38,7 +38,8 @@ export async function checkoutRoot(root: string) {
  * caches/daemons that could write or answer from stale state are disabled.
  */
 export async function inspectionGit(root: string, signal: AbortSignal) {
-  const base = ['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', '-c', 'core.splitIndex=false'];
+  const base = ['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', '-c', 'core.splitIndex=false',
+    '-c', 'core.ignoreStat=false', '-c', 'core.trustctime=true', '-c', 'core.checkStat=default'];
   const clean: NodeJS.ProcessEnv = {
     GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined, GIT_COMMON_DIR: undefined,
     GIT_OBJECT_DIRECTORY: undefined, GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined, GIT_LITERAL_PATHSPECS: '1',

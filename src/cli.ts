@@ -66,6 +66,7 @@ async function main() {
     return;
   }
   const parsed = invocation.command ? undefined : parseArguments(invocation.args);
+  const inspection = parsed?.command === 'claude' && (parsed.action === 'ls' || parsed.action === 'peek');
   const offline = parsed?.command === 'help' || parsed?.command === 'version' || invocation.command === 'logout';
   const introspectionOnly = parsed?.command === 'claude' && parsed.action === 'run' &&
     parsed.argv.length === 1 && ['--help', '-h', '--version', '-v'].includes(parsed.argv[0]!);
@@ -76,7 +77,7 @@ async function main() {
     await updater.check(controller.signal, 'manual');
     return;
   }
-  if (!offline) {
+  if (!offline && !inspection) {
     const command = await updater.check(controller.signal);
     if (command) {
       process.exitCode = await updater.restart(command, controller.signal);
@@ -120,6 +121,15 @@ async function main() {
       (args.command === 'claude' && args.action === 'delete') ||
         (args.command === 'env' && args.action === 'unset'),
     );
+    if (inspection) {
+      // Bootstrap already checked runtime compatibility. Use its recommended
+      // release before inspection, with the config fallback for older services.
+      const command = await updater.check(controller.signal, 'startup', managed.cliVersion);
+      if (command) {
+        process.exitCode = await updater.restart(command, controller.signal);
+        return;
+      }
+    }
     commandStarted = true;
     const claudeApp = fleet.connect(managed.connection);
     const selectProject = async (directory: string, workspace?: string) => {

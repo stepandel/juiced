@@ -217,13 +217,13 @@ export function application(s: Services) {
       if (!s.cfg.admissionEnabled) throw new ServiceError('admission_closed', 503);
       const input = await jsonBody(request);
       const installation = await timed('bootstrap', () => s.accounts.bootstrap(a, input));
-      await timed('job_wake', async () => { await s.wake?.(); });
-      return Response.json(installation);
+      if (installation.status !== 'ready') await timed('job_wake', async () => { await s.wake?.(); });
+      return Response.json({ ...installation, cliVersion: s.accounts.release.cliVersion });
     }
     if (method === 'GET' && action === 'installation') {
       const i = await s.accounts.installation(a.id);
       if (!i) throw new ServiceError('not_found', 404);
-      return Response.json(publicInstallation(i, s.accounts.release.minimumCli));
+      return Response.json({ ...publicInstallation(i, s.accounts.release.minimumCli), cliVersion: s.accounts.release.cliVersion });
     }
     if (method === 'GET' && /^operations\/[^/]+$/.test(action)) {
       const row = (

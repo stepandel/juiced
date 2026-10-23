@@ -366,6 +366,7 @@ export class AccountClient {
     return {
       scope,
       connection,
+      cliVersion: result.cliVersion,
       stop: async (session: string, workspaceId: string, project: string) => {
         await this.response(
           `/v1/accounts/${selected}/git-sessions/${session}/stop`,

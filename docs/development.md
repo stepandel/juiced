@@ -98,6 +98,18 @@ stream lifetime. `fleet_connection` groups the SDK's status and credential calls
 it does not separate them. An empty `serviceTimingMs` means the deployed service
 has no instrumentation; it must not be interpreted as zero work.
 
+To compare Git snapshot performance against a previous commit:
+
+```sh
+node scripts/benchmark-inspection.mjs --baseline REF --output /tmp/inspection-benchmark.json
+```
+
+This creates a disposable 64 MiB Git checkout and alternates three baseline and
+candidate reads for clean and dirty work. It checks snapshot equality and real
+index preservation. These local timings do not establish production end-to-end
+latency; runtime changes require a matching CLI/package/service rollout before
+repeating the hosted probe.
+
 To measure typing latency against the deployed app without submitting a model
 prompt:
 

@@ -92,6 +92,39 @@ speedup or latency percentiles. The earlier 2,792 ms inventory delay outside the
 App request did not recur, so its precise cause remains unresolved.
 [Instrumented evidence](peek-latency-2026-10-23-instrumented.json).
 
+### Performance follow-up
+
+The 0.3.2 candidate removes the separate config fetch for managed `ls`/`peek`
+when bootstrap supplies the service-approved CLI release. Compatibility checks
+and updates still run before inspection; older services retain the config
+fallback. Ready bootstrap responses skip a queue wake-up when no provisioning
+work was queued. These remove work that cost 203–1,088 ms for config and 44–82 ms
+for the queue wake-up in the prior instrumented pair; those are historical
+observations, not a measured production saving.
+
+Git snapshots now retain valid ordinary-file stat entries in a private copy of
+the real index. Hidden-change flags are cleared, ctime and readability checks
+are enforced, and the copy's timestamp is kept no later than the source index
+before Git rewrites it, preserving Git's racy-timestamp protection. Files using
+filters or content conversion retain fresh hashing. The real index and object
+store remain unchanged.
+
+A local 64 MiB fixture, with three alternating baseline/candidate pairs per
+scenario, measured these median snapshot times:
+
+| Scenario | Baseline `86c15e4` | Candidate |
+| --- | ---: | ---: |
+| Clean checkout | 338 ms | 132 ms |
+| One dirty file | 349 ms | 147 ms |
+
+Every candidate snapshot matched the baseline and the real index remained
+byte-for-byte unchanged. This demonstrates less Git work on a local filesystem;
+it does not demonstrate a multi-second hosted improvement. The candidate changes
+the compiled runtime identity, so production measurement requires a coordinated
+new CLI, Fleet package and service rollout. Production remains on the previously
+measured 0.3.1 runtime until that rollout.
+[Local benchmark evidence](peek-inspection-optimization-2026-10-23.json).
+
 ## Release verification
 
 **Workspace deletion** — October 19, 2026, release v9
