@@ -28,7 +28,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/prepared-release.mjs
 
-  # Intel retains serial execution inside each shard to avoid fixture contention.
+  # Two Intel shards + ARM tests + both Mac packagers fit five macOS slots.
+  # Retain serial execution inside each shard to avoid fixture contention.
   native-tests:
     needs: prepared
     timeout-minutes: 10
@@ -40,10 +41,8 @@ jobs:
           - { runner: ubuntu-22.04, shard: '1/1', concurrency: 4 }
           - { runner: ubuntu-22.04-arm, shard: '1/1', concurrency: 4 }
           - { runner: macos-14, shard: '1/1', concurrency: 4 }
-          - { runner: macos-15-intel, shard: '1/4', concurrency: 1 }
-          - { runner: macos-15-intel, shard: '2/4', concurrency: 1 }
-          - { runner: macos-15-intel, shard: '3/4', concurrency: 1 }
-          - { runner: macos-15-intel, shard: '4/4', concurrency: 1 }
+          - { runner: macos-15-intel, shard: '1/2', concurrency: 1 }
+          - { runner: macos-15-intel, shard: '2/2', concurrency: 1 }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6

@@ -44,9 +44,11 @@ runs that archive with Node and npm absent from PATH.
    The workflow checks and packages Linux x64/arm64 and macOS Intel/Apple Silicon on native runners.
    A manual workflow run builds artifacts without creating a release.
    Packaging runs independently of tests. Intel macOS runs the same complete CLI
-   suite in four native shards, serially within each shard, to avoid contention
+   suite in two native shards, serially within each shard, to avoid contention
    between compiler and filesystem fixtures. Every platform still installs its
    actual archive without Node/npm on PATH. Dependency downloads use npm caches.
+   Two Intel shards keep packaging and tests within five macOS runner slots;
+   four shards increased wall time by queueing the last worker behind packaging.
    Official portable Node archives are cached by version and platform and checked
    against fresh upstream checksums on every use. Packaging stages have explicit
    deadlines; an unhealthy runner cannot hold qualification open indefinitely.
