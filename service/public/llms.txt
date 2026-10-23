@@ -8,7 +8,7 @@ Source repository: https://github.com/stepandel/juiced
 ## Documentation
 
 - [Overview](https://juiced.codes/docs): Start here for Juiced's cloud workspace and terminal workflow.
-- [Getting started](https://juiced.codes/docs/getting-started): Node.js 22+, Juiced account sign-in, separate Claude login, and a first workspace.
+- [Getting started](https://juiced.codes/docs/getting-started): Install, Juiced account sign-in, separate Claude login, and a first workspace.
 - [Workspaces and sessions](https://juiced.codes/docs/workspaces-and-sessions): Project isolation, persistent state, detach, reconnect, and idle shutdown.
 - [Syncing code](https://juiced.codes/docs/syncing-code): Initial Git checkout, explicit uploads, importing commits, and fast-forwarding locally.
 - [Remote Claude Code](https://juiced.codes/docs/remote-claude-code): Running a turn with your laptop closed, permission pauses, and Claude access requirements.
@@ -17,7 +17,7 @@ Source repository: https://github.com/stepandel/juiced
 
 ## Product facts
 
-- The local CLI requires Node.js 22 or later. Claude Code and its tools run remotely on Cantelop infrastructure.
+- The local CLI runs on macOS 13.5+ and Linux (glibc 2.28+). The installer bundles Node.js, so no separate Node.js install is needed. Claude Code and its tools run remotely on Cantelop infrastructure.
 - Managed Juiced account login is `juiced login`. Claude login is `juiced claude login`, scoped to the selected workspace.
 - Each project selects a persistent workspace. Workspace files, Claude login, and saved conversations remain between runs.
 - `/detach` or closing the terminal disconnects while the remote turn continues. Permission requests, errors, and compute limits can pause or stop work. Idle compute shuts down.

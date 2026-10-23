@@ -5,6 +5,39 @@ import { pageMetadata, site } from '../src/site';
 
 const install = 'curl -fsSL https://juiced.codes/install.sh | sh';
 
+const features = [
+  {
+    title: 'A session in every tab',
+    body: 'Each terminal tab gets its own Claude session. Open another tab to work on something else in parallel.',
+  },
+  {
+    title: 'One workspace per project',
+    body: 'Your current directory picks the workspace, so each project keeps its own files, Claude login, and conversations.',
+  },
+  {
+    title: 'Explicit code transfer',
+    body: 'Git repositories start from your local HEAD. After that, nothing moves between your laptop and the cloud unless you ask.',
+  },
+  {
+    title: 'Local files on request',
+    body: 'Ask Claude to use your local .env or test fixtures. Juiced shows exactly what it will send and waits for your approval.',
+  },
+  {
+    title: 'Native Claude Code',
+    body: 'The stock Claude Code CLI with your own Claude account, including its permission checks, models, skills, and MCP servers.',
+  },
+  {
+    title: 'GitHub access',
+    body: 'Give the workspace a scoped token so Claude can push branches and open pull requests.',
+  },
+];
+
+const bringHome = [
+  ['juiced claude peek --changes-only  ', '# compare local and remote files'],
+  ['juiced claude sync --from-workspace', "# import Claude's commits"],
+  ['juiced claude fast-forward         ', '# apply them to your branch'],
+];
+
 function ArrowUpRight() {
   return (
     <svg
@@ -53,14 +86,13 @@ export default function Home() {
                 url: site.url,
                 description: site.description,
                 applicationCategory: 'DeveloperApplication',
-                runtimePlatform: 'Node.js 22+',
+                operatingSystem: 'macOS, Linux',
                 softwareRequirements: 'Your own Claude Code login',
                 sameAs: site.github,
                 featureList: [
                   'Persistent cloud workspaces',
-                  'Terminal interface',
                   'Detach and reconnect',
-                  'Explicit Git transfers',
+                  ...features.map(({ title }) => title),
                 ],
               },
             ],
@@ -95,7 +127,7 @@ export default function Home() {
               </InstallCommand>
               <p className="hero-meta mono">
                 <span>
-                  <i className="dot"></i>Node.js 22+
+                  <i className="dot"></i>macOS &amp; Linux
                 </span>
                 <span>Your own Claude Code login</span>
               </p>
@@ -220,18 +252,47 @@ export default function Home() {
                   <span className="prompt">$ </span>juiced claude
                 </div>
               </li>
-              <li>
-                <span className="number mono">04</span>
-                <h3>Bring the changes home</h3>
-                <p>
-                  Apply Claude's commits to your local branch. Nothing on your
-                  laptop changes until you do.
-                </p>
+              <li className="wide">
+                <div>
+                  <span className="number mono">04</span>
+                  <h3>Bring the changes home</h3>
+                  <p>
+                    When Claude is done, review its work and apply it to your
+                    branch. Nothing on your laptop changes until you do.
+                  </p>
+                </div>
                 <div className="cmd mono">
-                  <span className="prompt">$ </span>juiced claude fast-forward
+                  {bringHome.map(([command, comment]) => (
+                    <div key={command}>
+                      <span className="prompt">$ </span>
+                      {command} <span className="cmt">{comment}</span>
+                    </div>
+                  ))}
                 </div>
               </li>
             </ol>
+          </section>
+          <section className="band" aria-labelledby="features">
+            <div className="section-head">
+              <div>
+                <p className="label">
+                  <span className="hash">//</span>Features
+                </p>
+                <h2 id="features">The Claude Code you know, kept running.</h2>
+              </div>
+              <p>
+                Juiced doesn't replace Claude Code. It gives it a home that
+                outlives your terminal.
+              </p>
+            </div>
+            <ul className="features">
+              {features.map(({ title, body }) => (
+                <li key={title}>
+                  <h3>{title}</h3>
+                  <p>{body}</p>
+                </li>
+              ))}
+            </ul>
           </section>
           <section className="band" aria-labelledby="learn-more">
             <div className="section-head">
@@ -247,16 +308,18 @@ export default function Home() {
               </p>
             </div>
             <div className="guide-grid">
-              {guides.map(({ slug, title, description }) => (
-                <a key={slug} href={`/docs/${slug}`} className="guide-card">
-                  <span className="path mono">
-                    docs/{slug}
-                    <ArrowUpRight />
-                  </span>
-                  <h3>{title}</h3>
-                  <p>{description}</p>
-                </a>
-              ))}
+              {guides
+                .filter(({ slug }) => slug !== 'telemetry')
+                .map(({ slug, title, description }) => (
+                  <a key={slug} href={`/docs/${slug}`} className="guide-card">
+                    <span className="path mono">
+                      docs/{slug}
+                      <ArrowUpRight />
+                    </span>
+                    <h3>{title}</h3>
+                    <p>{description}</p>
+                  </a>
+                ))}
               <a href="/docs" className="guide-card all">
                 <div>
                   <span className="path mono">docs/</span>
@@ -283,7 +346,7 @@ export default function Home() {
               </h2>
               <InstallCommand command={install} />
               <p className="mono">
-                Requires Node.js 22+ and your own Claude Code access.
+                macOS and Linux. Bring your own Claude Code access.
               </p>
             </div>
           </div>

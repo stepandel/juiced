@@ -18,7 +18,10 @@ export const guides: {
       <>
         <h2>What you need</h2>
         <ul>
-          <li>Node.js 22 or later on the machine running the Juiced CLI.</li>
+          <li>
+            macOS 13.5 or later, or Linux with glibc 2.28 or later, on Apple
+            Silicon, x64, or Linux arm64.
+          </li>
           <li>Git for working with a Git repository.</li>
           <li>
             A Juiced account with managed access, or your own configured
@@ -30,9 +33,14 @@ export const guides: {
           </li>
         </ul>
         <p>
-          See <a href="/pricing">pricing</a> for managed access. For building
-          the CLI from source, follow
-          the{' '}
+          See <a href="/pricing">pricing</a> for managed access.
+        </p>
+        <h2>Install the CLI</h2>
+        <Shell>curl -fsSL https://juiced.codes/install.sh | sh</Shell>
+        <p>
+          The installer bundles Node.js and every dependency, verifies
+          checksums, and installs without <code>sudo</code>. Rerun it to update.
+          For building the CLI from source, follow the{' '}
           <a href="https://github.com/stepandel/juiced#readme">
             repository setup guide
           </a>
@@ -79,13 +87,15 @@ export const guides: {
         <h2>Review and bring back the result</h2>
         <Shell>
           {
-            'juiced claude peek --changes-only\njuiced claude sync --from-workspace'
+            'juiced claude peek --changes-only\njuiced claude sync --from-workspace\njuiced claude fast-forward'
           }
         </Shell>
         <p>
-          The import brings back commits without changing your local files.
-          Follow the <a href="/docs/syncing-code">Git transfer guide</a> to
-          review and apply them. Learn{' '}
+          Peek compares local and remote files, and the import brings back
+          Claude’s commits without changing your local files. Fast-forward then
+          applies them to your branch. The{' '}
+          <a href="/docs/syncing-code">Git transfer guide</a> covers each step.
+          Learn{' '}
           <a href="/docs/workspaces-and-sessions">
             what persists between sessions
           </a>{' '}
