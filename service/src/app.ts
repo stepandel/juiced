@@ -184,15 +184,10 @@ export function application(s: Services) {
       throw new ServiceError('not_found', 404);
     }
     if (method === 'GET' && action === 'usage') {
-      const used = (
-        await s.pool.query(
-          `SELECT coalesce(sum(credits),0)::text AS used FROM usage_events WHERE account_id=$1 AND payload->>'epoch'=$2`,
-          [a.id, a.period_id],
-        )
-      ).rows[0]!.used;
+      // Usage metering is retired; nothing records usage_events any more.
       return Response.json({
         included: a.included_credits,
-        used,
+        used: null,
         periodEnd: a.period_end,
         entitlement: a.entitlement,
         rateCard: null,

@@ -17,6 +17,8 @@ const base: NodeJS.ProcessEnv = {
   JUICED_GOOGLE_CLIENT_SECRET: 'google-secret',
   CANTELOP_APP_CONFIG: JSON.stringify({schemaVersion: 1, activeProfile: 'api', profiles: Object.fromEntries(['api','worker'].map((profile,index) => [profile,{apps:[],fleets:[{name:'juiced',id:`flt_${'a'.repeat(32)}`,controlUrl:'https://cantelop.example',accessToken:`fsp_${'b'.repeat(32)}.${String(index+1).repeat(64)}`,packageId:`pkg_${'a'.repeat(32)}`,runtimeId:fleet.runtimeId}]}]))}),
 };
+// The Fleet SDK reads its integration document from the process environment.
+process.env.CANTELOP_APP_CONFIG = base.CANTELOP_APP_CONFIG;
 
 for (const role of ['api', 'worker'] as const)
   test(`${role} services start without Stripe and disable billing`, async () => {
@@ -50,9 +52,14 @@ test('public configuration advertises the CLI paired with the deployed service',
 });
 
 test('service startup requires CLI deployment metadata matching the compiled Fleet contract', () => {
+  const start = (value: string) => {
+    process.env.CANTELOP_APP_CONFIG = value;
+    try { return services({...base,CANTELOP_APP_CONFIG:value}); } finally { process.env.CANTELOP_APP_CONFIG = base.CANTELOP_APP_CONFIG; }
+  };
   for (const value of ['', '{invalid', JSON.stringify({schemaVersion:1,profiles:{api:{apps:[],fleets:[]}}})])
-    assert.throws(() => services({...base,CANTELOP_APP_CONFIG:value}), /Fleet integration document|Fleet profile/);
+    assert.throws(() => start(value), /Fleet integration document|Fleet profile/);
   const document = JSON.parse(base.CANTELOP_APP_CONFIG!);
   document.profiles.api.fleets[0].runtimeId = 'runtime-other';
-  assert.throws(() => services({...base,CANTELOP_APP_CONFIG:JSON.stringify(document)}), /matching the compiled Juiced runtime/);
+  assert.throws(() => start(JSON.stringify(document)), /matching the compiled Juiced runtime/);
+  assert.throws(() => services({...base,CANTELOP_APP_CONFIG:JSON.stringify(document)}), /process environment the Fleet SDK reads/);
 });

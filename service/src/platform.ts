@@ -77,9 +77,14 @@ export class Platform {
     return this.operation(() => this.fleet.instance({ id }).setPolicy(update));
   }
 
-  private async pinned(id: string, expected: InstancePin) {
-    const result = await this.installation(id);
-    if (result.app_id !== expected.appId || result.runtime_id !== expected.runtimeId)
+  /**
+   * The SDK reads the instance's status once, requires the compiled runtime, and rejects
+   * credentials whose App or runtime differ from that status. Pinning the installation to
+   * the compiled runtime here therefore checks the credential actually used, in one
+   * status read; the instance id already fixes its App.
+   */
+  private pinned(id: string, expected: InstancePin) {
+    if (!expected.appId || expected.runtimeId !== this.fleet.runtimeId)
       throw new ServiceError('installation_changed', 409);
     return this.fleet.instance({ id });
   }

@@ -34,6 +34,8 @@ const messages: Record<string, string> = {
     'This CLI is incompatible with the service runtime. Run juiced update, then retry your command. You can also reinstall with: curl -fsSL https://juiced.codes/install.sh | sh',
   installation_changed: 'This command’s installation changed. Start a new Juiced command.',
   installation_pending: 'Your workspace service is being provisioned. Retry shortly.',
+  account_not_available:
+    'This Juiced account is not available to your sign-in. Pass --account with an account you belong to, or run juiced login.',
 };
 export class AccountClient {
   readonly origin: string;
@@ -301,7 +303,12 @@ export class AccountClient {
     let result = readInstallation(
       passive
         ? await this.json(`/v1/accounts/${account}/installation`, undefined, signal, 'GET')
-        : await this.json(`/v1/accounts/${account}/bootstrap`, { version, runtimeId }, signal),
+        : await this.json(`/v1/accounts/${account}/bootstrap`, { version, runtimeId }, signal).catch((error: unknown) => {
+            // Bootstrap authorizes membership; name a stale or mistyped account clearly.
+            if (error instanceof ManagedError && error.code === 'not_found')
+              throw new ManagedError('account_not_available', error.status);
+            throw error;
+          }),
     );
     const until = Date.now() + 300000;
     let progress = false;

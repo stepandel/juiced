@@ -6,6 +6,9 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 /** The CLI owns package selection; hosts receive its private integration document at process startup. */
 export function configuredFleet(env: NodeJS.ProcessEnv, role: 'api' | 'worker') {
   const profile = env[role === 'worker' ? 'CANTELOP_WORKER_PROFILE' : 'CANTELOP_API_PROFILE'] ?? role;
+  // The SDK resolves credentials from the process environment, so validate that same document.
+  if (env.CANTELOP_APP_CONFIG !== process.env.CANTELOP_APP_CONFIG)
+    throw new Error('CANTELOP_APP_CONFIG must match the process environment the Fleet SDK reads');
   let document: unknown;
   try { document = JSON.parse(required(env, 'CANTELOP_APP_CONFIG')); }
   catch { throw new Error('CANTELOP_APP_CONFIG must contain a private Fleet integration document'); }

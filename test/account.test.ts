@@ -57,7 +57,7 @@ test('prepare bootstraps known accounts directly and discovers accounts only whe
     });
     await client.store.write({ origin: client.origin, accessToken: 'a'.repeat(40), refreshToken: 'b'.repeat(40), expiresAt: Date.now() + 300000, ...(selected === 'discover' ? {} : { account: savedAccount }) });
     const preparing = client.prepare('0.2.6', 'runtime', selected === 'explicit' || selected === 'denied' ? explicitAccount : undefined, signal);
-    if (selected === 'denied') await assert.rejects(preparing, (error: unknown) => error instanceof ManagedError && error.status === 404);
+    if (selected === 'denied') await assert.rejects(preparing, (error: unknown) => error instanceof ManagedError && error.code === 'account_not_available' && error.status === 404);
     else await preparing;
     assert.equal(calls.length, selected === 'discover' ? 2 : 1);
   }

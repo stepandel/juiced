@@ -42,7 +42,7 @@ export async function captureRemoteInspection(command: InspectionCommand, signal
   }
 }
 
-export async function sendInspection(command: InspectionCommand, snapshot: InspectionSnapshot | InspectionListing, output: SessionOutput<InspectionEvent>, signal: AbortSignal) {
+async function sendInspection(command: InspectionCommand, snapshot: InspectionSnapshot | InspectionListing, output: SessionOutput<InspectionEvent>, signal: AbortSignal) {
   const bytes = Buffer.from(JSON.stringify(snapshot));
   if (bytes.length > MAX_INSPECTION_BYTES) throw new InspectionIncomplete('The inventory exceeds 64 MiB. Inspect a narrower path.');
   for (let offset = 0; offset < bytes.length; offset += INSPECTION_CHUNK_BYTES) {
@@ -52,8 +52,9 @@ export async function sendInspection(command: InspectionCommand, snapshot: Inspe
   await output.send({ type: 'inspection-end', id: command.id, size: bytes.length, sha256: sha256(bytes) });
 }
 
-export async function inspectRemote(command: InspectionCommand, output: SessionOutput<InspectionEvent>, signal: AbortSignal, workspace = process.cwd()) {
-  try { await sendInspection(command, await captureRemoteInspection(command, signal, workspace), output, signal); }
+/** Streams a captured inventory, capturing it first unless the caller already did. */
+export async function inspectRemote(command: InspectionCommand, output: SessionOutput<InspectionEvent>, signal: AbortSignal, workspace = process.cwd(), snapshot?: InspectionSnapshot | InspectionListing) {
+  try { await sendInspection(command, snapshot ?? await captureRemoteInspection(command, signal, workspace), output, signal); }
   catch (error) {
     if (signal.aborted) throw error;
     await output.send({ type: 'inspection-error', id: command.id, message: error instanceof Error ? error.message : 'Workspace inspection failed' });

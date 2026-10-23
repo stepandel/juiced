@@ -1,14 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Writable } from 'node:stream';
-import type { WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
+import type { SessionEventCursor, WorkspaceRef, WorkspaceSelector } from '@cantelop/sdk';
 import { discoverRepository, sha256 } from './git.js';
 import { selectProject } from './project.js';
 import { captureInspection } from './inspection-snapshot.js';
 import { compareInspection, renderInspection, renderRemoteListing } from './inspection-view.js';
 import { INSPECTION_CHUNK_BYTES, INSPECTION_TIMEOUT_MS, MAX_INSPECTION_BYTES, InspectionIncomplete, inspectionScope, validateInspectionListing, validateInspectionSnapshot, type InspectionListing, type InspectionSnapshot } from './inspection-protocol.js';
 import { BASE64, validWorkspaceId, type TerminalCommand, type TerminalEvent, type TerminalReply } from './protocol.js';
-import { isCursorExpired, retryAdmission } from './transport.js';
+import { isCursorExpired, isViewMissing, retryAdmission } from './transport.js';
 
 type Workspace = Pick<WorkspaceRef<TerminalCommand, TerminalEvent, TerminalReply>, 'inspect' | 'session' | 'selector'>;
 type InspectionApp = { workspace(selector: WorkspaceSelector): Workspace };
@@ -42,21 +42,28 @@ async function remoteInventory<T>(workspace: InspectionWorkspace, command: Inspe
   const combined = AbortSignal.any([signal, controller.signal, AbortSignal.timeout(INSPECTION_TIMEOUT_MS)]);
   try {
     combined.throwIfAborted();
-    const request = (inline: boolean) => session.request({ ...command, inline }, { signal: combined, timeoutMs: INSPECTION_TIMEOUT_MS }).then(reply => {
+    // Small inventories fit in the reply: no view read, replay, or SSE connection.
+    // Older runtimes and large inventories still emit the command's tagged events.
+    const requested = session.request({ ...command, inline: !fresh }, { signal: combined, timeoutMs: INSPECTION_TIMEOUT_MS }).then(reply => {
       if (!reply?.ok) throw new InspectionIncomplete(reply?.error ?? 'The workspace rejected inspection.');
       return reply;
     }).catch(error => { controller.abort(error); throw error; });
-    // Small inventories fit in the reply: no view read, replay, or SSE connection.
-    // Older runtimes and large inventories still emit the command's tagged events.
-    const requested = request(!fresh);
     void requested.catch(() => {});
+    let after: SessionEventCursor | undefined;
     if (!fresh) {
       const reply = await requested;
       if (reply.inspection !== undefined) return validate(reply.inspection, command.scope);
+      // The runtime commits a boundary tagged with this command just before its
+      // chunks. Older runtimes, or a boundary another inspection has since
+      // replaced, replay retained output instead; events are filtered by ID.
+      after = await session.view({ signal: combined }).then(view => (view.state as { streaming?: unknown } | undefined)?.streaming === command.id ? view.cursor : undefined).catch(error => {
+        if (isViewMissing(error)) return undefined;
+        throw error;
+      });
     }
     const chunks: Buffer[] = []; let size = 0;
     try {
-      for await (const event of session.stream({ signal: combined })) {
+      for await (const event of session.stream({ signal: combined, ...(after ? { after } : {}) })) {
         const data = event.data;
         if (!data || !('id' in data) || data.id !== command.id) continue;
         if (data.type === 'inspection-error') throw new InspectionIncomplete(data.message);

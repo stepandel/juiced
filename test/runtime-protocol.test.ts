@@ -301,11 +301,14 @@ test('native runtime returns small inspections inline and streams large or legac
   await Promise.all(Array.from({ length: 700 }, (_, i) => writeFile(join(target, `long-${i}-${'x'.repeat(70)}.txt`), 'content\n')));
   const large = await inline();
   assert.deepEqual(large.reply, { ok: true });
-  const largeChunks: Buffer[] = []; let complete = false;
+  const largeChunks: Buffer[] = []; let complete = false, tagged = false;
   for (let i = 0; i < 300 && !complete; i++) {
     const batch = await request(`/__cantelop/v2/runtime/events?after=${cursor}&wait=0`);
     for (const item of batch.events) {
+      // The CLI resumes at this boundary, so it must precede every chunk.
+      if (item.view?.streaming === large.inspectionId) tagged = true;
       if (item.event?.id === large.inspectionId) {
+        assert.ok(tagged, 'the tagged view boundary must precede inspection chunks');
         if (item.event.type === 'inspection-chunk') largeChunks.push(Buffer.from(item.event.data, 'base64'));
         if (item.event.type === 'inspection-end') complete = true;
       }

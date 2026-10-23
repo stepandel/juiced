@@ -145,9 +145,22 @@ export class Provisioner {
             ? await this.platform.installation(i.platform_id)
             : (await this.platform.find(i.external_key)) ?? await this.platform.install(i.external_key);
           // CLI rollout owns package changes. Wait for its selected package, then adopt its verified identity.
-          if (remote.package_id !== this.accounts.release.packageId || remote.runtime_id !== this.accounts.release.runtimeId) {
-            await tx.query("UPDATE installations SET status='provisioning',error_code='installation_upgrading' WHERE id=$1", [i.id]);
-            await tx.query("UPDATE jobs SET status='pending',lease_until=NULL,available_at=now()+interval '5 seconds' WHERE id=$1 AND fence=$2", [row.id, row.fence]);
+          const failed = remote.status === 'failed';
+          if (failed || remote.package_id !== this.accounts.release.packageId || remote.runtime_id !== this.accounts.release.runtimeId) {
+            // Only a new or upgrading installation pauses for the rollout. A ready one whose
+            // remote moved means this service's release is stale: keep it usable and report.
+            const awaiting = i.status !== 'ready' || i.desired_package_id !== null;
+            if (failed) await tx.query("UPDATE installations SET status='failed',error_code='platform_failed' WHERE id=$1", [i.id]);
+            else if (awaiting) await tx.query("UPDATE installations SET status='provisioning',error_code='installation_upgrading' WHERE id=$1", [i.id]);
+            if (failed || !awaiting || row.attempts > 6)
+              logError('provisioning_waiting', new Error(failed ? 'platform_installation_failed' : 'release_mismatch'), {
+                job: row.id, account: a.id, package: remote.package_id, runtime: remote.runtime_id,
+              });
+            // Back off from 5 seconds to 5 minutes so a stalled rollout cannot spin the queue.
+            await tx.query(
+              "UPDATE jobs SET status='pending',lease_until=NULL,available_at=now()+least(300,5*power(2,least($3,8)-1))*interval '1 second' WHERE id=$1 AND fence=$2",
+              [row.id, row.fence, row.attempts],
+            );
             return;
           }
           await tx.query('UPDATE installations SET package_id=$2,runtime_id=$3,desired_package_id=NULL,desired_runtime_id=NULL WHERE id=$1', [i.id, remote.package_id, remote.runtime_id]);

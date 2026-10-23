@@ -82,7 +82,7 @@ test('relay pins server App credentials and streams without buffering or losing 
     upstreamRequest = r;
     return new Response(new ReadableStream<Uint8Array>({start(c) {source=c;c.enqueue(new TextEncoder().encode('data: first\n\n'));},cancel(){cancelled=true;}}),{headers:{'Content-Type':'text/event-stream'}});
   });
-  const platform = new Platform(new CantelopClient().fleet({name:'juiced',runtime:{receive(){}}}) as JuicedFleet);
+  const platform = new Platform(new CantelopClient().fleet({name:'juiced',runtime:{receive(){},[Symbol.for('dev.cantelop.sdk.compiled-runtime.v1')]:'runtime-v1'}}) as JuicedFleet);
   const input = request('/commands/stream', envelope('stream'));
   const response = await relay(input, '/commands/stream', context(platform));
   assert.equal(upstreamRequest!.headers.get('authorization'), 'Bearer server-app-token');

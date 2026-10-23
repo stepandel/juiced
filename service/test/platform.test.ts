@@ -8,12 +8,13 @@ test('Platform delegates lifecycle and trusted App access to SDK instances witho
   const selectors: unknown[] = [];
   let connections = 0;
   const reference = { async status() { return status; }, async create() { return status; }, async delete() { return {state:'deleting'}; }, async connection() { connections++; return {fetch}; }, async app() { return {name:'juiced'}; } };
-  const platform = new Platform({ instance(selector: unknown) { selectors.push(selector); return reference; } } as unknown as JuicedFleet);
+  const platform = new Platform({ runtimeId: status.runtimeId, instance(selector: unknown) { selectors.push(selector); return reference; } } as unknown as JuicedFleet);
   assert.equal((await platform.install(status.externalKey)).app_id, status.appId);
   assert.equal((await platform.find(status.externalKey))!.policy_revision, 2);
   await platform.connection(status.id,{appId:status.appId,runtimeId:status.runtimeId});
   assert.equal(connections,1);
-  await assert.rejects(platform.connection(status.id,{appId:`app_${'b'.repeat(32)}`,runtimeId:status.runtimeId}),{code:'installation_changed'});
+  await assert.rejects(platform.connection(status.id,{appId:status.appId,runtimeId:'runtime-v0'}),{code:'installation_changed'});
+  await assert.rejects(platform.connection(status.id,{appId:null,runtimeId:status.runtimeId}),{code:'installation_changed'});
   assert.equal(connections,1);
   await platform.remove(status.externalKey);
   assert.deepEqual(selectors.at(-1),{externalKey:status.externalKey});
