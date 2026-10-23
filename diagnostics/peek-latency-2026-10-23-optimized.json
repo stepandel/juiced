@@ -1,0 +1,318 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-10-23T17:54:13.193Z",
+  "service": "https://juiced.codes",
+  "samples": [
+    {
+      "startedAt": "2026-10-23T17:54:13.414Z",
+      "cliVersion": "0.3.2",
+      "totalMs": 3261,
+      "exitCode": 2,
+      "comparisonRendered": true,
+      "requests": [
+        {
+          "path": "/v1/accounts/:account/bootstrap",
+          "startedAt": "2026-10-23T17:54:13.529Z",
+          "headersMs": 173,
+          "status": 200,
+          "serviceRequestId": "c84c6a3e-b240-429d-a9e6-6854028f4119",
+          "serviceTimingMs": {
+            "auth": 2.5,
+            "rate_limit": 3.1,
+            "account": 1.7,
+            "bootstrap": 7.1,
+            "service_total": 15.9
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/workspace.inspect",
+          "startedAt": "2026-10-23T17:54:13.772Z",
+          "command": "workspace.inspect",
+          "messageId": "msg_9bb42efe32194485896250c52bd5bb6d",
+          "headersMs": 1287,
+          "status": 200,
+          "serviceRequestId": "65e799bf-a0c8-4c7a-a9f6-c689ea0bb895",
+          "serviceTimingMs": {
+            "auth": 2.6,
+            "rate_limit": 2.9,
+            "account": 1.7,
+            "installation": 1.7,
+            "fleet_connection": 169.3,
+            "edge": 982,
+            "service_total": 1164
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/request",
+          "startedAt": "2026-10-23T17:54:15.068Z",
+          "command": "request",
+          "messageId": "msg_aea3993b89774aac99919dc064e961d8",
+          "headersMs": 1597,
+          "status": 200,
+          "serviceRequestId": "e03f8b6c-0115-464c-b421-49f4b359fd0d",
+          "serviceTimingMs": {
+            "auth": 3.1,
+            "rate_limit": 3,
+            "account": 1.8,
+            "installation": 1.8,
+            "fleet_connection": 107.8,
+            "edge": 1365.9,
+            "service_total": 1484.9
+          },
+          "snapshotMs": 643,
+          "replyReadyMs": 1601
+        }
+      ],
+      "platform": [
+        {
+          "command": "workspace.inspect",
+          "matched": true,
+          "matchedBy": "time_window",
+          "traceId": "req_a4229762a1d1437baba0c6bdd10a13a9",
+          "platformMs": 891,
+          "outsidePlatformMs": 396,
+          "attempts": 0,
+          "handlerMs": null,
+          "platformOutsideHandlerMs": null,
+          "snapshotMs": null,
+          "handlerOutsideSnapshotMs": null
+        },
+        {
+          "command": "request",
+          "matched": true,
+          "matchedBy": "message_id",
+          "traceId": "req_dacac30d2006447b998a9fd1ce5adf90",
+          "platformMs": 1323,
+          "outsidePlatformMs": 274,
+          "attempts": 1,
+          "handlerMs": 656,
+          "platformOutsideHandlerMs": 667,
+          "snapshotMs": 643,
+          "handlerOutsideSnapshotMs": 13
+        }
+      ]
+    },
+    {
+      "startedAt": "2026-10-23T17:54:16.719Z",
+      "cliVersion": "0.3.2",
+      "totalMs": 1410,
+      "exitCode": 2,
+      "comparisonRendered": true,
+      "requests": [
+        {
+          "path": "/v1/accounts/:account/bootstrap",
+          "startedAt": "2026-10-23T17:54:16.784Z",
+          "headersMs": 157,
+          "status": 200,
+          "serviceRequestId": "2851d427-6b75-42e9-9768-eeb561d2063a",
+          "serviceTimingMs": {
+            "auth": 2.5,
+            "rate_limit": 2.8,
+            "account": 1.7,
+            "bootstrap": 7.6,
+            "service_total": 15.2
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/workspace.inspect",
+          "startedAt": "2026-10-23T17:54:16.994Z",
+          "command": "workspace.inspect",
+          "messageId": "msg_da63a43442cf410fa4ff43b1ba0685e0",
+          "headersMs": 452,
+          "status": 200,
+          "serviceRequestId": "0aef04e4-e62c-4c58-b197-a245aef78627",
+          "serviceTimingMs": {
+            "auth": 3.4,
+            "rate_limit": 2.9,
+            "account": 1.8,
+            "installation": 1.7,
+            "fleet_connection": 109.5,
+            "edge": 188.3,
+            "service_total": 308.7
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/request",
+          "startedAt": "2026-10-23T17:54:17.452Z",
+          "command": "request",
+          "messageId": "msg_0ee1d25aa5194eba904ff5ad78517d1f",
+          "headersMs": 674,
+          "status": 200,
+          "serviceRequestId": "538fdd7f-37f9-4fe8-827d-cf906260cb17",
+          "serviceTimingMs": {
+            "auth": 2.4,
+            "rate_limit": 3.1,
+            "account": 1.8,
+            "installation": 1.5,
+            "fleet_connection": 110.9,
+            "edge": 440.9,
+            "service_total": 561.8
+          },
+          "snapshotMs": 130,
+          "replyReadyMs": 675
+        }
+      ],
+      "platform": [
+        {
+          "command": "workspace.inspect",
+          "matched": true,
+          "matchedBy": "time_window",
+          "traceId": "req_2e801bfb93df492ab4d14b6dcf93a88c",
+          "platformMs": 147,
+          "outsidePlatformMs": 305,
+          "attempts": 0,
+          "handlerMs": null,
+          "platformOutsideHandlerMs": null,
+          "snapshotMs": null,
+          "handlerOutsideSnapshotMs": null
+        },
+        {
+          "command": "request",
+          "matched": true,
+          "matchedBy": "message_id",
+          "traceId": "req_1f4295e6a2ca4f7a8f1315bbfe957cad",
+          "platformMs": 408,
+          "outsidePlatformMs": 266,
+          "attempts": 1,
+          "handlerMs": 135,
+          "platformOutsideHandlerMs": 273,
+          "snapshotMs": 130,
+          "handlerOutsideSnapshotMs": 5
+        }
+      ]
+    },
+    {
+      "startedAt": "2026-10-23T17:54:18.179Z",
+      "cliVersion": "0.3.2",
+      "totalMs": 1585,
+      "exitCode": 2,
+      "comparisonRendered": true,
+      "requests": [
+        {
+          "path": "/v1/accounts/:account/bootstrap",
+          "startedAt": "2026-10-23T17:54:18.244Z",
+          "headersMs": 170,
+          "status": 200,
+          "serviceRequestId": "36c449c7-a413-4ff2-a0f3-f8bf94c2e3a8",
+          "serviceTimingMs": {
+            "auth": 2.6,
+            "rate_limit": 2.7,
+            "account": 1.7,
+            "bootstrap": 7.1,
+            "service_total": 15.1
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/workspace.inspect",
+          "startedAt": "2026-10-23T17:54:18.465Z",
+          "command": "workspace.inspect",
+          "messageId": "msg_ee236143560546bc91c71cceaaf8e364",
+          "headersMs": 450,
+          "status": 200,
+          "serviceRequestId": "2f1a372b-1104-4fe1-ad46-602ccc57b5a7",
+          "serviceTimingMs": {
+            "auth": 2.5,
+            "rate_limit": 2.8,
+            "account": 1.7,
+            "installation": 1.7,
+            "fleet_connection": 127.4,
+            "edge": 206.7,
+            "service_total": 344
+          }
+        },
+        {
+          "path": "/v1/accounts/:account/runtime/commands/request",
+          "startedAt": "2026-10-23T17:54:18.927Z",
+          "command": "request",
+          "messageId": "msg_5dde8aab6a1142b582c8927349c4babb",
+          "headersMs": 829,
+          "status": 200,
+          "serviceRequestId": "32054519-bb9a-4009-8661-9a4eb8bfaef7",
+          "serviceTimingMs": {
+            "auth": 2.8,
+            "rate_limit": 2.8,
+            "account": 13,
+            "installation": 1.8,
+            "fleet_connection": 107.1,
+            "edge": 542,
+            "service_total": 671
+          },
+          "snapshotMs": 202,
+          "replyReadyMs": 831
+        }
+      ],
+      "platform": [
+        {
+          "command": "workspace.inspect",
+          "matched": true,
+          "matchedBy": "time_window",
+          "traceId": "req_49d22929c61b4b9f9622ca1c91d1c676",
+          "platformMs": 164,
+          "outsidePlatformMs": 286,
+          "attempts": 0,
+          "handlerMs": null,
+          "platformOutsideHandlerMs": null,
+          "snapshotMs": null,
+          "handlerOutsideSnapshotMs": null
+        },
+        {
+          "command": "request",
+          "matched": true,
+          "matchedBy": "message_id",
+          "traceId": "req_fcf94ee9dd0841489d0724bdcab47044",
+          "platformMs": 524,
+          "outsidePlatformMs": 305,
+          "attempts": 1,
+          "handlerMs": 208,
+          "platformOutsideHandlerMs": 316,
+          "snapshotMs": 202,
+          "handlerOutsideSnapshotMs": 6
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Instrumented client timings exclude the launcher and Node startup. Reading cloned JSON responses adds small probe overhead.",
+    "Platform request time includes the application handler; these overlapping durations must not be added together.",
+    "Time outside the platform trace includes network, Juiced authorization/database work, and Fleet connection setup. Service timings separate the named phases; remaining client/hosting/network time is not isolated.",
+    "Workspace lookup trace matches use a unique one-second-tolerant wall-clock window; inventory matches use exact message IDs.",
+    "Empty serviceTimingMs means server instrumentation is unavailable. fleet_connection groups SDK status and credential requests; it does not separate them.",
+    "The earlier release has two samples and this release has three; these are observations, not latency percentiles or a controlled cold-start comparison. The earlier first run also refreshed sign-in.",
+    "A separate launcher-inclusive installed command is recorded in installedCommand. It ran later and includes platform variability, so subtracting the instrumented repeat is not a startup measurement.",
+    "Main advanced with unrelated changes during rollout. The release source and runtime were frozen at the recorded release commit; the local comparison checkout was the primary repository."
+  ],
+  "release": {
+    "version": "0.3.2",
+    "commit": "9dedc4485a37380452a8b773952da0bc6e97c637",
+    "pullRequest": "https://github.com/stepandel/juiced/pull/40",
+    "url": "https://github.com/stepandel/juiced/releases/tag/v0.3.2",
+    "workflowRun": "https://github.com/stepandel/juiced/actions/runs/39994312851",
+    "serviceDeployment": "dpl_6Ahz3ZmzoSb9c1hWPvyNguozEs7g",
+    "fleetPackage": "pkg_0b83a880456d3c4a92bf997310b36626",
+    "runtimeId": "rt_cf4c8956382c1f7f5fecb39985753abd12044979431e2e3725cc6b16b21800f7"
+  },
+  "baselineEvidence": "peek-latency-2026-10-23-instrumented.json",
+  "installedCommand": {
+    "measuredAt": "2026-10-23T17:55:00.439Z",
+    "command": "juiced claude peek",
+    "wallMs": 2447,
+    "exitCode": 2,
+    "comparisonRendered": true,
+    "ignoredComparison": true,
+    "stderrEmpty": true
+  },
+  "verification": {
+    "allRequestsHttp200": true,
+    "comparisonRenderedAllSamples": true,
+    "publicConfigRequestCount": 0,
+    "bootstrapQueueWakeCount": 0,
+    "installationReadyBeforeAndAfter": true,
+    "fleetInstanceReadyOnMatchingPackage": true,
+    "expectedExitCode2": "The comparison includes a locally ignored entry; it rendered normally with HTTP 200 for every request.",
+    "temporaryDeploymentPrincipalRetired": true
+  },
+  "rolloutNotes": [
+    "Fleet was ready before Juiced adopted its package. Older Vercel deployments continued claiming the durable provisioning job and logged platform_unavailable. The existing Provisioner, run with the exact 0.3.2 binding, completed adoption; no installation state was forced by hand.",
+    "Automatic production-domain assignment was disabled after concurrent main deployments used a different compiled runtime. Production remains pinned to the matching 0.3.2 service; future runtime releases need coordinated CLI/Fleet/service promotion."
+  ]
+}

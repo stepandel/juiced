@@ -98,6 +98,22 @@ stream lifetime. `fleet_connection` groups the SDK's status and credential calls
 it does not separate them. An empty `serviceTimingMs` means the deployed service
 has no instrumentation; it must not be interpreted as zero work.
 
+The coordinated 0.3.2 rollout was measured on October 23, 2026. The earlier
+0.3.1 instrumented pair took 4,848 / 1,778 ms; 0.3.2 took 3,261 / 1,410 /
+1,585 ms. Every request returned HTTP 200 and every comparison rendered. The
+separate config request and ready-bootstrap queue wake were absent. A separate
+installed command including the launcher and Node startup took 2,447 ms. Exit 2
+was expected because the comparison contained a locally ignored entry.
+
+These small samples do not establish percentiles or controlled cold-start
+improvements; the earlier first run also refreshed sign-in. Repeat snapshots
+took 130–202 ms, while remote lookup, Fleet connections, network transit and
+platform work around the handler still accounted for substantial time. The
+release improves latency but does not demonstrate an instant peek or a
+consistent reduction of several seconds. Timings, matched traces, release
+identity, rollout recovery and limitations are recorded in
+`diagnostics/peek-latency-2026-10-23-optimized.json`.
+
 To compare Git snapshot performance against a previous commit:
 
 ```sh
