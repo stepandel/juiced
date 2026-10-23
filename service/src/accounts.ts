@@ -6,6 +6,7 @@ import { transaction, type Queryable } from './db';
 import type { Identity } from './auth';
 import { cliVersionAtLeast } from '../../contracts/cli-version';
 import { currentRelease, type ReleaseIdentity } from './release';
+import { policyEpoch } from './resource-policy';
 
 export const id = (prefix: string) => `${prefix}_${randomUUID().replaceAll('-', '')}`;
 export interface Account {
@@ -141,15 +142,16 @@ export class Accounts {
         i.desired_package_id = this.release.packageId;
         i.desired_runtime_id = this.release.runtimeId;
       }
-      if (i.status !== 'ready')
+      const workQueued = i.status !== 'ready' || i.entitlement_epoch !== policyEpoch(current.period_id);
+      if (workQueued)
         await enqueue(
           tx,
           a.id,
           'provision',
           {},
-          `bootstrap:${i.id}:${i.policy_revision}:${current.period_id}`,
+          `bootstrap:${i.id}:${i.policy_revision}:${policyEpoch(current.period_id)}`,
         );
-      return publicInstallation(i, this.release.minimumCli);
+      return { ...publicInstallation(i, this.release.minimumCli), workQueued };
     });
   }
 }

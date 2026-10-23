@@ -6,6 +6,7 @@ import { Provisioner } from '../src/provisioning';
 import { reconcile } from '../src/jobs';
 import type { Platform } from '../src/platform';
 import { testDatabase, user } from './database';
+import { policyEpoch } from '../src/resource-policy';
 
 const old = { generation: 1, packageId: 'pkg_old', runtimeId: 'runtime-old', minimumCli: '0.2.0' };
 const next = { generation: 2, packageId: 'pkg_new', runtimeId: 'runtime-new', minimumCli: '0.2.0' };
@@ -18,7 +19,7 @@ async function fixture() {
   await accounts.bootstrap(account, { version: '0.2.0', runtimeId: old.runtimeId });
   const installation = (await accounts.installation(account.id))!;
   await f.pool.query(`UPDATE installations SET status='ready',platform_id='ins_existing',app_id='app_existing',
-    entitlement_epoch=$2,policy_revision=1 WHERE id=$1`, [installation.id, account.period_id]);
+    entitlement_epoch=$2,policy_revision=1 WHERE id=$1`, [installation.id, policyEpoch(account.period_id)]);
   return { ...f, accounts, account, installation };
 }
 
