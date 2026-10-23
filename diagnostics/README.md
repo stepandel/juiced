@@ -7,8 +7,8 @@ Recorded evidence from hosted verification runs and platform investigations.
 Two consecutive runs of the installed 0.3.1 CLI took **6,450 ms** and **1,933 ms**.
 Both rendered the comparison and exited 2 because `.claude/` was ignored locally
 and present remotely. No model prompt or file upload was submitted. Exact message
-IDs matched both inventory requests to existing Cantelop traces. No production
-code, deployment or configuration was changed for these measurements.
+IDs matched both inventory requests to existing Cantelop traces. These initial
+measurements preceded the diagnostic deployment below.
 
 | Phase | First run | Immediate repeat |
 | --- | ---: | ---: |
@@ -25,14 +25,72 @@ became 862 ms faster on the immediate repeat, but the inventory also spent 2,484
 ms less outside the App request. That outer time includes Juiced's database work,
 network travel, and Fleet status/credential setup before forwarding to the App.
 It is not evidence that Juiced's database alone, or Cantelop alone, caused the
-delay. The existing service does not expose its individual phase timings.
+delay. At that point, the service did not expose its individual phase timings.
 
-The new opt-in `X-Juiced-Timing: 1` / `Server-Timing` instrumentation separates
-those service phases once deployed. `fleet_connection` still groups the SDK's
-status and credential requests. Platform dispatch/startup/reply work around the
-handler accounted for 662 ms / 345 ms; the trace does not individually isolate
-those components. Two samples do not establish latency percentiles or explain
-all first-run variability. [Evidence](peek-latency-2026-10-23.json).
+Platform dispatch/startup/reply work around the handler accounted for 662 ms /
+345 ms; the trace does not individually isolate those components. Two samples do
+not establish latency percentiles or explain all first-run variability.
+[Evidence](peek-latency-2026-10-23.json).
+
+### Production phase measurement
+
+With user approval, commit `95421fb` was deployed to `https://juiced.codes`
+(Vercel deployment `dpl_C7SunQYHbjhW21JbF7g9yuFsJ3aB`). The opt-in
+`X-Juiced-Timing: 1` header now returns numeric `Server-Timing` phases without
+buffering response bodies. The public config check returned HTTP 200 and timing
+headers. No CLI or runtime release was changed. This deployment adds diagnostics;
+it does not implement a latency optimization.
+
+Two more consecutive installed-CLI probes both rendered the comparison, with
+the same expected incomplete-comparison exit code 2. All requests returned 200.
+
+| Sequential client request | First run | Immediate repeat |
+| --- | ---: | ---: |
+| Public config | 1,088 ms | 203 ms |
+| Token refresh | 234 ms | Not needed |
+| Account bootstrap | 229 ms | 167 ms |
+| Workspace lookup | 937 ms | 454 ms |
+| Inventory | 2,127 ms | 799 ms |
+| Other client work / gaps | 233 ms | 155 ms |
+| **Total, excluding launcher and Node startup** | **4,848 ms** | **1,778 ms** |
+
+The instrumented inventory requests isolate these overlapping components:
+
+| Component | First run | Immediate repeat |
+| --- | ---: | ---: |
+| Juiced auth, rate limit, account and installation reads | 11 ms | 11 ms |
+| Fleet connection setup | 93 ms | 126 ms |
+| Upstream fetch to response headers | 1,919 ms | 558 ms |
+| Cantelop App request, included in upstream fetch | 1,886 ms | 521 ms |
+| Runtime receive handler, included in App request | 1,215 ms | 206 ms |
+| Git snapshot, included in handler | 1,199 ms | 202 ms |
+| App request outside handler | 671 ms | 315 ms |
+
+The database work is not the multi-second bottleneck in these samples. Across
+both runtime requests, database phases took 22 ms per run and Fleet connection
+setup took 299 ms / 233 ms. `fleet_connection` groups SDK status and credential
+requests; individual call costs remain unknown.
+
+The slow inventory was mainly the Git snapshot implemented by Juiced inside the
+runtime, plus platform work around the handler. Snapshot time improved by 997 ms
+on the immediate repeat; the trace does not prove whether the difference came
+from storage caching, Git startup, or another cause. Cantelop work around the
+handler contributed 671 ms / 315 ms, but dispatch, activation and reply delivery
+are not individually separated.
+
+The first config fetch also cost 1,088 ms while only 57 ms was inside the service
+handler (including 43 ms of measured initialization). Its remaining 1,031 ms is
+outside the measured handler and cannot be assigned specifically to transport,
+hosting startup or routing. The repeat spent 203 ms fetching config with less
+than 1 ms inside the handler. Calling this a proven cold start would overstate
+the evidence.
+
+The next optimization targets are the remote snapshot and the serial preflight
+requests. Fleet connection caching alone cannot explain a multi-second saving
+in this pair. These are first/repeat observations, not a controlled before/after
+speedup or latency percentiles. The earlier 2,792 ms inventory delay outside the
+App request did not recur, so its precise cause remains unresolved.
+[Instrumented evidence](peek-latency-2026-10-23-instrumented.json).
 
 ## Release verification
 

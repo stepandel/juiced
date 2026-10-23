@@ -112,7 +112,7 @@ async function main() {
   const report = { schemaVersion: 1, measuredAt: new Date().toISOString(), service: origin, samples: [], limitations: [
     'Instrumented client timings exclude the launcher and Node startup. Reading cloned JSON responses adds small probe overhead.',
     'Platform request time includes the application handler; these overlapping durations must not be added together.',
-    'Time outside the platform trace includes network, Juiced authorization/database work, and Fleet connection setup; these are not separated.',
+    'Time outside the platform trace includes network, Juiced authorization/database work, and Fleet connection setup. Service timings separate the named phases; remaining client/hosting/network time is not isolated.',
     'Workspace lookup trace matches use a unique one-second-tolerant wall-clock window; inventory matches use exact message IDs.',
     'Empty serviceTimingMs means server instrumentation is unavailable. fleet_connection groups SDK status and credential requests; it does not separate them.',
   ] };
