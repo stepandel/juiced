@@ -92,11 +92,11 @@ export async function waitFor(check, { timeout = 15 * 60_000, interval = 5000, s
 
 export async function release(mode, options = {}, env = process.env) {
   if (!['plan', 'prepare', 'ship', 'report'].includes(mode)) throw new Error('Usage: npm run release -- plan|prepare|ship|report [--state DIR] [--resume-package pkg_...] [--json]');
-  if (mode === 'report' && options.state) {
-    const report = releaseReport(await privateJSON(join(resolve(options.state), 'state.json')));
+  const printReport = async directory => {
+    const report = releaseReport(await privateJSON(join(directory, 'state.json')));
     console.log(options.json ? JSON.stringify(report, null, 2) : formatReleaseReport(report));
-    return;
-  }
+  };
+  if (mode === 'report' && options.state) return printReport(resolve(options.state));
   const sha = (await execute('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout.trim();
   const version = manifest.version, tag = `v${version}`;
   if (mode === 'plan') {
@@ -105,11 +105,7 @@ export async function release(mode, options = {}, env = process.env) {
     return;
   }
   const directory = resolve(options.state ?? join(root, 'dist/release', `${version}-${sha.slice(0, 12)}`));
-  if (mode === 'report') {
-    const report = releaseReport(await privateJSON(join(directory, 'state.json')));
-    console.log(options.json ? JSON.stringify(report, null, 2) : formatReleaseReport(report));
-    return;
-  }
+  if (mode === 'report') return printReport(directory);
   const inside = relative(root, directory);
   assert.ok(inside === '..' || inside.startsWith('../') || inside.startsWith('dist/release/'),
     'Keep private release state outside the source checkout or under dist/release/');
@@ -189,7 +185,9 @@ export async function release(mode, options = {}, env = process.env) {
     const fleetEnv = { ...env, CANTELOP_INTEGRATION_CONFIG: integration, CANTELOP_FLEET_SERVICE_TOKEN: binding.accessToken };
     delete fleetEnv.CANTELOP_APP_CONFIG;
     const deployArgs = ['deploy', '--app', 'juiced', '--fleet', binding.id, '--package-version', version, '--fleet-profile', 'api'];
-    const api = async (path, body) => JSON.parse((await run('github-api', 'gh', ['api', path, ...(body ? ['--method', 'POST', '--input', '-'] : [])], body ? { input: JSON.stringify(body) } : {})) || '{}');
+    // One log per endpoint, so concurrent calls cannot overwrite each other's diagnostics.
+    const apiLog = path => `github-api-${path.replace(/^repos\/[^/]+\/[^/]+\//, '').replace(/[^\w.-]+/g, '-').slice(0, 120)}`;
+    const api = async (path, body) => JSON.parse((await run(apiLog(path), 'gh', ['api', path, ...(body ? ['--method', 'POST', '--input', '-'] : [])], body ? { input: JSON.stringify(body) } : {})) || '{}');
     const preparation = await Promise.allSettled([
       step('cli-artifacts', async () => {
         const selection = await selectPreparation(sha, repository, api);
@@ -201,7 +199,7 @@ export async function release(mode, options = {}, env = process.env) {
           if (selected.length && selected.every(r => r.status === 'completed'))
             throw new Error('Selected release preparation failed. Inspect the Release Juiced CLI workflow before retrying.');
           console.log('Waiting for protected native CLI qualification…');
-        }, { interval: 15_000 });
+        }, { interval: 15_000, timeout: 45 * 60_000 }); // Bounded background wait, macOS queueing and a fresh build.
         try {
           const [runInfo, { jobs }] = await Promise.all([
             api(`repos/${repository}/actions/runs/${id}`),
@@ -344,17 +342,17 @@ export async function release(mode, options = {}, env = process.env) {
     succeeded = true;
     console.log(`Shipped ${tag}; receipt and stage timings: ${statePath}`);
   } finally {
-    try {
-      if (save) {
-        Object.assign(invocation, { status: succeeded ? 'success' : 'failure', completedAt: new Date().toISOString(),
-          durationMs: Date.now() - Date.parse(invocation.startedAt) });
+    // Reporting is best-effort: it must neither hide the release error nor fail a completed release.
+    if (save) {
+      Object.assign(invocation, { status: succeeded ? 'success' : 'failure', completedAt: new Date().toISOString(),
+        durationMs: Date.now() - Date.parse(invocation.startedAt) });
+      try {
         await save();
         console.log(formatReleaseReport(await writeReleaseReport(directory, state)));
-      }
-    } finally {
-      await lock.close();
-      await rm(lockPath, { force: true });
+      } catch (error) { console.error(`Release report not saved: ${error.message}`); }
     }
+    await lock.close();
+    await rm(lockPath, { force: true });
   }
 }
 

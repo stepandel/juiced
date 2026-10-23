@@ -134,6 +134,8 @@ jobs:
           merge-multiple: true
           run-id: ${{ needs.prepared.outputs.run_id || github.run_id }}
           github-token: ${{ github.token }}
+      # Call the stable export, not the CLI: selected commits may predate any source-sha
+      # option, and their CLI would verify against GITHUB_SHA (main's tip on dispatch).
       - name: Verify archive checksums, commits, versions and runtime identities
         env:
           SOURCE_SHA: ${{ needs.prepared.outputs.source_sha }}

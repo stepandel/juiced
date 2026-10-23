@@ -101,7 +101,8 @@ build and verification job checks out that source, even if main advances after
 selection. A protected run first waits for the same commit's in-flight background
 work, reusing its archives if it succeeds; if a newer main push cancels it, the
 protected run builds the selected commit. Failed or expired background results
-also require fresh tests and packaging. Pending background work has a bounded wait. To request this
+also require fresh tests and packaging. Pending background work has a bounded wait,
+after which the protected run builds the selected commit itself. To request this
 preparation directly:
 
 ```sh
@@ -141,7 +142,10 @@ time are unavailable, so the report cannot mistake days between retries for work
 Operator time includes preflight and failed attempts, excludes pauses between
 commands, and counts overlapping intervals once. Recorded stage time also
 counts parallel work once. CI preparation is reported separately and must not be
-added to operator time because they may overlap.
+added to operator time because they may overlap. The report status is `shipped`,
+`partially-shipped` once any ship stage has run without finishing the release,
+`prepared`, or `partial`. A report that cannot be saved is logged without masking
+the release result.
 
 Read a report without credentials, network access, or source-commit matching:
 

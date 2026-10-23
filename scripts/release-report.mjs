@@ -6,12 +6,10 @@ export const stageNames = [
   'cli-artifacts', 'runtime-preflight', 'publish-cli', 'deploy-runtime',
   'qualify-runtime', 'deploy-service', 'resume-rollout', 'promote', 'verify-live',
 ];
-const jobNames = new Set(['prepared', 'qualified',
-  ...['ubuntu-22.04', 'ubuntu-22.04-arm', 'macos-14'].map(r => `native-tests (${r}, 1/1, 4)`),
-  ...['1/2', '2/2'].map(s => `native-tests (macos-15-intel, ${s}, 1)`),
-  ...[['ubuntu-22.04', 'linux-x64'], ['ubuntu-22.04-arm', 'linux-arm64'],
-    ['macos-14', 'darwin-arm64'], ['macos-15-intel', 'darwin-x64']].map(([r, t]) => `package (${r}, ${t})`),
-]);
+// Workflow jobs by name pattern, so matrix changes stay reported; the restricted
+// character set keeps matrix values from carrying anything but runner/shard/target labels.
+const knownJob = name => typeof name === 'string' &&
+  /^(?:prepared|qualified|(?:native-tests|package) \([\w./, -]+\))$/.test(name);
 const duration = n => Number.isSafeInteger(n) && n >= 0 ? n : null;
 const timestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? Date.parse(value) : null;
 const difference = (end, start) => end !== null && start !== null ? duration(end - start) : null;
@@ -31,7 +29,7 @@ function activeTime(intervals) {
 // GitHub exposes job start times, not runner queue-entry times. Scheduling delay
 // is measured from dependency completion and includes orchestration overhead.
 export function preparationTiming(run, jobs) {
-  const known = jobs.filter(j => jobNames.has(j.name) && j.conclusion === 'success');
+  const known = jobs.filter(j => knownJob(j.name) && j.conclusion === 'success');
   // created_at belongs to the first attempt. A rerun may happen days later;
   // retain its job durations without treating that pause as runner queueing.
   const created = run.run_attempt > 1 ? null : timestamp(run.created_at);
@@ -71,13 +69,14 @@ export function releaseReport(state) {
   });
   const ci = state.ciTiming;
   const preparation = ci ? { durationMs: duration(ci.durationMs),
-    jobs: (ci.jobs ?? []).filter(j => jobNames.has(j.name)).map(j => ({ name: j.name,
+    jobs: (ci.jobs ?? []).filter(j => knownJob(j.name)).map(j => ({ name: j.name,
       schedulingDelayMs: duration(j.schedulingDelayMs), durationMs: duration(j.durationMs) })) } : null;
   const invocations = (state.invocations ?? []).filter(i => ['prepare', 'ship'].includes(i.mode) && ['success', 'failure'].includes(i.status));
   return { schemaVersion: 1, version: state.version, commit: state.commit,
     operatorActiveMs: invocations.length ? activeTime(invocations.map(interval).filter(Boolean)) : null,
     operatorAttempts: invocations.map(i => ({ mode: i.mode, status: i.status, durationMs: duration(i.durationMs) })),
-    status: completed['verify-live'] ? 'shipped' : stages.slice(0, 2).every(s => s.status === 'complete') ? 'prepared' : 'partial',
+    status: completed['verify-live'] ? 'shipped' : stages.slice(2).some(s => s.status !== 'pending') ? 'partially-shipped'
+      : stages.slice(0, 2).every(s => s.status === 'complete') ? 'prepared' : 'partial',
     recordedActiveMs: activeTime(intervals), preparation, stages };
 }
 const seconds = n => n === null ? 'unavailable' : `${(n / 1000).toFixed(1)}s`;

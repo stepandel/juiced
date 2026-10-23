@@ -54,7 +54,8 @@ test('artifact reuse requires successful main qualification of the exact commit 
   assert.equal(completeArtifacts(artifacts), true);
   assert.equal(completeArtifacts(artifacts.map((a, i) => ({ ...a, expired: i === 0 }))), false);
   assert.equal(completeArtifacts(artifacts.slice(1)), false);
-  const result = await findPrepared(sha, repository, async path => path.includes('/artifacts?') ? { artifacts } : { workflow_runs: [valid] });
+  const result = await findPrepared(sha, repository, async path => path.includes('/commits/') ? committed
+    : path.includes('/artifacts?') ? { artifacts } : { workflow_runs: [valid] });
   assert.equal(result, '1');
 });
 
@@ -139,16 +140,24 @@ test('canary uses production capacity and cleans up even when create commits amb
 });
 
 
+const committed = { commit: { committer: { date: '2026-01-01T00:00:00Z' } } };
+
 test('release selection protects exact main commits instead of waiting on cancellable background builds', async () => {
   const background = { id: 1, head_sha: sha, event: 'push', head_branch: 'main', status: 'in_progress', head_repository: { full_name: repository }, path: '.github/workflows/release.yml' };
   const selected = { ...background, id: 2, event: 'workflow_dispatch', head_sha: 'c'.repeat(40), display_title: `Prepare ${sha}` };
-  let runs = [background], artifacts = [], dispatches = [];
+  let runs = [background], artifacts = [], dispatches = [], paths = [];
   const api = async (path, body) => {
     if (body) { dispatches.push({ path, body }); return { workflow_run_id: 3 }; }
+    paths.push(path);
+    if (path.includes('/commits/')) return committed;
+    // Dispatch head_sha is main's tip, so older selected runs are found by date and paging.
+    if (path.includes('event=workflow_dispatch') && path.endsWith('page=1'))
+      return { workflow_runs: Array.from({ length: 100 }, (_, i) => ({ ...selected, id: 100 + i, display_title: 'Prepare other' })) };
     return path.includes('/artifacts?') ? { artifacts } : { workflow_runs: runs };
   };
   assert.deepEqual(await selectPreparation(sha, repository, api), { pendingRunIds: [3] });
   assert.deepEqual(dispatches, [{ path: `repos/${repository}/actions/workflows/release.yml/dispatches`, body: { ref: 'main', inputs: { commit: sha }, return_run_details: true } }]);
+  assert.ok(paths.some(p => p.includes(`created=${encodeURIComponent('>=2026-01-01T00:00:00Z')}`) && p.endsWith('page=2')));
   runs = [background, selected];
   assert.deepEqual(await selectPreparation(sha, repository, api), { pendingRunIds: [2] });
   assert.equal(dispatches.length, 1);
@@ -171,6 +180,9 @@ test('selected source must be an immutable ancestor of main and dispatch must us
   await assert.rejects(releaseSource({ ...env, SELECTED_COMMIT: 'main' }, git), /exact source/);
   await assert.rejects(releaseSource(env, async () => { throw new Error('not on main'); }), /not on main/);
   assert.equal(await releaseSource({ ...env, GITHUB_EVENT_NAME: 'push', GITHUB_SHA: sha }, git), sha);
+  calls.length = 0;
+  assert.equal(await releaseSource({ GITHUB_EVENT_NAME: 'push', GITHUB_REF_TYPE: 'tag', GITHUB_SHA: sha }, git), sha);
+  assert.deepEqual(calls, []); // Tags publish their own commit, including hotfixes not yet on main.
 });
 
 test('timing reports measure scheduling after dependencies and export only known fields', async t => {
@@ -198,7 +210,7 @@ test('timing reports measure scheduling after dependencies and export only known
   const report = releaseReport(state);
   assert.equal(report.recordedActiveMs, 20000); // 0..15 plus 20..25, rather than summing parallel work.
   assert.equal(report.operatorActiveMs, 50000); // Excludes the pause between commands.
-  assert.equal(report.status, 'prepared');
+  assert.equal(report.status, 'partially-shipped'); // A ship attempt ran, so production may be partly changed.
   assert.equal(report.stages.find(s => s.name === 'deploy-runtime').failedAttempts, 1);
   const rendered = JSON.stringify(report) + formatReleaseReport(report);
   assert.doesNotMatch(rendered, /secret|accessToken|account|integration|stdout/);
@@ -230,7 +242,8 @@ test('old receipts report unavailable timing without inventing durations or expo
 test('protected preparation reuses in-flight background work and builds if main cancels it', async () => {
   const run = { id: 1, head_sha: sha, event: 'push', head_branch: 'main', status: 'in_progress', head_repository: { full_name: repository }, path: '.github/workflows/release.yml' };
   const artifacts = ['release-qualified', ...targets.map(t => `juiced-${t}`)].map(name => ({ name }));
-  const api = async path => path.includes('/artifacts?') ? { artifacts } : { workflow_runs: [run] };
+  const api = async path => path.includes('/commits/') ? committed
+    : path.includes('/artifacts?') ? { artifacts } : { workflow_runs: [run] };
   let sleeps = 0;
   assert.equal(await reuseBackground(sha, repository, api, async () => {
     sleeps++; run.status = 'completed'; run.conclusion = 'success';
@@ -240,4 +253,8 @@ test('protected preparation reuses in-flight background work and builds if main 
   assert.equal(await reuseBackground(sha, repository, api, async () => { throw new Error('must not wait'); }), '');
   run.conclusion = 'failure';
   assert.equal(await reuseBackground(sha, repository, api), ''); // Failed builds never qualify a release; run fresh tests.
+  Object.assign(run, { status: 'queued', conclusion: null });
+  sleeps = 0;
+  assert.equal(await reuseBackground(sha, repository, api, async () => { sleeps++; }), ''); // Starved background work: build instead.
+  assert.equal(sleeps, 40);
 });

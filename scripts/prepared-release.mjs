@@ -25,14 +25,25 @@ export function completeArtifacts(artifacts) {
   const names = new Set(artifacts.filter(a => !a.expired).map(a => a.name));
   return ['release-qualified', ...targets.map(t => `juiced-${t}`)].every(name => names.has(name));
 }
+// Dispatched runs carry main's tip as head_sha, so bound them by the selected
+// commit's date instead and page through every run since then.
+async function dispatchRuns(base, sha, repository, api) {
+  const { commit } = await api(`repos/${repository}/commits/${sha}`);
+  const since = encodeURIComponent(`>=${commit.committer.date}`), runs = [];
+  for (let page = 1; ; page++) {
+    const { workflow_runs } = await api(`${base}?event=workflow_dispatch&branch=main&created=${since}&per_page=100&page=${page}`);
+    runs.push(...workflow_runs);
+    if (workflow_runs.length < 100) return runs;
+  }
+}
 export async function listPreparations(sha, repository, api = defaultAPI) {
   validSource(sha, repository);
   const base = `repos/${repository}/actions/workflows/release.yml/runs`;
-  const responses = await Promise.all([
+  const [push, dispatched] = await Promise.all([
     api(`${base}?head_sha=${sha}&event=push&branch=main&per_page=100`),
-    api(`${base}?event=workflow_dispatch&branch=main&per_page=100`),
+    dispatchRuns(base, sha, repository, api),
   ]);
-  const runs = [...new Map(responses.flatMap(r => r.workflow_runs).map(r => [r.id, r])).values()];
+  const runs = [...new Map([...push.workflow_runs, ...dispatched].map(r => [r.id, r])).values()];
   return preparationRuns(runs, sha, repository);
 }
 export async function findPrepared(sha, repository, api = defaultAPI, runs) {
@@ -59,7 +70,8 @@ export async function selectPreparation(sha, repository, api) {
 }
 
 // A selected run can wait on the same commit's existing background work without
-// taking more Mac slots. If main advances and cancels it, this run builds instead.
+// taking more Mac slots. If main advances and cancels it, or it stays pending past
+// the bounded wait, this run builds instead.
 export async function reuseBackground(sha, repository, api = defaultAPI, sleep = delay) {
   for (let attempt = 0; attempt < 40; attempt++) {
     const runs = await listPreparations(sha, repository, api);
@@ -69,7 +81,8 @@ export async function reuseBackground(sha, repository, api = defaultAPI, sleep =
     if (!background.some(r => r.status !== 'completed')) return '';
     await sleep(15000);
   }
-  throw new Error('Background qualification is still pending; inspect runner availability before retrying');
+  console.log('Background qualification is still pending; building the selected commit instead');
+  return '';
 }
 
 export async function releaseSource(env, git = async args => (await execute('git', args)).stdout.trim()) {
@@ -77,7 +90,11 @@ export async function releaseSource(env, git = async args => (await execute('git
   if (selected) assert.equal(env.GITHUB_REF, 'refs/heads/main', 'Select releases through the main workflow');
   const sha = selected ? env.SELECTED_COMMIT : env.GITHUB_SHA;
   assert.match(sha, /^[a-f0-9]{40}$/, 'An exact source commit is required');
-  await git(['merge-base', '--is-ancestor', sha, 'origin/main']);
+  // Tags publish whatever commit they name, as before; only main sources need ancestry.
+  if (env.GITHUB_REF_TYPE === 'tag') return sha;
+  await git(['merge-base', '--is-ancestor', sha, 'origin/main']).catch(() => {
+    throw new Error(`Release source ${sha} is not on main`);
+  });
   return sha;
 }
 
